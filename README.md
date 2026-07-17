@@ -1,0 +1,287 @@
+# MewCode
+
+MewCode 是一个终端内运行的 AI 代码智能体项目，目标是提供类似 Claude Code 的本地开发体验：读取和修改代码、执行命令、管理权限、压缩上下文、加载技能、调用 MCP、创建子智能体团队，并支持 checkpoint/rewind 与 Hermes 风格自进化机制。
+
+项目入口命令为 `mewcode`，对应 Python 包入口：
+
+```text
+mewcode.__main__:main
+```
+
+---
+
+## 核心能力
+
+- **终端 TUI**：基于 Textual 构建交互式聊天与工具执行界面。
+- **多模型适配**：支持 Anthropic、OpenAI 和 OpenAI-compatible provider。
+- **工具系统**：内置 `ReadFile`、`WriteFile`、`EditFile`、`Bash`、`Glob`、`Grep` 等代码操作工具。
+- **权限控制**：按 read/write/command 分类工具，结合 sandbox、规则引擎和危险命令检测。
+- **上下文压缩**：包含大工具结果预算控制、自动 compact、恢复附件和语义压缩计划。
+- **Checkpoint / Rewind**：支持 `/checkpoint`、`/rewind --preview`、`/rewind --undo`，可回退代码和对话状态。
+- **Hermes 自进化**：通过 `/evolve` 记录经验、生成提案、审批并受控写入项目记忆。
+- **Skills**：支持项目级、用户级和内置技能，技能可 inline 或 fork 执行。
+- **MCP**：支持 stdio / HTTP MCP server，并包装为可调用工具。
+- **子智能体与团队协作**：支持 task、team、mailbox、trace、worktree 等多智能体能力。
+- **Hooks**：支持会话、轮次和工具调用相关 hook。
+
+---
+
+## 项目结构
+
+```text
+mewcode/
+  agent.py                 Agent 主循环、工具执行、compact、checkpoint 触发
+  app.py                   Textual TUI 应用
+  client.py                Anthropic / OpenAI / OpenAI-compatible 客户端
+  config.py                配置加载与 provider 定义
+  conversation.py          对话消息结构和 token 估算
+  prompts.py               System prompt 和环境上下文构造
+
+  tools/                   内置工具与工具注册表
+  permissions/             权限模式、危险命令检测、路径沙箱、规则引擎
+  context/                 工具结果预算、auto compact、语义压缩计划
+  memory/                  长期记忆、会话恢复、相关记忆选择
+  checkpoint/              checkpoint / rewind 编排与持久化
+  evolution/               Hermes 风格自进化 evidence / proposal / apply
+  skills/                  skill 解析、加载、执行和内置技能
+  commands/                Slash command 框架与命令 handlers
+  agents/                  子智能体定义、加载、trace、任务管理
+  teams/                   团队协作、mailbox、tmux/iTerm/in-process backend
+  mcp/                     MCP client、manager、tool wrapper
+  hooks/                   hooks 配置、条件、执行器
+  worktree/                worktree 创建、清理、会话集成
+
+docs/                      架构设计、审计、压缩、自进化与 rewind 文档
+tests/                     单元测试与集成测试
+scripts/                   实验脚本
+```
+
+---
+
+## 环境要求
+
+- Python `>=3.11`
+- 推荐使用虚拟环境
+- 至少配置一个 LLM provider
+
+主要依赖见 `pyproject.toml`：
+
+```text
+textual
+anthropic
+openai
+pyyaml
+pydantic
+mcp
+httpx[socks]
+```
+
+---
+
+## 安装
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+开发测试依赖：
+
+```bash
+pip install pytest pytest-asyncio
+```
+
+如果使用 `uv`，也可以根据仓库中的 `uv.lock` 和 `dependency-groups.dev` 管理开发环境。
+
+---
+
+## 配置
+
+MewCode 会按顺序读取配置：
+
+```text
+~/.mewcode/config.yaml
+<project>/.mewcode/config.yaml
+<project>/.mewcode/config.local.yaml
+```
+
+最小配置示例：
+
+```yaml
+providers:
+  - name: claude
+    protocol: anthropic
+    base_url: https://api.anthropic.com
+    model: claude-sonnet-4-20250514
+    api_key: ${ANTHROPIC_API_KEY}
+    thinking: false
+
+permission_mode: default
+```
+
+OpenAI 示例：
+
+```yaml
+providers:
+  - name: openai
+    protocol: openai
+    base_url: https://api.openai.com/v1
+    model: gpt-4.1
+    api_key: ${OPENAI_API_KEY}
+```
+
+本地项目配置、会话、checkpoint、evolution 记录等默认写入 `.mewcode/`。该目录已在 `.gitignore` 中忽略。
+
+---
+
+## 运行
+
+交互式启动：
+
+```bash
+mewcode
+```
+
+非交互式执行单条任务：
+
+```bash
+mewcode -p "阅读 README 并总结项目结构"
+```
+
+指定权限模式：
+
+```bash
+mewcode --mode plan
+mewcode --mode default
+```
+
+---
+
+## 常用命令
+
+| 命令 | 作用 |
+|---|---|
+| `/help` | 查看命令列表 |
+| `/plan [任务]` | 切换到 Plan 模式 |
+| `/do [任务]` | 退出 Plan 模式并恢复执行 |
+| `/compact` | 手动压缩上下文 |
+| `/checkpoint "label"` | 创建命名 checkpoint |
+| `/rewind` | 列出 checkpoint |
+| `/rewind N --preview` | 预览回退影响 |
+| `/rewind N` | 回退代码和对话 |
+| `/rewind N --code` | 仅回退代码 |
+| `/rewind N --conv` | 仅回退对话 |
+| `/rewind --undo` | 撤销最近一次 rewind |
+| `/evolve observe <summary>` | 记录自进化 evidence |
+| `/evolve propose <title> :: <change>` | 创建自进化 proposal |
+| `/evolve approve <id>` | 批准 proposal |
+| `/evolve apply <id>` | 应用已批准的 memory proposal |
+| `/skill list` | 查看 skills |
+| `/memory list` | 查看自动记忆 |
+| `/status` | 查看当前状态 |
+
+---
+
+## 上下文压缩
+
+当前上下文压缩分为三层：
+
+1. **工具结果预算控制**：超大 `tool_result` 落盘并在上下文中保留预览。
+2. **自动摘要压缩**：接近 context window 时摘要早期对话，原样保留近期尾部。
+3. **语义压缩计划**：对消息打标签、评分、分类，识别用户约束、TODO、错误、代码事实和工具噪音。
+
+详细说明：
+
+- `docs/context-compression-strategy.md`
+- `docs/semantic-context-compression.md`
+- `docs/compact-strategy-experiment-results.md`
+
+---
+
+## Checkpoint / Rewind
+
+项目实现了 Claude Code 风格的回退机制：
+
+- `CheckpointManager` 负责创建、预览、回退和撤销。
+- `CheckpointStore` 使用 JSONL 持久化 checkpoint 元数据。
+- `FileHistory` 负责文件级备份和恢复。
+- Agent 会在 turn-end、pre-write、pre-bash、pre-compact 等时机自动创建 checkpoint。
+
+详细说明：
+
+- `docs/rewind-feature-design.md`
+- `docs/hermes-evolution-rewind-review.md`
+
+---
+
+## Hermes 自进化
+
+自进化机制位于 `mewcode/evolution/`，采用安全闭环：
+
+```text
+observe -> propose -> validate -> approve -> apply
+```
+
+第一版只允许 approved 的 `memory` proposal 自动应用到 `.mewcode/memories.md`。`code`、`tool`、`prompt`、`skill` 仍保持 proposal-only，避免 Agent 无约束修改自身行为。
+
+`/evolve apply` 在写入 memory 前会尝试创建 checkpoint，便于通过 `/rewind` 回退。
+
+详细说明：
+
+- `docs/hermes-evolution-rewind-review.md`
+
+---
+
+## 测试
+
+运行全部测试：
+
+```bash
+PYTHONPATH=. pytest -q
+```
+
+运行重点测试：
+
+```bash
+PYTHONPATH=. pytest tests/test_context.py -q
+PYTHONPATH=. pytest tests/test_checkpoint.py -q
+PYTHONPATH=. pytest tests/test_evolution.py -q
+PYTHONPATH=. pytest tests/test_commands.py -q
+```
+
+最近一次相关验证：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_checkpoint.py tests/test_commands.py -q
+84 passed
+```
+
+---
+
+## 重要文档
+
+| 文档 | 内容 |
+|---|---|
+| `docs/audit-claude-code-standards.md` | 按 Claude Code 标准的架构审计 |
+| `docs/codebase-walkthrough.md` | 逐模块代码讲解 |
+| `docs/context-compression-strategy.md` | 上下文压缩策略详解 |
+| `docs/compact-strategy-experiment-results.md` | 压缩策略前后实验结果 |
+| `docs/rewind-feature-design.md` | Rewind 设计文档 |
+| `docs/hermes-evolution-rewind-review.md` | Hermes 自进化与 Rewind 复盘 |
+| `docs/agent-interview-qa.md` | Agent 项目问答材料 |
+
+---
+
+## 安全说明
+
+- 不要提交 `.mewcode/`、`config.yaml`、API key、会话记录和本地权限规则。
+- 写文件和危险命令前建议使用 `/checkpoint`。
+- 自进化提案默认只写 memory，高风险目标必须先形成 proposal 并人工审核。
+- 运行 Bash 工具前会经过权限检查和危险命令检测。
+
+---
+
+## License
+
+当前仓库未声明许可证。公开发布前请补充明确的 LICENSE 文件。
