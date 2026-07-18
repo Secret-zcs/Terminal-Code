@@ -11,6 +11,7 @@ from mewcode.commands.handlers.compact import COMPACT_COMMAND
 from mewcode.commands.handlers.do import DO_COMMAND
 from mewcode.commands.handlers.evolve import EVOLVE_COMMAND
 from mewcode.commands.handlers.help import HELP_COMMAND
+from mewcode.commands.handlers.learn import LEARN_COMMAND
 from mewcode.commands.handlers.mcp import MCP_COMMAND
 from mewcode.commands.handlers.memory import MEMORY_COMMAND
 from mewcode.commands.handlers.permission import PERMISSION_COMMAND
@@ -27,6 +28,7 @@ ALL_COMMANDS = [
     CHECKPOINT_COMMAND,
     COMPACT_COMMAND,
     EVOLVE_COMMAND,
+    LEARN_COMMAND,
     CLEAR_COMMAND,
     PLAN_COMMAND,
     DO_COMMAND,

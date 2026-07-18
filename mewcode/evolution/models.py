@@ -22,7 +22,7 @@ EvidenceKind = Literal[
     "rewind",
 ]
 
-ProposalTarget = Literal["memory", "skill", "prompt", "tool", "code"]
+ProposalTarget = Literal["memory", "skill"]
 ProposalStatus = Literal["proposed", "approved", "rejected", "applied"]
 ProposalRisk = Literal["low", "medium", "high"]
 

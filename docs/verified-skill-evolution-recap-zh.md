@@ -1,0 +1,238 @@
+# Verified Skill Evolution 自进化复盘
+
+> 日期：2026-07-18
+> 目标：把 Hermes 风格“模型生成 skill 后可用”的自进化路径，升级为“候选 skill 先验证、评审、再启用”的安全闭环。
+
+## 1. 结论
+
+本次实现的是第一阶段 Verified Skill Evolution：模型仍然可以从 `/learn` 或 `/evolve propose-skill*` 生成 skill，但生成结果只会进入候选区，不会直接进入正式 skill loader。
+
+新的落地路径是：
+
+```text
+learn / propose-skill
+  -> 写入 candidate skill
+  -> validate 静态校验
+  -> approve 人工确认
+  -> promote 启用正式 skill
+  -> checkpoint + reload
+```
+
+这比原来的“approve 后 apply 直接写 `.mewcode/skills`”更保守，也更适合代码智能体。因为错误 skill 会长期影响后续工具选择、代码修改顺序和验证策略，风险比普通 memory 更高。
+
+## 2. 与 Hermes 原版策略的差异
+
+| 维度 | Hermes 倾向 | 当前项目策略 |
+|---|---|---|
+| skill 生成 | background review 可自动 patch/create | 只生成 candidate，不直接启用 |
+| 用户确认 | 偏轻量，强调持续学习 | approve 后还需要 promote |
+| 验证重点 | 经验沉淀与可复用性 | 静态安全、候选隔离、checkpoint |
+| 启用路径 | 写入 skill 资产后可加载 | candidate 通过 promote 后才进入 `.mewcode/skills` |
+| 风险控制 | 依赖受限工具和后台隔离 | 额外增加候选区、静态策略、显式启用 |
+
+当前方案不是全面替代 Hermes，而是在代码智能体场景下提高安全性：模型负责提出候选，系统负责校验边界，用户负责授权启用。
+
+## 3. 新状态机
+
+Memory 仍保持原闭环：
+
+```text
+observe -> propose -> validate -> approve -> apply
+```
+
+Skill 改为候选闭环：
+
+```text
+learn / propose-skill
+  -> candidate
+  -> validate
+  -> approve
+  -> promote
+```
+
+其中：
+
+- `candidate`：写入 `.mewcode/evolution/candidates/<proposal_id>/SKILL.md`。
+- `approve`：人工确认 proposal 可进入启用阶段。
+- `promote`：将 candidate 写入正式 `.mewcode/skills/<name>/SKILL.md`。
+- `applied`：proposal 状态仍沿用既有 `applied`，表示 candidate 已正式启用。
+
+## 4. Candidate 存储结构
+
+每个 skill proposal 会生成：
+
+```text
+.mewcode/evolution/candidates/<proposal_id>/SKILL.md
+.mewcode/evolution/candidates/<proposal_id>/manifest.json
+```
+
+`manifest.json` 记录：
+
+```json
+{
+  "proposal_id": "prop_xxx",
+  "skill_name": "debug-regression-loop",
+  "action": "create",
+  "status": "candidate",
+  "evidence_ids": ["ev_xxx"],
+  "formal_target": ".mewcode/skills/debug-regression-loop/SKILL.md",
+  "candidate_skill": ".mewcode/evolution/candidates/prop_xxx/SKILL.md",
+  "created_at": 1780000000.0,
+  "promoted_at": 0.0
+}
+```
+
+promote 成功后，manifest 的 `status` 会变为 `enabled`，并写入 `promoted_at`。
+
+## 5. 命令语义
+
+### `/learn`
+
+`/learn` 仍然是显式学习入口：
+
+```text
+/learn <skill-name> :: <description> :: <skill body>
+```
+
+执行逻辑：
+
+```text
+记录 learn evidence
+  -> 同名项目 skill 存在：创建 patch proposal + candidate
+  -> 同名项目 skill 不存在：创建 create proposal + candidate
+```
+
+### `/evolve apply`
+
+现在只用于 memory proposal。
+
+如果对 skill proposal 执行 apply，会返回提示：
+
+```text
+skill proposals must be promoted with /evolve promote after review
+```
+
+### `/evolve promote`
+
+新增 skill 启用命令：
+
+```text
+/evolve promote <proposal_id>
+```
+
+promote 要求：
+
+- proposal 必须存在；
+- target 必须是 `skill`；
+- status 必须是 `approved`；
+- validate 必须通过；
+- candidate `SKILL.md` 必须能被 `parse_skill_file()` 解析。
+
+promote 成功后会：
+
+- 写入正式 `.mewcode/skills/<name>/SKILL.md`；
+- 将 proposal 状态改为 `applied`；
+- 更新 candidate manifest 为 `enabled`；
+- 尝试 reload skill loader；
+- 在命令层 promote 前创建 checkpoint。
+
+## 6. 静态安全校验
+
+本次新增基础静态策略：如果 skill body 包含明显危险命令片段，会阻止通过 validate。
+
+当前阻断示例：
+
+```text
+rm -rf /
+sudo rm -rf
+chmod 777 /
+curl | sh
+curl -s | sh
+wget -qO-
+```
+
+同时对过宽规则词给 warning，例如：
+
+```text
+永远
+所有任务
+必须
+禁止
+```
+
+这些 warning 不阻断，但要求人工 review 时关注 scope 是否过度泛化。
+
+## 7. 修改清单
+
+- 修改 `mewcode/evolution/engine.py`：新增 candidate 路径、candidate skill/manifest 写入、`promote()`、skill direct apply 拒绝和静态危险命令校验。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve promote`，并让 `/evolve apply` 不再对 skill 做正式启用。
+- 修改 `tests/test_evolution.py`：新增 candidate 写入、direct apply 拒绝、promote 启用、promote 审批要求、patch promote、危险命令阻断和命令层 promote/reload 测试。
+- 修改 `README.md`：更新自进化命令和 memory/skill 分流语义。
+- 新增本文档：记录 Verified Skill Evolution 的设计和验证。
+
+## 8. 测试记录
+
+TDD 红灯记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py -q
+8 failed, 11 passed
+```
+
+失败原因符合预期：
+
+- `EvolutionEngine` 尚无 `candidate_skill_path()` / `candidate_manifest_path()`。
+- `EvolutionEngine` 尚无 `promote()`。
+- skill proposal 仍可通过 `apply()` 直接写入正式 skill。
+- 尚未阻断危险命令 candidate。
+- `/evolve promote` 尚未接入命令层。
+
+绿灯记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py -q
+19 passed
+```
+
+扩展回归记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
+193 passed
+```
+
+格式检查记录：
+
+```text
+git diff --check
+```
+
+命令无输出，表示未发现 diff whitespace 问题。
+
+全量测试记录：
+
+```text
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次 candidate/promote 自进化修改无直接依赖。
+
+## 9. 后续方向
+
+当前只实现了第一阶段验证闭环。下一阶段建议增加：
+
+- `/evolve eval <proposal_id>`：用正反例任务测试 candidate 是否该触发。
+- eval case 文件：`.mewcode/evolution/evals/<skill-name>/cases.jsonl`。
+- `/evolve quarantine <skill-name>`：启用后如果用户纠正或任务失败，将正式 skill 移入隔离区。
+- usage log：记录 skill 触发、结果、用户反馈，用于后续自动降级或复盘。
+- background review：只能生成 candidate，禁止自动 promote。
+
+## 10. 设计取舍
+
+该方案牺牲了 Hermes 原版的学习速度，但降低了代码智能体长期行为污染风险。核心原则是：
+
+```text
+模型生成的是候选，不是事实；
+候选通过验证和评审后，才可以变成正式能力。
+```

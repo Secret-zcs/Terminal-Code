@@ -175,8 +175,12 @@ mewcode --mode default
 | `/rewind --undo` | 撤销最近一次 rewind |
 | `/evolve observe <summary>` | 记录自进化 evidence |
 | `/evolve propose <title> :: <change>` | 创建自进化 proposal |
+| `/evolve propose-skill <name> :: <description> :: <body>` | 创建新 skill 提案 |
+| `/evolve propose-skill-patch <name> :: <description> :: <body>` | 创建既有 skill patch 提案 |
 | `/evolve approve <id>` | 批准 proposal |
 | `/evolve apply <id>` | 应用已批准的 memory proposal |
+| `/evolve promote <id>` | 将已批准的 candidate skill 提升为正式 skill |
+| `/learn <name> :: <description> :: <body>` | 将可复用流程蒸馏为 skill 提案；同名项目 skill 存在时优先 patch |
 | `/skill list` | 查看 skills |
 | `/memory list` | 查看自动记忆 |
 | `/status` | 查看当前状态 |
@@ -220,16 +224,40 @@ mewcode --mode default
 自进化机制位于 `mewcode/evolution/`，采用安全闭环：
 
 ```text
-observe -> propose -> validate -> approve -> apply
+memory: observe -> propose -> validate -> approve -> apply
+skill:  learn/propose -> candidate -> validate -> approve -> promote
 ```
 
-第一版只允许 approved 的 `memory` proposal 自动应用到 `.mewcode/memories.md`。`code`、`tool`、`prompt`、`skill` 仍保持 proposal-only，避免 Agent 无约束修改自身行为。
+当前支持两类受控落地：
 
-`/evolve apply` 在写入 memory 前会尝试创建 checkpoint，便于通过 `/rewind` 回退。
+- approved `memory` proposal 自动追加到 `.mewcode/memories.md`。
+- skill proposal 先写入 `.mewcode/evolution/candidates/<proposal_id>/SKILL.md`，不会立即进入正式 skill loader。
+- approved candidate skill 只能通过 `/evolve promote <proposal_id>` 写入 `.mewcode/skills/<name>/SKILL.md`。
+- `/learn` 是 Hermes 风格显式学习入口：同名项目 skill 存在时创建 `patch` 提案，否则创建 `create` 提案，避免重复 skill 膨胀。
+- `/learn` 会先记录 learn evidence，再把 evidence id 关联到生成的 proposal。
+
+运行时自进化只接受 `memory` 和 `skill`。`code`、`tool`、`prompt` 不进入 `/evolve apply` 路径；相关想法只能作为人工开发建议处理。
+
+常用命令：
+
+```text
+/evolve observe <summary>
+/evolve propose <title> :: <memory change>
+/evolve propose-skill <name> :: <description> :: <skill body>
+/evolve propose-skill-patch <name> :: <description> :: <skill body>
+/learn <name> :: <description> :: <skill body>
+/evolve approve <proposal_id>
+/evolve apply <proposal_id>      # memory only
+/evolve promote <proposal_id>    # skill candidate only
+```
+
+`/evolve apply` 在写入 memory 前会尝试创建 checkpoint；`/evolve promote` 在启用 skill candidate 前会尝试创建 checkpoint，并在成功后 reload skill loader。
 
 详细说明：
 
 - `docs/hermes-evolution-rewind-review.md`
+- `docs/hermes-skill-evolution-implementation.md`
+- `docs/verified-skill-evolution-recap-zh.md`
 
 ---
 

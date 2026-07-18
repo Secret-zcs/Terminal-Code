@@ -4,10 +4,13 @@ Usage:
     /evolve
     /evolve observe <summary>
     /evolve propose <title> :: <memory change>
+    /evolve propose-skill <name> :: <description> :: <skill body>
+    /evolve propose-skill-patch <name> :: <description> :: <skill body>
     /evolve list
     /evolve approve <proposal_id>
     /evolve reject <proposal_id>
     /evolve apply <proposal_id>
+    /evolve promote <proposal_id>
 """
 
 from __future__ import annotations
@@ -45,6 +48,10 @@ async def handle_evolve(ctx: CommandContext) -> None:
         _handle_observe(ctx, engine, rest)
     elif subcmd == "propose":
         _handle_propose(ctx, engine, rest)
+    elif subcmd == "propose-skill":
+        _handle_propose_skill(ctx, engine, rest)
+    elif subcmd == "propose-skill-patch":
+        _handle_propose_skill_patch(ctx, engine, rest)
     elif subcmd == "list":
         _handle_list(ctx, engine)
     elif subcmd == "show":
@@ -55,6 +62,8 @@ async def handle_evolve(ctx: CommandContext) -> None:
         _handle_reject(ctx, engine, rest)
     elif subcmd == "apply":
         _handle_apply(ctx, engine, rest)
+    elif subcmd == "promote":
+        _handle_promote(ctx, engine, rest)
     else:
         ctx.ui.add_system_message(f"Unknown evolve subcommand: {subcmd}. Use /evolve help.")
 
@@ -65,14 +74,21 @@ def _show_help(ctx: CommandContext) -> None:
             "Hermes evolution workflow:",
             "  /evolve observe <summary>",
             "  /evolve propose <title> :: <memory change>",
+            "  /evolve propose-skill <name> :: <description> :: <skill body>",
+            "  /evolve propose-skill-patch <name> :: <description> :: <skill body>",
             "  /evolve list",
             "  /evolve show <proposal_id>",
             "  /evolve approve <proposal_id>",
             "  /evolve reject <proposal_id>",
             "  /evolve apply <proposal_id>",
+            "  /evolve promote <proposal_id>",
             "",
-            "Only approved memory proposals are applied automatically. Code, prompt,",
-            "tool, and skill evolution remain proposal-only until dedicated guards exist.",
+            "Approved memory proposals write .mewcode/memories.md via apply.",
+            "Skill proposals first write candidates under .mewcode/evolution/candidates.",
+            "After review, promote writes the candidate into .mewcode/skills.",
+            "Skill learning should patch an existing project skill before creating",
+            "a duplicate; /learn applies that priority automatically.",
+            "Runtime evolution is intentionally limited to memory and skill.",
         ])
     )
 
@@ -107,6 +123,73 @@ def _handle_propose(ctx: CommandContext, engine: EvolutionEngine, rest: str) -> 
     warn = f" Warnings: {'; '.join(validation.warnings)}" if validation.warnings else ""
     ctx.ui.add_system_message(
         f"Evolution proposal created: {proposal.id} [{proposal.status}].{warn}"
+    )
+
+
+def _handle_propose_skill(
+    ctx: CommandContext, engine: EvolutionEngine, rest: str
+) -> None:
+    parts = [part.strip() for part in rest.split("::", 2)]
+    if len(parts) != 3 or not all(parts):
+        ctx.ui.add_system_message(
+            "Usage: /evolve propose-skill <name> :: <description> :: <skill body>"
+        )
+        return
+    name, description, body = parts
+    try:
+        proposal = engine.propose_skill(
+            name=name,
+            description=description,
+            body=body,
+            rationale="Manual Hermes skill evolution proposal from slash command.",
+        )
+    except ValueError as e:
+        ctx.ui.add_system_message(str(e))
+        return
+
+    validation = engine.validate(proposal)
+    details = []
+    if validation.errors:
+        details.append("Errors: " + "; ".join(validation.errors))
+    if validation.warnings:
+        details.append("Warnings: " + "; ".join(validation.warnings))
+    suffix = " " + " ".join(details) if details else ""
+    ctx.ui.add_system_message(
+        f"Evolution skill proposal created: {proposal.id} [{proposal.status}].{suffix}"
+    )
+
+
+def _handle_propose_skill_patch(
+    ctx: CommandContext, engine: EvolutionEngine, rest: str
+) -> None:
+    parts = [part.strip() for part in rest.split("::", 2)]
+    if len(parts) != 3 or not all(parts):
+        ctx.ui.add_system_message(
+            "Usage: /evolve propose-skill-patch <name> :: <description> :: <skill body>"
+        )
+        return
+    name, description, body = parts
+    try:
+        proposal = engine.propose_skill_patch(
+            name=name,
+            description=description,
+            body=body,
+            rationale="Manual Hermes skill patch proposal from slash command.",
+        )
+    except ValueError as e:
+        ctx.ui.add_system_message(str(e))
+        return
+
+    validation = engine.validate(proposal)
+    details = []
+    if validation.errors:
+        details.append("Errors: " + "; ".join(validation.errors))
+    if validation.warnings:
+        details.append("Warnings: " + "; ".join(validation.warnings))
+    suffix = " " + " ".join(details) if details else ""
+    ctx.ui.add_system_message(
+        f"Evolution skill patch proposal created: {proposal.id} "
+        f"[{proposal.status}].{suffix}"
     )
 
 
@@ -187,15 +270,71 @@ def _handle_apply(ctx: CommandContext, engine: EvolutionEngine, proposal_id: str
         )
         return
 
-    target_path = engine.project_memory_path
-    _checkpoint_before_apply(ctx, target_path, proposal.title)
+    try:
+        target_path = engine.proposal_target_path(proposal)
+    except ValueError:
+        target_path = None
+    if target_path is not None and proposal.target != "skill":
+        _checkpoint_before_apply(ctx, target_path, proposal.title)
     ok, message = engine.apply(proposal_id)
     if not ok:
         ctx.ui.add_system_message(f"Evolution apply failed: {message}")
         return
+    _reload_skill_loader_if_needed(ctx, proposal)
     ctx.ui.add_system_message(
         f"Evolution proposal {proposal.id} applied to {message}."
     )
+
+
+def _handle_promote(ctx: CommandContext, engine: EvolutionEngine, proposal_id: str) -> None:
+    if not proposal_id:
+        ctx.ui.add_system_message("Usage: /evolve promote <proposal_id>")
+        return
+
+    proposal = engine.store.get_proposal(proposal_id)
+    if proposal is None:
+        ctx.ui.add_system_message(f"Proposal not found: {proposal_id}")
+        return
+    if proposal.status != "approved":
+        ctx.ui.add_system_message(
+            f"Proposal {proposal.id} must be approved before promote."
+        )
+        return
+    if proposal.target != "skill":
+        ctx.ui.add_system_message(
+            f"Proposal {proposal.id} is not a skill proposal."
+        )
+        return
+
+    try:
+        target_path = engine.proposal_target_path(proposal)
+    except ValueError:
+        target_path = None
+    if target_path is not None:
+        _checkpoint_before_apply(ctx, target_path, proposal.title)
+
+    ok, message = engine.promote(proposal_id)
+    if not ok:
+        ctx.ui.add_system_message(f"Evolution promote failed: {message}")
+        return
+    _reload_skill_loader_if_needed(ctx, proposal)
+    ctx.ui.add_system_message(
+        f"Evolution proposal {proposal.id} promoted to {message}."
+    )
+
+
+def _reload_skill_loader_if_needed(
+    ctx: CommandContext, proposal
+) -> None:
+    if proposal.target != "skill":
+        return
+    loader = ctx.config.get("skill_loader") if ctx.config else None
+    if loader is None or not hasattr(loader, "reload"):
+        return
+    try:
+        loader.reload()
+    except Exception:
+        pass
 
 
 def _checkpoint_before_apply(
@@ -207,9 +346,6 @@ def _checkpoint_before_apply(
     file_history = getattr(agent, "file_history", None)
     if file_history is not None:
         try:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            if not target_path.exists():
-                target_path.write_text("", encoding="utf-8")
             file_history.track_edit(str(target_path))
         except OSError:
             pass
@@ -233,6 +369,9 @@ EVOLVE_COMMAND = Command(
     description="Hermes-style self-evolution proposals",
     type=CommandType.LOCAL,
     handler=handle_evolve,
-    usage="/evolve [observe|propose|list|show|approve|reject|apply]",
+    usage=(
+        "/evolve [observe|propose|propose-skill|propose-skill-patch|"
+        "list|show|approve|reject|apply|promote]"
+    ),
     aliases=["evolution"],
 )

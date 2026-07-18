@@ -20,7 +20,8 @@
 当前实现把 Hermes 风格自进化拆成五步：
 
 ```text
-observe -> propose -> validate -> approve -> apply
+memory: observe -> propose -> validate -> approve -> apply
+skill:  learn/propose -> candidate -> validate -> approve -> promote
 ```
 
 并用 Claude Code 风格 rewind/checkpoint 机制作为安全保护：
@@ -29,13 +30,13 @@ observe -> propose -> validate -> approve -> apply
 自进化应用前
   -> track 目标文件
   -> 创建 checkpoint
-  -> apply 变更
+  -> apply memory 或 promote skill
   -> 如果结果不好，可用 /rewind 回退
 ```
 
-当前可自动应用的目标只有 `memory`，也就是项目记忆 `.mewcode/memories.md`。`code`、`prompt`、`tool`、`skill` 这类高风险目标目前只允许形成提案，不自动应用。
+当前可自动落地的目标是 `memory` 和 `skill`，但路径不同：memory 经 `/evolve apply` 写入 `.mewcode/memories.md`；skill 先写入 candidate，只有 `/evolve promote` 后才进入 `.mewcode/skills/<name>/SKILL.md`。
 
-这个边界是有意设计的：自进化系统如果一开始就允许改工具实现、系统提示词或代码，很容易形成不可审计、不可回退、难以测试的隐性行为变化。
+这个边界是有意设计的：Hermes 风格运行时自进化应沉淀外部、可审计的行为资产，而不是直接修改工具实现、系统提示词或代码。
 
 ---
 
@@ -57,7 +58,7 @@ observe -> propose -> validate -> approve -> apply
 ```text
 先建立可审计的自进化提案系统
 再用 rewind/checkpoint 保护任何实际落地动作
-最后为未来 code/prompt/skill/tool 自进化留下扩展点
+把可复用经验落到 memory 和 skill，尤其是 skill
 ```
 
 ---
@@ -81,17 +82,15 @@ Hermes 风格自进化的核心不是“模型自己改代码”，而是：
 | 资产 | 当前状态 | 风险 |
 |---|---|---|
 | `memory` | 已支持自动应用 | 低 |
-| `skill` | 只允许形成提案 | 中 |
-| `prompt` | 只允许形成提案 | 中 |
-| `tool` | 只允许形成提案 | 高 |
-| `code` | 只允许形成提案 | 高 |
+| `skill` | 已支持审批后创建项目级 skill | 中 |
 
-第一阶段只应用 `memory`，原因是：
+运行时自进化只接受这两类资产，原因是：
 
 - `.mewcode/memories.md` 本来就是项目长期记忆入口。
-- 写入记忆不会改变代码执行路径。
+- `.mewcode/skills/<name>/SKILL.md` 是可审计、可 reload、可回滚的任务流程资产。
+- 二者都不会直接修改工具实现、系统 prompt 或代码执行路径。
 - 即使写错，也能通过 rewind 或手动编辑恢复。
-- 记忆型自进化已经能让 Agent 在后续任务中记住经验。
+- `code/tool/prompt` 相关想法只能作为人工开发建议处理，不属于 `/evolve apply`。
 
 ---
 
@@ -173,7 +172,7 @@ EvolutionValidation
 设计理由：
 
 - 提案必须从创建到应用有状态流转。
-- 高风险目标必须停留在 proposal 阶段，不能直接写入。
+- 运行时 target 被限制为 `memory` 和 `skill`。
 - `evidence_ids` 让每个变更都能追溯来源。
 
 ---
@@ -271,16 +270,17 @@ validate(proposal)
 当前验证规则：
 
 - proposal 状态必须是 `proposed` 或 `approved`。
-- 只有 `target == "memory"` 可以自动应用。
+- 只有 `target == "memory"` 或 `target == "skill"` 可以进入 apply。
 - `change` 不能为空。
+- `skill` 会校验名称、描述、正文、`mode`、`context`、`allowedTools` 和同名冲突。
 - 非低风险提案会产生 warning。
 - 缺失 evidence 会产生 warning。
 
-为什么 `code/tool/prompt/skill` 暂时不能自动 apply：
+为什么 `code/tool/prompt` 不进入运行时自进化：
 
-- 这些目标会改变 Agent 行为或代码执行路径。
-- 需要专门的 patch 生成、测试运行、diff 预览、人工确认和 rollback 机制。
-- 当前只把它们作为可审计提案保留。
+- 它们会改变 Agent 的执行面或提示面，影响范围大于 memory/skill。
+- 即使有 rewind，也无法保证错误工具或 prompt 在回滚前没有造成副作用。
+- 如果确实需要改代码、工具或 prompt，应走普通人工开发流程、测试和代码审查，而不是 `/evolve apply`。
 
 #### approve / reject
 
@@ -300,11 +300,15 @@ reject(proposal_id)
 apply(proposal_id)
 ```
 
-当前仅支持 memory：
+当前支持 memory 和 skill：
 
 ```text
 approved memory proposal
   -> append 到 .mewcode/memories.md 的 ### 项目知识
+  -> proposal.status = applied
+
+approved skill proposal
+  -> write .mewcode/skills/<name>/SKILL.md
   -> proposal.status = applied
 ```
 
@@ -518,19 +522,19 @@ docker rm
 
 ### 6.1 应用前 checkpoint
 
-`/evolve apply` 会在真正写 `.mewcode/memories.md` 之前尝试：
+`/evolve apply` 写入 memory 前、`/evolve promote` 启用 skill candidate 前会尝试：
 
 ```text
-1. target_path = .mewcode/memories.md
+1. target_path = .mewcode/memories.md 或 .mewcode/skills/<name>/SKILL.md
 2. file_history.track_edit(target_path)
 3. checkpoint_manager.create_checkpoint(
        label="Hermes evolution: <title>",
        trigger="manual",
    )
-4. engine.apply(proposal_id)
+4. engine.apply(proposal_id) 或 engine.promote(proposal_id)
 ```
 
-这样自进化应用后，如果用户发现记忆写错，可以：
+这样自进化应用后，如果用户发现 memory 或 skill 写错，可以：
 
 ```text
 /rewind
@@ -552,14 +556,15 @@ docker rm
 | 代码自改不跑测试 | 回归风险进入主路径 |
 | 无 checkpoint | 无法快速恢复 |
 
-当前做法先把高风险目标限制为提案：
+当前做法把运行时自进化限制为外部行为资产：
 
 ```text
-code/tool/prompt/skill -> proposed only
 memory -> approved 后可 apply
+skill  -> candidate + approved 后可 promote
+code/tool/prompt -> 不属于 /evolve target
 ```
 
-这是更适合当前项目成熟度的选择。
+这是更接近 Hermes 的选择：把复杂经验固化为 skill，而不是让 Agent 直接改自身执行面。
 
 ---
 
@@ -704,20 +709,19 @@ evidence -> proposal -> approve -> apply
 /evolve preview <proposal_id>
 ```
 
-展示即将写入的 memory diff。
+展示即将写入的 memory 或 skill diff。
 
-### 9.4 非 memory 自进化还没有落地通道
+### 9.4 Skill patch 还没有落地通道
 
-当前 `skill`、`prompt`、`tool`、`code` 都只能提案。
+当前 `skill` 已支持审批后创建新项目级 skill，但还不支持 patch 已有 skill。
 
-未来如果要支持，需要分别设计：
+后续如果要更接近 Hermes，需要优先补齐：
 
-| target | 需要的保护 |
+| 能力 | 需要的保护 |
 |---|---|
-| `skill` | frontmatter 校验、allowedTools 校验、skill reload 测试 |
-| `prompt` | prompt diff、行为回归测试、版本号 |
-| `tool` | schema 校验、权限校验、工具单测 |
-| `code` | patch preview、pytest、lint、checkpoint、人工确认 |
+| 创建 skill | frontmatter 校验、allowedTools 校验、skill reload 测试 |
+| patch skill | diff preview、同名冲突检查、reload 测试、rewind checkpoint |
+| skill references/templates/scripts | 路径约束、文件类型约束、大小限制、人工 approve |
 
 ---
 
@@ -778,9 +782,6 @@ summary = "pytest failed after modifying context manager"
 ```text
 memory verifier
 skill verifier
-prompt verifier
-tool verifier
-code verifier
 ```
 
 每种 verifier 都负责：
@@ -817,7 +818,7 @@ code verifier
 
 ## 12. 与 Hermes 自进化的差距
 
-当前实现是 Hermes 风格的最小安全闭环，但还不是完整 Hermes。
+当前实现是 Hermes 风格的安全闭环，并已支持将 approved skill proposal 落地为项目级 `.mewcode/skills/<name>/SKILL.md`。2026-07-18 后，项目进一步补齐了 `/learn` 显式学习入口和已有项目 skill 的 patch 路径。
 
 差距：
 
@@ -826,8 +827,8 @@ code verifier
 | evidence 来源 | 手动 observe | 自动从 trace、tests、rewind、feedback 提取 |
 | mutation | 手动 propose | 自动生成候选改进 |
 | selection | 人工 approve | 指标驱动排序 + 人工确认 |
-| validation | 简单规则 | 针对 target 的 verifier 和回归测试 |
-| application | 只写 memory | 支持 skill/prompt/tool/code 的受控更新 |
+| validation | 简单规则 | 针对 memory/skill 的 verifier 和回归测试 |
+| application | 写 memory；创建或 patch 项目级 skill；支持 `/learn` 蒸馏 | skill references/templates/scripts 与回放验证 |
 | evaluation | 单元测试 | 长期任务 benchmark 和回放评估 |
 
 下一步不应直接跳到自动改代码，而应先补：
@@ -836,8 +837,22 @@ code verifier
 自动 evidence 收集
   -> proposal 质量评分
   -> preview
-  -> target-specific verifier
+  -> memory/skill verifier
 ```
+
+其中 skill 方向已实现：
+
+```text
+会话复盘/learn
+  -> 识别可复用流程
+  -> 优先 patch 已加载 skill
+  -> 无合适 skill 时创建新 skill
+  -> 写入 candidate
+  -> approve 后 promote
+  -> reload
+```
+
+准确边界是：当前项目实现的是手动 `/learn` 触发的候选学习闭环；Hermes 原版的后台 fork review、自动筛选会话片段、自动蒸馏正文和任务回放 eval 仍未接入主循环。
 
 ---
 
@@ -857,4 +872,61 @@ code verifier
 - 新增复盘文档：`docs/hermes-evolution-rewind-review.md`。
 - 验证结果：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，5 个测试成功。
 - 验证结果：`PYTHONPATH=. pytest tests/test_checkpoint.py -q` 通过，36 个测试成功。
-- 设计边界：第一版只允许 approved memory proposal 自动应用；code、tool、prompt、skill 暂时保持 proposal-only。
+- 历史边界：第一版只允许 approved memory proposal 自动应用；当时 skill 尚未落地，code/tool/prompt 不应进入 runtime self-evolution。
+
+### 2026-07-17 补充：Skill 自进化落地
+
+- 修改 `mewcode/evolution/engine.py`：新增 `propose_skill()`，支持把可复用解决流程保存为 `target="skill"` 的结构化 proposal。
+- 修改 `mewcode/evolution/engine.py`：`validate()` 改为按 target 分派，`skill` proposal 会校验名称、描述、正文、`mode`、`context`、`allowedTools` 和同名冲突。
+- 修改 `mewcode/evolution/engine.py`：approved skill proposal 可写入 `.mewcode/skills/<name>/SKILL.md`，并返回实际写入路径。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve propose-skill <name> :: <description> :: <skill body>`。
+- 修改 `mewcode/commands/handlers/evolve.py`：`/evolve apply` 改为对真实 target path 创建 checkpoint，skill apply 成功后尝试 reload skill loader。
+- 修改 `tests/test_evolution.py`：新增 skill proposal 写入、拒绝覆盖已有 skill、命令 apply 后 reload、损坏 skill proposal 可读错误返回的测试。
+- 修改 `README.md`：更新 Hermes 自进化能力说明和命令用法。
+- 新增文档：`docs/hermes-skill-evolution-implementation.md`。
+- 验证结果：先运行 `PYTHONPATH=. pytest tests/test_evolution.py -q` 得到 3 个预期失败；实现后当前通过，9 个测试成功。
+- 验证结果：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，183 个测试成功。
+- 全量测试记录：`PYTHONPATH=. pytest -q -x` 停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为 `WriteFile` 触发“写前必须先 ReadFile”的既有安全策略，与本次 self-evolution/skill 修改无直接依赖。
+
+### 2026-07-18 补充：收紧为 Memory + Skill only
+
+- 修改 `mewcode/evolution/models.py`：`ProposalTarget` 收紧为 `Literal["memory", "skill"]`。
+- 修改 `mewcode/evolution/engine.py`：新增运行时 target 白名单，拒绝创建 `code/tool/prompt` 自进化 proposal。
+- 修改 `mewcode/commands/handlers/evolve.py`：帮助文案明确 runtime evolution 仅限 memory 和 skill。
+- 修改 `tests/test_evolution.py`：将非 memory/skill target 的测试改为创建阶段直接拒绝。
+- 修改 `README.md`、`docs/hermes-skill-evolution-implementation.md` 和本文档：统一说明 `code/tool/prompt` 不属于 `/evolve apply`，只能作为人工开发建议处理。
+- 验证结果：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，183 个测试成功。
+- 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突。
+
+### 2026-07-18 补充：Hermes `/learn` 与 Skill Patch 优先级
+
+- 修改 `mewcode/evolution/engine.py`：新增 `propose_skill_patch()`，将 skill proposal payload 扩展为 `action=create|patch`。
+- 修改 `mewcode/evolution/engine.py`：新增项目 skill 命中逻辑，只允许 patch `.mewcode/skills/<name>/SKILL.md` 或 `.mewcode/skills/<name>.md`，不 patch 内置 skill 或用户全局 skill。
+- 修改 `mewcode/evolution/engine.py`：`validate()` 区分 create 与 patch；create 遇到同名 skill 时拒绝，patch 找不到项目 skill 时拒绝。
+- 新增 `mewcode/commands/handlers/learn.py`：实现 `/learn <name> :: <description> :: <skill body>`，同名项目 skill 存在时优先创建 patch proposal，否则创建 create proposal，并自动记录 `source="learn-command"` 的 evidence。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve propose-skill-patch <name> :: <description> :: <skill body>`。
+- 修改 `mewcode/commands/handlers/__init__.py`：注册 `/learn` 命令。
+- 修改 `tests/test_evolution.py`：新增 skill patch 写回、缺失 skill patch 拒绝、`/learn` patch/create 优先级和 evidence 关联测试。
+- 修改 `tests/test_commands.py`：将 `/learn` 纳入命令注册集合。
+- 修改 `README.md` 和 `docs/hermes-skill-evolution-implementation.md`：同步记录 `/learn`、`propose-skill-patch`、patch 优先级和安全边界。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 得到 4 个预期失败；`PYTHONPATH=. pytest tests/test_commands.py::TestRegisterAllCommands::test_all_commands_registered -q` 得到 1 个预期失败。
+- 追加红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 得到 1 个预期失败，原因是 `/learn` 尚未记录 evidence 并关联到 proposal。
+- 绿灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，14 个测试成功；命令注册单测通过，1 个测试成功。
+- 扩展回归记录：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，188 个测试成功。
+- 格式检查记录：`git diff --check` 无输出。
+- 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突。
+
+### 2026-07-18 补充：Verified Skill Evolution Candidate / Promote
+
+- 修改 `mewcode/evolution/engine.py`：新增 `.mewcode/evolution/candidates/<proposal_id>/SKILL.md` 与 `manifest.json` 候选区。
+- 修改 `mewcode/evolution/engine.py`：新增 `candidate_dir()`、`candidate_skill_path()`、`candidate_manifest_path()` 和 `promote()`。
+- 修改 `mewcode/evolution/engine.py`：skill proposal 创建后只写 candidate；`apply()` 对 skill proposal 返回 promote 提示，不再直接写正式 skill。
+- 修改 `mewcode/evolution/engine.py`：新增危险命令静态策略，阻断包含 `rm -rf /`、`sudo rm -rf`、`chmod 777 /`、`curl | sh` 等片段的 candidate。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve promote <proposal_id>`，promote 前创建 checkpoint，promote 后 reload skill loader。
+- 修改 `tests/test_evolution.py`：新增 candidate 写入、direct apply 拒绝、promote 启用、promote 必须先 approve、patch promote、危险命令阻断和命令层 promote/reload 测试。
+- 修改 `README.md`、`docs/hermes-skill-evolution-implementation.md`，新增 `docs/verified-skill-evolution-recap-zh.md`：同步记录 candidate/promote 的设计、边界和验证结果。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 得到 8 个预期失败，覆盖缺失 candidate/promote API、direct apply 未拒绝、危险命令未阻断和命令层 promote 未接入。
+- 绿灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，19 个测试成功。
+- 扩展回归记录：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，193 个测试成功。
+- 格式检查记录：`git diff --check` 无输出。
+- 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突。
