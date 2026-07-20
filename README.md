@@ -302,6 +302,7 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_checkpoint.py tests/test_
 | `docs/compact-strategy-experiment-results.md` | 压缩策略前后实验结果 |
 | `docs/rewind-feature-design.md` | Rewind 设计文档 |
 | `docs/hermes-evolution-rewind-review.md` | Hermes 自进化与 Rewind 复盘 |
+| `docs/self-evolution-development-progress-recap-zh.md` | 当前自进化开发进度总复盘 |
 | `docs/agent-interview-qa.md` | Agent 项目问答材料 |
 
 ---

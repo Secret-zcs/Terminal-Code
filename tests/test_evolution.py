@@ -595,3 +595,21 @@ class TestEvolveCommand:
         assert len(evidence) == 1
         assert evidence[0].source == "learn-command"
         assert evidence[0].id in proposal.evidence_ids
+
+    async def test_learn_command_points_to_eval_promote_flow(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.commands.handlers.learn import handle_learn
+
+        ui = MockUI()
+        await handle_learn(_ctx(
+            tmp_path,
+            "guided-workflow :: 正确启用流程 :: # 任务\n先 case eval，再 promote。",
+            ui,
+        ))
+
+        message = "\n".join(ui.messages)
+        assert "add-eval-case" in message
+        assert "/evolve eval" in message
+        assert "/evolve promote" in message
+        assert "then apply" not in message
