@@ -10,6 +10,7 @@ Usage:
     /evolve approve <proposal_id>
     /evolve reject <proposal_id>
     /evolve apply <proposal_id>
+    /evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]
     /evolve eval <proposal_id>
     /evolve promote <proposal_id>
 """
@@ -63,6 +64,8 @@ async def handle_evolve(ctx: CommandContext) -> None:
         _handle_reject(ctx, engine, rest)
     elif subcmd == "apply":
         _handle_apply(ctx, engine, rest)
+    elif subcmd == "add-eval-case":
+        _handle_add_eval_case(ctx, engine, rest)
     elif subcmd == "eval":
         _handle_eval(ctx, engine, rest)
     elif subcmd == "promote":
@@ -84,12 +87,14 @@ def _show_help(ctx: CommandContext) -> None:
             "  /evolve approve <proposal_id>",
             "  /evolve reject <proposal_id>",
             "  /evolve apply <proposal_id>",
+            "  /evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv>",
             "  /evolve eval <proposal_id>",
             "  /evolve promote <proposal_id>",
             "",
             "Approved memory proposals write .mewcode/memories.md via apply.",
             "Skill proposals first write candidates under .mewcode/evolution/candidates.",
-            "After review, promote writes the candidate into .mewcode/skills.",
+            "Skill eval cases live under .mewcode/evolution/evals/<skill>/cases.jsonl.",
+            "After eval and review, promote writes the candidate into .mewcode/skills.",
             "Skill learning should patch an existing project skill before creating",
             "a duplicate; /learn applies that priority automatically.",
             "Runtime evolution is intentionally limited to memory and skill.",
@@ -339,6 +344,40 @@ def _handle_eval(ctx: CommandContext, engine: EvolutionEngine, proposal_id: str)
     ctx.ui.add_system_message(f"Evolution eval passed: {message}")
 
 
+def _handle_add_eval_case(
+    ctx: CommandContext, engine: EvolutionEngine, rest: str
+) -> None:
+    parts = [part.strip() for part in rest.split("::", 3)]
+    if len(parts) not in {3, 4} or not all(parts[:3]):
+        ctx.ui.add_system_message(
+            "Usage: /evolve add-eval-case <proposal_id> :: <task> :: "
+            "<must_contain_csv> [:: <must_not_contain_csv>]"
+        )
+        return
+
+    proposal_id, task, must_contain_text = parts[:3]
+    must_not_contain_text = parts[3] if len(parts) == 4 else ""
+    try:
+        case_id = engine.add_eval_case(
+            proposal_id,
+            task=task,
+            must_contain=_split_terms(must_contain_text),
+            must_not_contain=_split_terms(must_not_contain_text),
+        )
+    except ValueError as e:
+        ctx.ui.add_system_message(f"Evolution eval case failed: {e}")
+        return
+    ctx.ui.add_system_message(f"Evolution eval case recorded: {case_id}")
+
+
+def _split_terms(text: str) -> list[str]:
+    return [
+        term.strip()
+        for term in text.replace("，", ",").split(",")
+        if term.strip()
+    ]
+
+
 def _reload_skill_loader_if_needed(
     ctx: CommandContext, proposal
 ) -> None:
@@ -387,7 +426,7 @@ EVOLVE_COMMAND = Command(
     handler=handle_evolve,
     usage=(
         "/evolve [observe|propose|propose-skill|propose-skill-patch|"
-        "list|show|approve|reject|apply|eval|promote]"
+        "list|show|approve|reject|apply|add-eval-case|eval|promote]"
     ),
     aliases=["evolution"],
 )

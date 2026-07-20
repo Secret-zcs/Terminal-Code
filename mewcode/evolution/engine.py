@@ -32,6 +32,7 @@ from mewcode.skills.parser import (
     VALID_NAME_RE,
     SkillParseError,
     parse_skill_file,
+    substitute_arguments,
 )
 
 PROJECT_MEMORY_HEADER = "### 项目知识"
@@ -63,6 +64,10 @@ class EvolutionEngine:
     def candidate_skills_path(self) -> Path:
         return self.project_root / ".mewcode" / "evolution" / "candidates"
 
+    @property
+    def evals_path(self) -> Path:
+        return self.project_root / ".mewcode" / "evolution" / "evals"
+
     def candidate_dir(self, proposal_id: str) -> Path:
         return self.candidate_skills_path / proposal_id
 
@@ -71,6 +76,9 @@ class EvolutionEngine:
 
     def candidate_manifest_path(self, proposal_id: str) -> Path:
         return self.candidate_dir(proposal_id) / "manifest.json"
+
+    def eval_cases_path(self, skill_name: str) -> Path:
+        return self.evals_path / skill_name / "cases.jsonl"
 
     def proposal_target_path(self, proposal: EvolutionProposal) -> Path:
         if proposal.target == "memory":
@@ -264,6 +272,55 @@ class EvolutionEngine:
             self.store.update_proposal(proposal)
         return proposal
 
+    def add_eval_case(
+        self,
+        proposal_id: str,
+        *,
+        task: str,
+        must_contain: list[str],
+        must_not_contain: list[str] | None = None,
+        case_id: str | None = None,
+    ) -> str:
+        proposal = self.store.get_proposal(proposal_id)
+        if proposal is None:
+            raise ValueError(f"proposal {proposal_id} not found")
+        if proposal.target != "skill":
+            raise ValueError(f"proposal {proposal_id} is not a skill proposal")
+
+        payload = self._decode_skill_change(proposal.change)
+        skill_name = str(payload["name"])
+        if not VALID_NAME_RE.match(skill_name):
+            raise ValueError("invalid skill name for eval case")
+        clean_task = task.strip()
+        required = [term.strip() for term in must_contain if term.strip()]
+        forbidden = [
+            term.strip()
+            for term in (must_not_contain or [])
+            if term.strip()
+        ]
+        if not clean_task:
+            raise ValueError("eval case task cannot be empty")
+        if not required:
+            raise ValueError("eval case must_contain cannot be empty")
+
+        eval_case = {
+            "id": case_id or new_evolution_id("case"),
+            "proposal_id": proposal.id,
+            "skill_name": skill_name,
+            "task": clean_task,
+            "must_contain": required,
+            "must_not_contain": forbidden,
+            "created_at": time.time(),
+        }
+        path = self.eval_cases_path(skill_name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        path.write_text(
+            existing + json.dumps(eval_case, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        return str(eval_case["id"])
+
     def apply(self, proposal_id: str) -> tuple[bool, str]:
         proposal = self.store.get_proposal(proposal_id)
         if proposal is None:
@@ -332,7 +389,7 @@ class EvolutionEngine:
 
         validation = self.validate(proposal)
         if not validation.ok:
-            self._write_eval_result(proposal, "failed", [], validation.errors)
+            self._write_eval_result(proposal, "failed", [], validation.errors, [])
             return False, "; ".join(validation.errors)
 
         payload = self._decode_skill_change(proposal.change)
@@ -342,17 +399,34 @@ class EvolutionEngine:
 
         checks: list[str] = []
         errors: list[str] = []
+        case_results: list[dict] = []
+        skill = None
         try:
-            parse_skill_file(candidate_path)
+            skill = parse_skill_file(candidate_path)
             checks.append("parse_skill_file")
         except SkillParseError as e:
             errors.append(f"candidate skill is invalid: {e}")
 
+        if skill is not None:
+            cases, case_errors = self._load_eval_cases(proposal)
+            errors.extend(case_errors)
+            if not cases and not case_errors:
+                errors.append(f"no eval case found for skill '{payload['name']}'")
+            for eval_case in cases:
+                result = self._evaluate_eval_case(skill, eval_case)
+                case_results.append(result)
+                if result["status"] == "passed":
+                    checks.append(f"eval_case:{result['id']}")
+                else:
+                    errors.extend(
+                        f"{result['id']}: {error}" for error in result["errors"]
+                    )
+
         if errors:
-            self._write_eval_result(proposal, "failed", checks, errors)
+            self._write_eval_result(proposal, "failed", checks, errors, case_results)
             return False, "; ".join(errors)
 
-        self._write_eval_result(proposal, "passed", checks, [])
+        self._write_eval_result(proposal, "passed", checks, [], case_results)
         return True, f"skill candidate eval passed: {proposal.id}"
 
     def _validate_memory_proposal(
@@ -524,6 +598,7 @@ class EvolutionEngine:
             "eval_status": existing.get("eval_status", "pending"),
             "eval_checks": existing.get("eval_checks", []),
             "eval_errors": existing.get("eval_errors", []),
+            "eval_case_results": existing.get("eval_case_results", []),
             "evaluated_at": existing.get("evaluated_at", 0.0),
         }
         self.candidate_manifest_path(proposal.id).write_text(
@@ -559,6 +634,7 @@ class EvolutionEngine:
         status: str,
         checks: list[str],
         errors: list[str],
+        case_results: list[dict],
     ) -> None:
         payload = self._decode_skill_change(proposal.change)
         self._write_candidate_manifest(proposal, payload, status="candidate")
@@ -566,11 +642,75 @@ class EvolutionEngine:
         manifest["eval_status"] = status
         manifest["eval_checks"] = checks
         manifest["eval_errors"] = errors
+        manifest["eval_case_results"] = case_results
         manifest["evaluated_at"] = time.time()
         self.candidate_manifest_path(proposal.id).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+
+    def _load_eval_cases(self, proposal: EvolutionProposal) -> tuple[list[dict], list[str]]:
+        payload = self._decode_skill_change(proposal.change)
+        path = self.eval_cases_path(str(payload["name"]))
+        if not path.exists():
+            return [], []
+
+        cases: list[dict] = []
+        errors: list[str] = []
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                data = json.loads(stripped)
+            except json.JSONDecodeError as e:
+                errors.append(f"eval case line {line_no} is invalid JSON: {e}")
+                continue
+            error = self._validate_eval_case(data, line_no)
+            if error is not None:
+                errors.append(error)
+                continue
+            cases.append(data)
+        return cases, errors
+
+    @staticmethod
+    def _validate_eval_case(data: dict, line_no: int) -> str | None:
+        if not isinstance(data, dict):
+            return f"eval case line {line_no} must be a JSON object"
+        if not isinstance(data.get("id"), str) or not data["id"].strip():
+            return f"eval case line {line_no} missing id"
+        if not isinstance(data.get("task"), str) or not data["task"].strip():
+            return f"eval case {data.get('id', line_no)} missing task"
+        required = data.get("must_contain")
+        if (
+            not isinstance(required, list)
+            or not required
+            or not all(isinstance(term, str) and term.strip() for term in required)
+        ):
+            return f"eval case {data.get('id', line_no)} missing must_contain"
+        forbidden = data.get("must_not_contain", [])
+        if not isinstance(forbidden, list) or not all(
+            isinstance(term, str) and term.strip() for term in forbidden
+        ):
+            return f"eval case {data.get('id', line_no)} has invalid must_not_contain"
+        return None
+
+    @staticmethod
+    def _evaluate_eval_case(skill, eval_case: dict) -> dict:
+        rendered = substitute_arguments(skill.prompt_body, eval_case["task"])
+        text = f"{skill.name}\n{skill.description}\n{rendered}".lower()
+        errors: list[str] = []
+        for term in eval_case["must_contain"]:
+            if term.lower() not in text:
+                errors.append(f"must contain '{term}'")
+        for term in eval_case.get("must_not_contain", []):
+            if term.lower() in text:
+                errors.append(f"must not contain '{term}'")
+        return {
+            "id": eval_case["id"],
+            "status": "failed" if errors else "passed",
+            "errors": errors,
+        }
 
     def _project_skill_path(self, name: str) -> Path:
         return self.project_skills_path / name / "SKILL.md"

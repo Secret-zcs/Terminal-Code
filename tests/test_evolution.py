@@ -61,6 +61,15 @@ def _ctx(tmp_path: Path, args: str, ui: MockUI | None = None) -> CommandContext:
     )
 
 
+def _add_debug_eval_case(engine: EvolutionEngine, proposal_id: str) -> str:
+    return engine.add_eval_case(
+        proposal_id,
+        task="修复复杂回归 bug 时应该遵循什么流程？",
+        must_contain=["复现失败", "回归测试"],
+        must_not_contain=["跳过测试"],
+    )
+
+
 class TestEvolutionEngine:
     def test_records_evidence_and_proposal(self, tmp_path: Path) -> None:
         engine = EvolutionEngine(tmp_path)
@@ -144,13 +153,32 @@ class TestEvolutionEngine:
         assert manifest["eval_status"] == "pending"
         assert manifest["evidence_ids"] == [evidence.id]
 
-    def test_evaluate_skill_candidate_updates_manifest(self, tmp_path: Path) -> None:
+    def test_evaluate_skill_candidate_requires_eval_case(self, tmp_path: Path) -> None:
         engine = EvolutionEngine(tmp_path)
         proposal = engine.propose_skill(
             name="debug-regression-loop",
             description="复杂调试任务的回归测试优先流程",
             body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
         )
+
+        ok, message = engine.evaluate(proposal.id)
+
+        assert not ok
+        assert "eval case" in message
+        manifest = json.loads(
+            engine.candidate_manifest_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert manifest["eval_status"] == "failed"
+        assert any("eval case" in error for error in manifest["eval_errors"])
+
+    def test_evaluate_skill_candidate_runs_eval_cases(self, tmp_path: Path) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="debug-regression-loop",
+            description="复杂调试任务的回归测试优先流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
+        )
+        case_id = _add_debug_eval_case(engine, proposal.id)
 
         ok, message = engine.evaluate(proposal.id)
 
@@ -161,6 +189,51 @@ class TestEvolutionEngine:
         )
         assert manifest["eval_status"] == "passed"
         assert "parse_skill_file" in manifest["eval_checks"]
+        assert f"eval_case:{case_id}" in manifest["eval_checks"]
+        assert manifest["eval_case_results"] == [{
+            "id": case_id,
+            "status": "passed",
+            "errors": [],
+        }]
+
+    def test_evaluate_skill_candidate_fails_failed_eval_case(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="debug-regression-loop",
+            description="复杂调试任务的回归测试优先流程",
+            body="# 任务\n\n直接修改代码，然后提交。\n",
+        )
+        _add_debug_eval_case(engine, proposal.id)
+
+        ok, message = engine.evaluate(proposal.id)
+
+        assert not ok
+        assert "must contain" in message
+        manifest = json.loads(
+            engine.candidate_manifest_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert manifest["eval_status"] == "failed"
+        assert manifest["eval_case_results"][0]["status"] == "failed"
+        assert any("must contain" in error for error in manifest["eval_errors"])
+
+    def test_add_eval_case_rejects_invalid_skill_name(self, tmp_path: Path) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="../escape",
+            description="非法 skill 名称不能写 eval case 路径",
+            body="# 任务\n\n不要写出 evals 目录。\n",
+        )
+
+        with pytest.raises(ValueError, match="invalid skill name"):
+            engine.add_eval_case(
+                proposal.id,
+                task="非法名称不能写入 eval case。",
+                must_contain=["不要写出 evals 目录"],
+            )
+
+        assert not (tmp_path / ".mewcode" / "evolution" / "escape").exists()
 
     def test_approved_skill_proposal_cannot_apply_directly(
         self, tmp_path: Path
@@ -214,6 +287,7 @@ class TestEvolutionEngine:
             context="recent",
         )
         engine.approve(proposal.id)
+        _add_debug_eval_case(engine, proposal.id)
         engine.evaluate(proposal.id)
 
         ok, path = engine.promote(proposal.id)
@@ -302,6 +376,11 @@ class TestEvolutionEngine:
 
         validation = engine.validate(proposal)
         engine.approve(proposal.id)
+        engine.add_eval_case(
+            proposal.id,
+            task="复盘复杂任务后如何更新已有 skill？",
+            must_contain=["优先 patch 已有 skill"],
+        )
         engine.evaluate(proposal.id)
         ok, path = engine.promote(proposal.id)
 
@@ -397,6 +476,12 @@ class TestEvolveCommand:
         proposal = EvolutionEngine(tmp_path).store.load_proposals()[0]
 
         await handle_evolve(_ctx(tmp_path, f"approve {proposal.id}", ui))
+        await handle_evolve(_ctx(
+            tmp_path,
+            f"add-eval-case {proposal.id} :: 复盘复杂任务后怎么沉淀流程？ :: "
+            "可复用流程",
+            ui,
+        ))
         await handle_evolve(_ctx(tmp_path, f"eval {proposal.id}", ui))
         promote_ctx = _ctx(tmp_path, f"promote {proposal.id}", ui)
         promote_ctx.config = {"skill_loader": loader}

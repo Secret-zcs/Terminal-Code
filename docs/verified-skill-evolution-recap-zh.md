@@ -1,6 +1,7 @@
 # Verified Skill Evolution 自进化复盘
 
 > 日期：2026-07-18
+> 最近更新：2026-07-20
 > 目标：把 Hermes 风格“模型生成 skill 后可用”的自进化路径，升级为“候选 skill 先验证、评审、再启用”的安全闭环。
 
 ## 1. 结论
@@ -13,7 +14,8 @@
 learn / propose-skill
   -> 写入 candidate skill
   -> validate 静态校验
-  -> eval 候选评估
+  -> add-eval-case 记录任务评估用例
+  -> eval 运行候选评估
   -> approve 人工确认
   -> promote 启用正式 skill
   -> checkpoint + reload
@@ -47,6 +49,7 @@ Skill 改为候选闭环：
 learn / propose-skill
   -> candidate
   -> validate
+  -> eval-case
   -> eval
   -> approve
   -> promote
@@ -55,7 +58,8 @@ learn / propose-skill
 其中：
 
 - `candidate`：写入 `.mewcode/evolution/candidates/<proposal_id>/SKILL.md`。
-- `eval`：对 candidate 做最小可用性评估，确认候选 skill 可解析且通过 validate。
+- `eval-case`：写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`，记录任务输入、必须覆盖的关键步骤和禁止出现的错误策略。
+- `eval`：对 candidate 做确定性评估，确认候选 skill 可解析、通过 validate，并满足至少一个任务评估用例。
 - `approve`：人工确认 proposal 可进入启用阶段。
 - `promote`：将 candidate 写入正式 `.mewcode/skills/<name>/SKILL.md`。
 - `applied`：proposal 状态仍沿用既有 `applied`，表示 candidate 已正式启用。
@@ -67,6 +71,7 @@ learn / propose-skill
 ```text
 .mewcode/evolution/candidates/<proposal_id>/SKILL.md
 .mewcode/evolution/candidates/<proposal_id>/manifest.json
+.mewcode/evolution/evals/<skill-name>/cases.jsonl
 ```
 
 `manifest.json` 记录：
@@ -85,6 +90,7 @@ learn / propose-skill
   "eval_status": "pending",
   "eval_checks": [],
   "eval_errors": [],
+  "eval_case_results": [],
   "evaluated_at": 0.0
 }
 ```
@@ -144,20 +150,64 @@ promote 要求：
 /evolve eval <proposal_id>
 ```
 
-当前第一版 eval 是 deterministic gate，不调用模型：
+当前 eval 是 deterministic gate，不调用模型：
 
 - proposal 必须存在；
 - target 必须是 `skill`；
 - proposal validate 必须通过；
 - candidate `SKILL.md` 必须能被 `parse_skill_file()` 解析。
+- 至少存在一个 eval case；
+- 每个 eval case 的 `must_contain` 必须出现在候选 SOP 中；
+- 每个 eval case 的 `must_not_contain` 不得出现在候选 SOP 中。
+
+### `/evolve add-eval-case`
+
+新增任务评估用例命令：
+
+```text
+/evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]
+```
+
+示例：
+
+```text
+/evolve add-eval-case prop_xxx :: 修复复杂回归 bug 时应该遵循什么流程？ :: 复现失败,回归测试 :: 跳过测试
+```
+
+该命令会写入：
+
+```text
+.mewcode/evolution/evals/<skill-name>/cases.jsonl
+```
+
+case schema：
+
+```json
+{
+  "id": "case_xxx",
+  "proposal_id": "prop_xxx",
+  "skill_name": "debug-regression-loop",
+  "task": "修复复杂回归 bug 时应该遵循什么流程？",
+  "must_contain": ["复现失败", "回归测试"],
+  "must_not_contain": ["跳过测试"],
+  "created_at": 1780000000.0
+}
+```
 
 通过后写入 manifest：
 
 ```json
 {
   "eval_status": "passed",
-  "eval_checks": ["parse_skill_file"],
+  "eval_checks": ["parse_skill_file", "eval_case:case_xxx"],
   "eval_errors": [],
+  "eval_case_results": [
+    {
+      "id": "case_xxx",
+      "status": "passed",
+      "errors": []
+    }
+  ],
   "evaluated_at": 1780000000.0
 }
 ```
@@ -200,9 +250,9 @@ wget -qO-
 
 ## 7. 修改清单
 
-- 修改 `mewcode/evolution/engine.py`：新增 candidate 路径、candidate skill/manifest 写入、`evaluate()`、`promote()`、skill direct apply 拒绝和静态危险命令校验。
-- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve eval` 和 `/evolve promote`，并让 `/evolve apply` 不再对 skill 做正式启用。
-- 修改 `tests/test_evolution.py`：新增 candidate 写入、eval manifest、direct apply 拒绝、promote eval 门禁、promote 启用、patch promote、危险命令阻断和命令层 eval/promote/reload 测试。
+- 修改 `mewcode/evolution/engine.py`：新增 candidate 路径、candidate skill/manifest 写入、`evaluate()`、`add_eval_case()`、`promote()`、skill direct apply 拒绝、eval case 执行和静态危险命令校验。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve add-eval-case`、`/evolve eval` 和 `/evolve promote`，并让 `/evolve apply` 不再对 skill 做正式启用。
+- 修改 `tests/test_evolution.py`：新增 candidate 写入、eval manifest、eval case 缺失阻断、eval case 成功/失败、direct apply 拒绝、promote eval 门禁、promote 启用、patch promote、危险命令阻断和命令层 eval/promote/reload 测试。
 - 修改 `README.md`：更新自进化命令和 memory/skill 分流语义。
 - 新增本文档：记录 Verified Skill Evolution 的设计和验证。
 
@@ -301,14 +351,78 @@ FAILED tests/test_agent.py::test_message_splicing
 
 全量首个失败点停在既有 agent 消息拼接测试，断言期望消息数为 5、实际为 4，和本次 candidate eval gate 修改无直接依赖。
 
+### 2026-07-20 Eval Case Gate 追加记录
+
+本次把 eval 从“候选 skill 可解析”升级为“候选 skill 必须通过至少一个任务评估用例”。这对应用户提出的安全要求：模型生成的 skill 不应因为格式正确就被启用，而应先证明它覆盖了目标任务中的关键步骤。
+
+TDD 红灯记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py -q
+5 failed, 18 passed
+```
+
+失败原因符合预期：
+
+- 无 eval case 时 `evaluate()` 仍然返回 passed。
+- `EvolutionEngine` 尚无 `add_eval_case()`。
+- manifest 尚无 `eval_case_results`。
+- `/evolve add-eval-case` 尚未接入命令层。
+
+追加安全红灯记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_add_eval_case_rejects_invalid_skill_name -q
+1 failed
+```
+
+失败原因符合预期：无效 skill name 仍可写入 eval case 路径。
+
+绿灯记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py -q
+24 passed
+```
+
+扩展回归记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
+198 passed
+```
+
+格式检查记录：
+
+```text
+git diff --check
+```
+
+命令无输出，表示未发现 diff whitespace 问题。
+
+全量测试记录：
+
+```text
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次 eval case gate 修改无直接依赖。
+
+修改内容：
+
+- 修改 `mewcode/evolution/engine.py`：新增 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`、`add_eval_case()`、case 读取校验、case 执行和 `eval_case_results` manifest 留档。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]`。
+- 修改 `tests/test_evolution.py`：新增无 case 阻断、case 通过、case 失败、命令层 add-eval-case 到 promote 的完整流程测试。
+- 修改 `README.md`、`docs/hermes-skill-evolution-implementation.md`、`docs/hermes-evolution-rewind-review.md` 和本文档：同步记录新的 case gate。
+
 ## 9. 后续方向
 
-当前已实现第一阶段 candidate/promote 和最小 eval gate。下一阶段建议增加：
+当前已实现第一阶段 candidate/promote、eval gate 和 eval case gate。下一阶段建议增加：
 
-- eval case 文件：`.mewcode/evolution/evals/<skill-name>/cases.jsonl`。
-- `/evolve eval <proposal_id>` 扩展为正反例任务测试 candidate 是否该触发。
 - `/evolve quarantine <skill-name>`：启用后如果用户纠正或任务失败，将正式 skill 移入隔离区。
 - usage log：记录 skill 触发、结果、用户反馈，用于后续自动降级或复盘。
+- 更强的任务回放：由受限 fork agent 在沙盒中执行 case，而不只是检查候选 SOP 的关键步骤覆盖。
 - background review：只能生成 candidate，禁止自动 promote。
 
 ## 10. 设计取舍

@@ -34,7 +34,7 @@ skill:  learn/propose -> candidate -> validate -> eval -> approve -> promote
   -> 如果结果不好，可用 /rewind 回退
 ```
 
-当前可自动落地的目标是 `memory` 和 `skill`，但路径不同：memory 经 `/evolve apply` 写入 `.mewcode/memories.md`；skill 先写入 candidate，只有 `/evolve eval` 通过并 `/evolve promote` 后才进入 `.mewcode/skills/<name>/SKILL.md`。
+当前可自动落地的目标是 `memory` 和 `skill`，但路径不同：memory 经 `/evolve apply` 写入 `.mewcode/memories.md`；skill 先写入 candidate，并且至少记录一个任务 eval case，只有 `/evolve eval` 通过并 `/evolve promote` 后才进入 `.mewcode/skills/<name>/SKILL.md`。
 
 这个边界是有意设计的：Hermes 风格运行时自进化应沉淀外部、可审计的行为资产，而不是直接修改工具实现、系统提示词或代码。
 
@@ -944,3 +944,18 @@ skill verifier
 - 扩展回归记录：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，195 个测试成功。
 - 格式检查记录：`git diff --check` 无输出。
 - 全量测试记录：`PYTHONPATH=. pytest -q -x` 停在 `tests/test_agent.py::test_message_splicing`；失败原因为既有 agent 消息拼接测试期望消息数 5、实际 4，和本次 candidate eval gate 修改无直接依赖。
+
+### 2026-07-20 补充：Candidate Eval Case Gate
+
+- 修改 `mewcode/evolution/engine.py`：新增 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`，用于保存 candidate skill 的任务评估用例。
+- 修改 `mewcode/evolution/engine.py`：新增 `add_eval_case()`，写入 `task`、`must_contain`、`must_not_contain` 和 `created_at`。
+- 修改 `mewcode/evolution/engine.py`：`evaluate()` 现在要求至少一个 eval case，并将每个 case 的通过/失败明细写入 `eval_case_results`。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]`。
+- 修改 `tests/test_evolution.py`：新增无 eval case 阻断、case 通过、case 失败和命令层 add-eval-case 到 promote 的完整流程测试。
+- 修改 `README.md`、`docs/hermes-skill-evolution-implementation.md`、`docs/verified-skill-evolution-recap-zh.md` 和本文档：同步记录 eval case gate。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 得到 5 个预期失败，覆盖无 case 仍通过、缺少 `add_eval_case()`、manifest 缺 `eval_case_results` 和命令层缺 `add-eval-case`。
+- 追加安全红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_add_eval_case_rejects_invalid_skill_name -q` 得到 1 个预期失败，覆盖无效 skill name 仍可写入 eval case 路径。
+- 绿灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，24 个测试成功。
+- 扩展回归记录：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，198 个测试成功。
+- 格式检查记录：`git diff --check` 无输出。
+- 全量测试记录：`PYTHONPATH=. pytest -q -x` 停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次 eval case gate 修改无直接依赖。
