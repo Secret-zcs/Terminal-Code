@@ -304,6 +304,9 @@ class EvolutionEngine:
         if not validation.ok:
             return False, "; ".join(validation.errors)
 
+        if not self._candidate_eval_passed(proposal.id):
+            return False, f"proposal {proposal_id} must pass eval before promote"
+
         candidate_path = self.candidate_skill_path(proposal.id)
         if not candidate_path.exists():
             payload = self._decode_skill_change(proposal.change)
@@ -319,6 +322,38 @@ class EvolutionEngine:
         self.store.update_proposal(proposal)
         self._update_candidate_manifest(proposal, status="enabled")
         return True, str(applied_path)
+
+    def evaluate(self, proposal_id: str) -> tuple[bool, str]:
+        proposal = self.store.get_proposal(proposal_id)
+        if proposal is None:
+            return False, f"proposal {proposal_id} not found"
+        if proposal.target != "skill":
+            return False, f"proposal {proposal_id} is not a skill proposal"
+
+        validation = self.validate(proposal)
+        if not validation.ok:
+            self._write_eval_result(proposal, "failed", [], validation.errors)
+            return False, "; ".join(validation.errors)
+
+        payload = self._decode_skill_change(proposal.change)
+        candidate_path = self.candidate_skill_path(proposal.id)
+        if not candidate_path.exists():
+            self._write_candidate_skill(proposal, payload)
+
+        checks: list[str] = []
+        errors: list[str] = []
+        try:
+            parse_skill_file(candidate_path)
+            checks.append("parse_skill_file")
+        except SkillParseError as e:
+            errors.append(f"candidate skill is invalid: {e}")
+
+        if errors:
+            self._write_eval_result(proposal, "failed", checks, errors)
+            return False, "; ".join(errors)
+
+        self._write_eval_result(proposal, "passed", checks, [])
+        return True, f"skill candidate eval passed: {proposal.id}"
 
     def _validate_memory_proposal(
         self,
@@ -475,6 +510,7 @@ class EvolutionEngine:
         *,
         status: str,
     ) -> None:
+        existing = self._load_candidate_manifest(proposal.id)
         manifest = {
             "proposal_id": proposal.id,
             "skill_name": payload.get("name"),
@@ -485,6 +521,10 @@ class EvolutionEngine:
             "candidate_skill": str(self.candidate_skill_path(proposal.id)),
             "created_at": proposal.created_at,
             "promoted_at": proposal.applied_at if status == "enabled" else 0.0,
+            "eval_status": existing.get("eval_status", "pending"),
+            "eval_checks": existing.get("eval_checks", []),
+            "eval_errors": existing.get("eval_errors", []),
+            "evaluated_at": existing.get("evaluated_at", 0.0),
         }
         self.candidate_manifest_path(proposal.id).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
@@ -499,6 +539,38 @@ class EvolutionEngine:
     ) -> None:
         payload = self._decode_skill_change(proposal.change)
         self._write_candidate_manifest(proposal, payload, status=status)
+
+    def _load_candidate_manifest(self, proposal_id: str) -> dict:
+        path = self.candidate_manifest_path(proposal_id)
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _candidate_eval_passed(self, proposal_id: str) -> bool:
+        return self._load_candidate_manifest(proposal_id).get("eval_status") == "passed"
+
+    def _write_eval_result(
+        self,
+        proposal: EvolutionProposal,
+        status: str,
+        checks: list[str],
+        errors: list[str],
+    ) -> None:
+        payload = self._decode_skill_change(proposal.change)
+        self._write_candidate_manifest(proposal, payload, status="candidate")
+        manifest = self._load_candidate_manifest(proposal.id)
+        manifest["eval_status"] = status
+        manifest["eval_checks"] = checks
+        manifest["eval_errors"] = errors
+        manifest["evaluated_at"] = time.time()
+        self.candidate_manifest_path(proposal.id).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     def _project_skill_path(self, name: str) -> Path:
         return self.project_skills_path / name / "SKILL.md"

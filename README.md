@@ -179,6 +179,7 @@ mewcode --mode default
 | `/evolve propose-skill-patch <name> :: <description> :: <body>` | 创建既有 skill patch 提案 |
 | `/evolve approve <id>` | 批准 proposal |
 | `/evolve apply <id>` | 应用已批准的 memory proposal |
+| `/evolve eval <id>` | 评估 candidate skill 是否可启用 |
 | `/evolve promote <id>` | 将已批准的 candidate skill 提升为正式 skill |
 | `/learn <name> :: <description> :: <body>` | 将可复用流程蒸馏为 skill 提案；同名项目 skill 存在时优先 patch |
 | `/skill list` | 查看 skills |
@@ -225,14 +226,14 @@ mewcode --mode default
 
 ```text
 memory: observe -> propose -> validate -> approve -> apply
-skill:  learn/propose -> candidate -> validate -> approve -> promote
+skill:  learn/propose -> candidate -> validate -> eval -> approve -> promote
 ```
 
 当前支持两类受控落地：
 
 - approved `memory` proposal 自动追加到 `.mewcode/memories.md`。
 - skill proposal 先写入 `.mewcode/evolution/candidates/<proposal_id>/SKILL.md`，不会立即进入正式 skill loader。
-- approved candidate skill 只能通过 `/evolve promote <proposal_id>` 写入 `.mewcode/skills/<name>/SKILL.md`。
+- candidate skill 必须先通过 `/evolve eval <proposal_id>`，再经 approve/promote 写入 `.mewcode/skills/<name>/SKILL.md`。
 - `/learn` 是 Hermes 风格显式学习入口：同名项目 skill 存在时创建 `patch` 提案，否则创建 `create` 提案，避免重复 skill 膨胀。
 - `/learn` 会先记录 learn evidence，再把 evidence id 关联到生成的 proposal。
 
@@ -246,6 +247,7 @@ skill:  learn/propose -> candidate -> validate -> approve -> promote
 /evolve propose-skill <name> :: <description> :: <skill body>
 /evolve propose-skill-patch <name> :: <description> :: <skill body>
 /learn <name> :: <description> :: <skill body>
+/evolve eval <proposal_id>       # skill candidate gate
 /evolve approve <proposal_id>
 /evolve apply <proposal_id>      # memory only
 /evolve promote <proposal_id>    # skill candidate only

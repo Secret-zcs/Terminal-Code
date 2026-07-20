@@ -141,7 +141,26 @@ class TestEvolutionEngine:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         assert manifest["proposal_id"] == proposal.id
         assert manifest["status"] == "candidate"
+        assert manifest["eval_status"] == "pending"
         assert manifest["evidence_ids"] == [evidence.id]
+
+    def test_evaluate_skill_candidate_updates_manifest(self, tmp_path: Path) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="debug-regression-loop",
+            description="复杂调试任务的回归测试优先流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
+        )
+
+        ok, message = engine.evaluate(proposal.id)
+
+        assert ok
+        assert "passed" in message
+        manifest = json.loads(
+            engine.candidate_manifest_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert manifest["eval_status"] == "passed"
+        assert "parse_skill_file" in manifest["eval_checks"]
 
     def test_approved_skill_proposal_cannot_apply_directly(
         self, tmp_path: Path
@@ -177,6 +196,28 @@ class TestEvolutionEngine:
 
         ok, path = engine.promote(proposal.id)
 
+        assert not ok
+        assert "eval" in path
+        assert not (
+            tmp_path / ".mewcode" / "skills" / "debug-regression-loop" / "SKILL.md"
+        ).exists()
+
+    def test_promote_approved_and_evaluated_skill_candidate_to_project_skill(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="debug-regression-loop",
+            description="复杂调试任务的回归测试优先流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
+            allowed_tools=["Bash", "ReadFile"],
+            context="recent",
+        )
+        engine.approve(proposal.id)
+        engine.evaluate(proposal.id)
+
+        ok, path = engine.promote(proposal.id)
+
         assert ok
         skill_path = Path(path)
         assert skill_path == tmp_path / ".mewcode" / "skills" / "debug-regression-loop" / "SKILL.md"
@@ -185,6 +226,7 @@ class TestEvolutionEngine:
             engine.candidate_manifest_path(proposal.id).read_text(encoding="utf-8")
         )
         assert manifest["status"] == "enabled"
+        assert manifest["eval_status"] == "passed"
         applied = engine.store.get_proposal(proposal.id)
         assert applied is not None
         assert applied.status == "applied"
@@ -260,6 +302,7 @@ class TestEvolutionEngine:
 
         validation = engine.validate(proposal)
         engine.approve(proposal.id)
+        engine.evaluate(proposal.id)
         ok, path = engine.promote(proposal.id)
 
         assert validation.ok
@@ -354,6 +397,7 @@ class TestEvolveCommand:
         proposal = EvolutionEngine(tmp_path).store.load_proposals()[0]
 
         await handle_evolve(_ctx(tmp_path, f"approve {proposal.id}", ui))
+        await handle_evolve(_ctx(tmp_path, f"eval {proposal.id}", ui))
         promote_ctx = _ctx(tmp_path, f"promote {proposal.id}", ui)
         promote_ctx.config = {"skill_loader": loader}
         await handle_evolve(promote_ctx)

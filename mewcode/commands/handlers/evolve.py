@@ -10,6 +10,7 @@ Usage:
     /evolve approve <proposal_id>
     /evolve reject <proposal_id>
     /evolve apply <proposal_id>
+    /evolve eval <proposal_id>
     /evolve promote <proposal_id>
 """
 
@@ -62,6 +63,8 @@ async def handle_evolve(ctx: CommandContext) -> None:
         _handle_reject(ctx, engine, rest)
     elif subcmd == "apply":
         _handle_apply(ctx, engine, rest)
+    elif subcmd == "eval":
+        _handle_eval(ctx, engine, rest)
     elif subcmd == "promote":
         _handle_promote(ctx, engine, rest)
     else:
@@ -81,6 +84,7 @@ def _show_help(ctx: CommandContext) -> None:
             "  /evolve approve <proposal_id>",
             "  /evolve reject <proposal_id>",
             "  /evolve apply <proposal_id>",
+            "  /evolve eval <proposal_id>",
             "  /evolve promote <proposal_id>",
             "",
             "Approved memory proposals write .mewcode/memories.md via apply.",
@@ -323,6 +327,18 @@ def _handle_promote(ctx: CommandContext, engine: EvolutionEngine, proposal_id: s
     )
 
 
+def _handle_eval(ctx: CommandContext, engine: EvolutionEngine, proposal_id: str) -> None:
+    if not proposal_id:
+        ctx.ui.add_system_message("Usage: /evolve eval <proposal_id>")
+        return
+
+    ok, message = engine.evaluate(proposal_id)
+    if not ok:
+        ctx.ui.add_system_message(f"Evolution eval failed: {message}")
+        return
+    ctx.ui.add_system_message(f"Evolution eval passed: {message}")
+
+
 def _reload_skill_loader_if_needed(
     ctx: CommandContext, proposal
 ) -> None:
@@ -371,7 +387,7 @@ EVOLVE_COMMAND = Command(
     handler=handle_evolve,
     usage=(
         "/evolve [observe|propose|propose-skill|propose-skill-patch|"
-        "list|show|approve|reject|apply|promote]"
+        "list|show|approve|reject|apply|eval|promote]"
     ),
     aliases=["evolution"],
 )

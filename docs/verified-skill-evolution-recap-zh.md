@@ -13,6 +13,7 @@
 learn / propose-skill
   -> 写入 candidate skill
   -> validate 静态校验
+  -> eval 候选评估
   -> approve 人工确认
   -> promote 启用正式 skill
   -> checkpoint + reload
@@ -26,8 +27,8 @@ learn / propose-skill
 |---|---|---|
 | skill 生成 | background review 可自动 patch/create | 只生成 candidate，不直接启用 |
 | 用户确认 | 偏轻量，强调持续学习 | approve 后还需要 promote |
-| 验证重点 | 经验沉淀与可复用性 | 静态安全、候选隔离、checkpoint |
-| 启用路径 | 写入 skill 资产后可加载 | candidate 通过 promote 后才进入 `.mewcode/skills` |
+| 验证重点 | 经验沉淀与可复用性 | 静态安全、候选隔离、eval、checkpoint |
+| 启用路径 | 写入 skill 资产后可加载 | candidate 通过 eval + promote 后才进入 `.mewcode/skills` |
 | 风险控制 | 依赖受限工具和后台隔离 | 额外增加候选区、静态策略、显式启用 |
 
 当前方案不是全面替代 Hermes，而是在代码智能体场景下提高安全性：模型负责提出候选，系统负责校验边界，用户负责授权启用。
@@ -46,6 +47,7 @@ Skill 改为候选闭环：
 learn / propose-skill
   -> candidate
   -> validate
+  -> eval
   -> approve
   -> promote
 ```
@@ -53,6 +55,7 @@ learn / propose-skill
 其中：
 
 - `candidate`：写入 `.mewcode/evolution/candidates/<proposal_id>/SKILL.md`。
+- `eval`：对 candidate 做最小可用性评估，确认候选 skill 可解析且通过 validate。
 - `approve`：人工确认 proposal 可进入启用阶段。
 - `promote`：将 candidate 写入正式 `.mewcode/skills/<name>/SKILL.md`。
 - `applied`：proposal 状态仍沿用既有 `applied`，表示 candidate 已正式启用。
@@ -78,7 +81,11 @@ learn / propose-skill
   "formal_target": ".mewcode/skills/debug-regression-loop/SKILL.md",
   "candidate_skill": ".mewcode/evolution/candidates/prop_xxx/SKILL.md",
   "created_at": 1780000000.0,
-  "promoted_at": 0.0
+  "promoted_at": 0.0,
+  "eval_status": "pending",
+  "eval_checks": [],
+  "eval_errors": [],
+  "evaluated_at": 0.0
 }
 ```
 
@@ -126,7 +133,36 @@ promote 要求：
 - target 必须是 `skill`；
 - status 必须是 `approved`；
 - validate 必须通过；
+- candidate eval 必须通过；
 - candidate `SKILL.md` 必须能被 `parse_skill_file()` 解析。
+
+### `/evolve eval`
+
+新增 candidate 评估命令：
+
+```text
+/evolve eval <proposal_id>
+```
+
+当前第一版 eval 是 deterministic gate，不调用模型：
+
+- proposal 必须存在；
+- target 必须是 `skill`；
+- proposal validate 必须通过；
+- candidate `SKILL.md` 必须能被 `parse_skill_file()` 解析。
+
+通过后写入 manifest：
+
+```json
+{
+  "eval_status": "passed",
+  "eval_checks": ["parse_skill_file"],
+  "eval_errors": [],
+  "evaluated_at": 1780000000.0
+}
+```
+
+promote 会检查 `eval_status == "passed"`，否则拒绝启用。
 
 promote 成功后会：
 
@@ -164,9 +200,9 @@ wget -qO-
 
 ## 7. 修改清单
 
-- 修改 `mewcode/evolution/engine.py`：新增 candidate 路径、candidate skill/manifest 写入、`promote()`、skill direct apply 拒绝和静态危险命令校验。
-- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve promote`，并让 `/evolve apply` 不再对 skill 做正式启用。
-- 修改 `tests/test_evolution.py`：新增 candidate 写入、direct apply 拒绝、promote 启用、promote 审批要求、patch promote、危险命令阻断和命令层 promote/reload 测试。
+- 修改 `mewcode/evolution/engine.py`：新增 candidate 路径、candidate skill/manifest 写入、`evaluate()`、`promote()`、skill direct apply 拒绝和静态危险命令校验。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve eval` 和 `/evolve promote`，并让 `/evolve apply` 不再对 skill 做正式启用。
+- 修改 `tests/test_evolution.py`：新增 candidate 写入、eval manifest、direct apply 拒绝、promote eval 门禁、promote 启用、patch promote、危险命令阻断和命令层 eval/promote/reload 测试。
 - 修改 `README.md`：更新自进化命令和 memory/skill 分流语义。
 - 新增本文档：记录 Verified Skill Evolution 的设计和验证。
 
@@ -218,12 +254,59 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次 candidate/promote 自进化修改无直接依赖。
 
+### 2026-07-20 Eval Gate 追加记录
+
+TDD 红灯记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py -q
+5 failed, 16 passed
+```
+
+失败原因符合预期：
+
+- candidate manifest 缺少 `eval_status`。
+- `EvolutionEngine` 尚无 `evaluate()`。
+- `promote()` 尚未要求 eval 通过。
+- `/evolve eval` 尚未接入命令层。
+
+绿灯记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py -q
+21 passed
+```
+
+扩展回归记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
+195 passed
+```
+
+格式检查记录：
+
+```text
+git diff --check
+```
+
+命令无输出，表示未发现 diff whitespace 问题。
+
+全量测试记录：
+
+```text
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_message_splicing
+```
+
+全量首个失败点停在既有 agent 消息拼接测试，断言期望消息数为 5、实际为 4，和本次 candidate eval gate 修改无直接依赖。
+
 ## 9. 后续方向
 
-当前只实现了第一阶段验证闭环。下一阶段建议增加：
+当前已实现第一阶段 candidate/promote 和最小 eval gate。下一阶段建议增加：
 
-- `/evolve eval <proposal_id>`：用正反例任务测试 candidate 是否该触发。
 - eval case 文件：`.mewcode/evolution/evals/<skill-name>/cases.jsonl`。
+- `/evolve eval <proposal_id>` 扩展为正反例任务测试 candidate 是否该触发。
 - `/evolve quarantine <skill-name>`：启用后如果用户纠正或任务失败，将正式 skill 移入隔离区。
 - usage log：记录 skill 触发、结果、用户反馈，用于后续自动降级或复盘。
 - background review：只能生成 candidate，禁止自动 promote。

@@ -21,7 +21,7 @@
 
 ```text
 memory: observe -> propose -> validate -> approve -> apply
-skill:  learn/propose -> candidate -> validate -> approve -> promote
+skill:  learn/propose -> candidate -> validate -> eval -> approve -> promote
 ```
 
 并用 Claude Code 风格 rewind/checkpoint 机制作为安全保护：
@@ -34,7 +34,7 @@ skill:  learn/propose -> candidate -> validate -> approve -> promote
   -> 如果结果不好，可用 /rewind 回退
 ```
 
-当前可自动落地的目标是 `memory` 和 `skill`，但路径不同：memory 经 `/evolve apply` 写入 `.mewcode/memories.md`；skill 先写入 candidate，只有 `/evolve promote` 后才进入 `.mewcode/skills/<name>/SKILL.md`。
+当前可自动落地的目标是 `memory` 和 `skill`，但路径不同：memory 经 `/evolve apply` 写入 `.mewcode/memories.md`；skill 先写入 candidate，只有 `/evolve eval` 通过并 `/evolve promote` 后才进入 `.mewcode/skills/<name>/SKILL.md`。
 
 这个边界是有意设计的：Hermes 风格运行时自进化应沉淀外部、可审计的行为资产，而不是直接修改工具实现、系统提示词或代码。
 
@@ -560,7 +560,7 @@ docker rm
 
 ```text
 memory -> approved 后可 apply
-skill  -> candidate + approved 后可 promote
+skill  -> candidate + eval passed + approved 后可 promote
 code/tool/prompt -> 不属于 /evolve target
 ```
 
@@ -848,6 +848,7 @@ skill verifier
   -> 优先 patch 已加载 skill
   -> 无合适 skill 时创建新 skill
   -> 写入 candidate
+  -> eval gate
   -> approve 后 promote
   -> reload
 ```
@@ -930,3 +931,16 @@ skill verifier
 - 扩展回归记录：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，193 个测试成功。
 - 格式检查记录：`git diff --check` 无输出。
 - 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突。
+
+### 2026-07-20 补充：Candidate Eval Gate
+
+- 修改 `mewcode/evolution/engine.py`：新增 `evaluate()`，对 skill candidate 执行 deterministic eval，并将 `eval_status`、`eval_checks`、`eval_errors`、`evaluated_at` 写入 manifest。
+- 修改 `mewcode/evolution/engine.py`：`promote()` 新增 eval 门禁，只有 `eval_status == "passed"` 才能启用正式 skill。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve eval <proposal_id>`。
+- 修改 `tests/test_evolution.py`：新增 eval manifest、promote 未 eval 拒绝、eval 后 promote、命令层 eval/promote 测试。
+- 修改 `README.md`、`docs/verified-skill-evolution-recap-zh.md` 和本文档：同步记录 eval gate。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 得到 5 个预期失败，覆盖缺少 `evaluate()`、manifest 缺 `eval_status`、promote 未要求 eval 和命令层 eval 未接入。
+- 绿灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，21 个测试成功。
+- 扩展回归记录：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，195 个测试成功。
+- 格式检查记录：`git diff --check` 无输出。
+- 全量测试记录：`PYTHONPATH=. pytest -q -x` 停在 `tests/test_agent.py::test_message_splicing`；失败原因为既有 agent 消息拼接测试期望消息数 5、实际 4，和本次 candidate eval gate 修改无直接依赖。
