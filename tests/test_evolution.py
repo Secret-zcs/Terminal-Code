@@ -70,6 +70,29 @@ def _add_debug_eval_case(engine: EvolutionEngine, proposal_id: str) -> str:
     )
 
 
+def _add_debug_eval_cases(engine: EvolutionEngine, proposal_id: str) -> list[str]:
+    return [
+        engine.add_eval_case(
+            proposal_id,
+            task="修复复杂回归 bug 时应该先做什么？",
+            must_contain=["复现失败", "回归测试"],
+            must_not_contain=["跳过测试"],
+        ),
+        engine.add_eval_case(
+            proposal_id,
+            task="修复用户反馈的线上缺陷时如何防止回归？",
+            must_contain=["复现失败", "回归测试"],
+            must_not_contain=["跳过测试"],
+        ),
+        engine.add_eval_case(
+            proposal_id,
+            task="复杂调试结束前如何确认修复可靠？",
+            must_contain=["复现失败", "回归测试"],
+            must_not_contain=["跳过测试"],
+        ),
+    ]
+
+
 class TestEvolutionEngine:
     def test_records_evidence_and_proposal(self, tmp_path: Path) -> None:
         engine = EvolutionEngine(tmp_path)
@@ -235,6 +258,59 @@ class TestEvolutionEngine:
 
         assert not (tmp_path / ".mewcode" / "evolution" / "escape").exists()
 
+    def test_run_execution_eval_requires_multiple_eval_cases(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="debug-regression-loop",
+            description="复杂调试任务的回归测试优先流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
+        )
+        _add_debug_eval_case(engine, proposal.id)
+        engine.evaluate(proposal.id)
+
+        ok, message = engine.run_execution_eval(proposal.id)
+
+        assert not ok
+        assert "at least 3" in message
+        assert not engine.execution_eval_report_path(proposal.id).exists()
+
+    def test_run_execution_eval_writes_user_visible_report(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="debug-regression-loop",
+            description="复杂调试任务的回归测试优先流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
+        )
+        case_ids = _add_debug_eval_cases(engine, proposal.id)
+        engine.evaluate(proposal.id)
+
+        ok, message = engine.run_execution_eval(proposal.id)
+
+        assert ok
+        assert "passed" in message
+        report = json.loads(
+            engine.execution_eval_report_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert report["status"] == "passed"
+        assert report["proposal_id"] == proposal.id
+        assert report["min_cases_required"] == 3
+        assert [round_["case_id"] for round_ in report["rounds"]] == case_ids
+        assert all(round_["status"] == "passed" for round_ in report["rounds"])
+        markdown = engine.execution_eval_markdown_path(proposal.id).read_text(
+            encoding="utf-8"
+        )
+        assert "Skill Execution Eval Report" in markdown
+        assert "修复复杂回归 bug" in markdown
+        manifest = json.loads(
+            engine.candidate_manifest_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert manifest["execution_eval_status"] == "passed"
+        assert manifest["execution_eval_report"].endswith("eval_report.json")
+
     def test_approved_skill_proposal_cannot_apply_directly(
         self, tmp_path: Path
     ) -> None:
@@ -292,6 +368,30 @@ class TestEvolutionEngine:
 
         ok, path = engine.promote(proposal.id)
 
+        assert not ok
+        assert "execution eval" in path
+        assert not (
+            tmp_path / ".mewcode" / "skills" / "debug-regression-loop" / "SKILL.md"
+        ).exists()
+
+    def test_promote_approved_evaluated_and_execution_tested_skill(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="debug-regression-loop",
+            description="复杂调试任务的回归测试优先流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
+            allowed_tools=["Bash", "ReadFile"],
+            context="recent",
+        )
+        engine.approve(proposal.id)
+        _add_debug_eval_cases(engine, proposal.id)
+        engine.evaluate(proposal.id)
+        engine.run_execution_eval(proposal.id)
+
+        ok, path = engine.promote(proposal.id)
+
         assert ok
         skill_path = Path(path)
         assert skill_path == tmp_path / ".mewcode" / "skills" / "debug-regression-loop" / "SKILL.md"
@@ -304,6 +404,46 @@ class TestEvolutionEngine:
         applied = engine.store.get_proposal(proposal.id)
         assert applied is not None
         assert applied.status == "applied"
+
+    def test_add_eval_case_invalidates_existing_execution_eval(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="debug-regression-loop",
+            description="复杂调试任务的回归测试优先流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
+            allowed_tools=["Bash", "ReadFile"],
+            context="recent",
+        )
+        engine.approve(proposal.id)
+        _add_debug_eval_cases(engine, proposal.id)
+        engine.evaluate(proposal.id)
+        engine.run_execution_eval(proposal.id)
+
+        engine.add_eval_case(
+            proposal.id,
+            task="新增上线缺陷处理流程必须覆盖什么？",
+            must_contain=["线上复盘记录"],
+        )
+
+        manifest = json.loads(
+            engine.candidate_manifest_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert manifest["eval_status"] == "pending"
+        assert manifest["execution_eval_status"] == "pending"
+
+        report_ok, report_message = engine.read_execution_eval_report(proposal.id)
+        assert not report_ok
+        assert "not passed" in report_message
+
+        ok, message = engine.promote(proposal.id)
+
+        assert not ok
+        assert "eval" in message
+        assert not (
+            tmp_path / ".mewcode" / "skills" / "debug-regression-loop" / "SKILL.md"
+        ).exists()
 
     def test_promote_requires_approval(self, tmp_path: Path) -> None:
         engine = EvolutionEngine(tmp_path)
@@ -381,7 +521,18 @@ class TestEvolutionEngine:
             task="复盘复杂任务后如何更新已有 skill？",
             must_contain=["优先 patch 已有 skill"],
         )
+        engine.add_eval_case(
+            proposal.id,
+            task="遇到重复 skill 时如何处理？",
+            must_contain=["优先 patch 已有 skill"],
+        )
+        engine.add_eval_case(
+            proposal.id,
+            task="已有项目 skill 需要更新时如何避免重复创建？",
+            must_contain=["优先 patch 已有 skill"],
+        )
         engine.evaluate(proposal.id)
+        engine.run_execution_eval(proposal.id)
         ok, path = engine.promote(proposal.id)
 
         assert validation.ok
@@ -482,7 +633,21 @@ class TestEvolveCommand:
             "可复用流程",
             ui,
         ))
+        await handle_evolve(_ctx(
+            tmp_path,
+            f"add-eval-case {proposal.id} :: 复杂任务结束后如何复用经验？ :: "
+            "可复用流程",
+            ui,
+        ))
+        await handle_evolve(_ctx(
+            tmp_path,
+            f"add-eval-case {proposal.id} :: 下次遇到类似问题时怎么复用？ :: "
+            "可复用流程",
+            ui,
+        ))
         await handle_evolve(_ctx(tmp_path, f"eval {proposal.id}", ui))
+        await handle_evolve(_ctx(tmp_path, f"run-eval {proposal.id}", ui))
+        await handle_evolve(_ctx(tmp_path, f"show-eval {proposal.id}", ui))
         promote_ctx = _ctx(tmp_path, f"promote {proposal.id}", ui)
         promote_ctx.config = {"skill_loader": loader}
         await handle_evolve(promote_ctx)
@@ -490,6 +655,8 @@ class TestEvolveCommand:
         skill_path = tmp_path / ".mewcode" / "skills" / "review-to-skill" / "SKILL.md"
         assert skill_path.exists()
         assert parse_skill_file(skill_path).name == "review-to-skill"
+        assert any("Execution eval passed" in msg for msg in ui.messages)
+        assert any("Skill Execution Eval Report" in msg for msg in ui.messages)
         loader.reload.assert_called_once()
 
     async def test_apply_valid_skill_proposal_tells_user_to_promote(
@@ -611,5 +778,7 @@ class TestEvolveCommand:
         message = "\n".join(ui.messages)
         assert "add-eval-case" in message
         assert "/evolve eval" in message
+        assert "/evolve run-eval" in message
+        assert "/evolve show-eval" in message
         assert "/evolve promote" in message
         assert "then apply" not in message

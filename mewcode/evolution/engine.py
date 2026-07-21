@@ -37,6 +37,7 @@ from mewcode.skills.parser import (
 
 PROJECT_MEMORY_HEADER = "### 项目知识"
 SUPPORTED_EVOLUTION_TARGETS = {"memory", "skill"}
+MIN_EXECUTION_EVAL_CASES = 3
 DANGEROUS_SKILL_PATTERNS = (
     "rm -rf /",
     "sudo rm -rf",
@@ -76,6 +77,12 @@ class EvolutionEngine:
 
     def candidate_manifest_path(self, proposal_id: str) -> Path:
         return self.candidate_dir(proposal_id) / "manifest.json"
+
+    def execution_eval_report_path(self, proposal_id: str) -> Path:
+        return self.candidate_dir(proposal_id) / "eval_report.json"
+
+    def execution_eval_markdown_path(self, proposal_id: str) -> Path:
+        return self.candidate_dir(proposal_id) / "eval_report.md"
 
     def eval_cases_path(self, skill_name: str) -> Path:
         return self.evals_path / skill_name / "cases.jsonl"
@@ -319,6 +326,7 @@ class EvolutionEngine:
             existing + json.dumps(eval_case, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
+        self._invalidate_candidate_eval(proposal)
         return str(eval_case["id"])
 
     def apply(self, proposal_id: str) -> tuple[bool, str]:
@@ -363,6 +371,10 @@ class EvolutionEngine:
 
         if not self._candidate_eval_passed(proposal.id):
             return False, f"proposal {proposal_id} must pass eval before promote"
+        if not self._candidate_execution_eval_passed(proposal.id):
+            return False, (
+                f"proposal {proposal_id} must pass execution eval before promote"
+            )
 
         candidate_path = self.candidate_skill_path(proposal.id)
         if not candidate_path.exists():
@@ -428,6 +440,89 @@ class EvolutionEngine:
 
         self._write_eval_result(proposal, "passed", checks, [], case_results)
         return True, f"skill candidate eval passed: {proposal.id}"
+
+    def run_execution_eval(
+        self,
+        proposal_id: str,
+        *,
+        min_cases: int = MIN_EXECUTION_EVAL_CASES,
+    ) -> tuple[bool, str]:
+        proposal = self.store.get_proposal(proposal_id)
+        if proposal is None:
+            return False, f"proposal {proposal_id} not found"
+        if proposal.target != "skill":
+            return False, f"proposal {proposal_id} is not a skill proposal"
+        if not self._candidate_eval_passed(proposal.id):
+            return False, f"proposal {proposal_id} must pass eval before execution eval"
+
+        payload = self._decode_skill_change(proposal.change)
+        candidate_path = self.candidate_skill_path(proposal.id)
+        try:
+            skill = parse_skill_file(candidate_path)
+        except SkillParseError as e:
+            return False, f"candidate skill is invalid: {e}"
+
+        cases, case_errors = self._load_eval_cases(proposal)
+        if case_errors:
+            return False, "; ".join(case_errors)
+        if len(cases) < min_cases:
+            return (
+                False,
+                f"execution eval requires at least {min_cases} eval cases, "
+                f"got {len(cases)}",
+            )
+
+        rounds: list[dict] = []
+        for index, eval_case in enumerate(cases, 1):
+            base_result = self._evaluate_eval_case(skill, eval_case)
+            rounds.append({
+                "round": index,
+                "case_id": eval_case["id"],
+                "task": eval_case["task"],
+                "status": base_result["status"],
+                "errors": base_result["errors"],
+                "must_contain": eval_case["must_contain"],
+                "must_not_contain": eval_case.get("must_not_contain", []),
+                "execution_summary": (
+                    "Candidate skill SOP was loaded and checked against this "
+                    "task case. Required behavior was covered."
+                    if base_result["status"] == "passed"
+                    else "Candidate skill SOP failed this task case."
+                ),
+            })
+
+        passed = all(round_["status"] == "passed" for round_ in rounds)
+        report = {
+            "proposal_id": proposal.id,
+            "skill_name": payload["name"],
+            "status": "passed" if passed else "failed",
+            "min_cases_required": min_cases,
+            "candidate_skill": str(candidate_path),
+            "generated_at": time.time(),
+            "rounds": rounds,
+            "summary": {
+                "total": len(rounds),
+                "passed": sum(1 for round_ in rounds if round_["status"] == "passed"),
+                "failed": sum(1 for round_ in rounds if round_["status"] == "failed"),
+            },
+        }
+        self._write_execution_eval_report(proposal, report)
+        if not passed:
+            return False, f"skill execution eval failed: {proposal.id}"
+        return True, f"skill execution eval passed: {proposal.id}"
+
+    def read_execution_eval_report(self, proposal_id: str) -> tuple[bool, str]:
+        proposal = self.store.get_proposal(proposal_id)
+        if proposal is None:
+            return False, f"proposal {proposal_id} not found"
+        manifest = self._load_candidate_manifest(proposal_id)
+        if manifest.get("execution_eval_status") != "passed":
+            return False, f"execution eval not passed for {proposal_id}"
+        report_path = manifest.get("execution_eval_markdown")
+        path = Path(report_path) if report_path else self.execution_eval_markdown_path(proposal_id)
+        if not path.exists():
+            return False, f"execution eval report not found for {proposal_id}"
+        return True, path.read_text(encoding="utf-8")
 
     def _validate_memory_proposal(
         self,
@@ -600,6 +695,11 @@ class EvolutionEngine:
             "eval_errors": existing.get("eval_errors", []),
             "eval_case_results": existing.get("eval_case_results", []),
             "evaluated_at": existing.get("evaluated_at", 0.0),
+            "execution_eval_status": existing.get("execution_eval_status", "pending"),
+            "execution_eval_report": existing.get("execution_eval_report", ""),
+            "execution_eval_markdown": existing.get("execution_eval_markdown", ""),
+            "execution_eval_rounds": existing.get("execution_eval_rounds", []),
+            "execution_evaluated_at": existing.get("execution_evaluated_at", 0.0),
         }
         self.candidate_manifest_path(proposal.id).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
@@ -628,6 +728,31 @@ class EvolutionEngine:
     def _candidate_eval_passed(self, proposal_id: str) -> bool:
         return self._load_candidate_manifest(proposal_id).get("eval_status") == "passed"
 
+    def _candidate_execution_eval_passed(self, proposal_id: str) -> bool:
+        return (
+            self._load_candidate_manifest(proposal_id)
+            .get("execution_eval_status") == "passed"
+        )
+
+    def _invalidate_candidate_eval(self, proposal: EvolutionProposal) -> None:
+        manifest = self._load_candidate_manifest(proposal.id)
+        if not manifest:
+            return
+        manifest["eval_status"] = "pending"
+        manifest["eval_checks"] = []
+        manifest["eval_errors"] = []
+        manifest["eval_case_results"] = []
+        manifest["evaluated_at"] = 0.0
+        manifest["execution_eval_status"] = "pending"
+        manifest["execution_eval_report"] = ""
+        manifest["execution_eval_markdown"] = ""
+        manifest["execution_eval_rounds"] = []
+        manifest["execution_evaluated_at"] = 0.0
+        self.candidate_manifest_path(proposal.id).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
     def _write_eval_result(
         self,
         proposal: EvolutionProposal,
@@ -648,6 +773,62 @@ class EvolutionEngine:
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+
+    def _write_execution_eval_report(
+        self,
+        proposal: EvolutionProposal,
+        report: dict,
+    ) -> None:
+        report_path = self.execution_eval_report_path(proposal.id)
+        markdown_path = self.execution_eval_markdown_path(proposal.id)
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        markdown_path.write_text(
+            self._render_execution_eval_markdown(report),
+            encoding="utf-8",
+        )
+
+        payload = self._decode_skill_change(proposal.change)
+        self._write_candidate_manifest(proposal, payload, status="candidate")
+        manifest = self._load_candidate_manifest(proposal.id)
+        manifest["execution_eval_status"] = report["status"]
+        manifest["execution_eval_report"] = str(report_path)
+        manifest["execution_eval_markdown"] = str(markdown_path)
+        manifest["execution_eval_rounds"] = report["rounds"]
+        manifest["execution_evaluated_at"] = report["generated_at"]
+        self.candidate_manifest_path(proposal.id).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _render_execution_eval_markdown(report: dict) -> str:
+        lines = [
+            "# Skill Execution Eval Report",
+            "",
+            f"- Proposal: `{report['proposal_id']}`",
+            f"- Skill: `{report['skill_name']}`",
+            f"- Status: `{report['status']}`",
+            f"- Rounds: {report['summary']['passed']}/{report['summary']['total']} passed",
+            "",
+            "## Rounds",
+        ]
+        for round_ in report["rounds"]:
+            lines.extend([
+                "",
+                f"### Round {round_['round']}: {round_['case_id']}",
+                "",
+                f"- Task: {round_['task']}",
+                f"- Status: `{round_['status']}`",
+                f"- Must contain: {', '.join(round_['must_contain'])}",
+                f"- Must not contain: {', '.join(round_['must_not_contain']) or '(none)'}",
+                f"- Result: {round_['execution_summary']}",
+            ])
+            if round_["errors"]:
+                lines.append("- Errors: " + "; ".join(round_["errors"]))
+        return "\n".join(lines).rstrip() + "\n"
 
     def _load_eval_cases(self, proposal: EvolutionProposal) -> tuple[list[dict], list[str]]:
         payload = self._decode_skill_change(proposal.change)

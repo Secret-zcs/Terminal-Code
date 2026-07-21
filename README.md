@@ -181,6 +181,8 @@ mewcode --mode default
 | `/evolve apply <id>` | 应用已批准的 memory proposal |
 | `/evolve add-eval-case <id> :: <task> :: <must_contain_csv>` | 为 candidate skill 追加任务评估用例 |
 | `/evolve eval <id>` | 评估 candidate skill 是否可启用 |
+| `/evolve run-eval <id>` | 对 candidate skill 执行至少三轮任务评估并生成报告 |
+| `/evolve show-eval <id>` | 展示 candidate skill 的执行评估报告 |
 | `/evolve promote <id>` | 将已批准的 candidate skill 提升为正式 skill |
 | `/learn <name> :: <description> :: <body>` | 将可复用流程蒸馏为 skill 提案；同名项目 skill 存在时优先 patch |
 | `/skill list` | 查看 skills |
@@ -227,15 +229,16 @@ mewcode --mode default
 
 ```text
 memory: observe -> propose -> validate -> approve -> apply
-skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> approve -> promote
+skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval -> show-eval -> approve -> promote
 ```
 
 当前支持两类受控落地：
 
 - approved `memory` proposal 自动追加到 `.mewcode/memories.md`。
 - skill proposal 先写入 `.mewcode/evolution/candidates/<proposal_id>/SKILL.md`，不会立即进入正式 skill loader。
-- candidate skill 必须先记录至少一个 eval case，并通过 `/evolve eval <proposal_id>`，再经 approve/promote 写入 `.mewcode/skills/<name>/SKILL.md`。
+- candidate skill 必须先记录 eval case，通过 `/evolve eval <proposal_id>`，再通过 `/evolve run-eval <proposal_id>` 至少三轮任务评估，并用 `/evolve show-eval <proposal_id>` 向用户展示报告后，才能经 approve/promote 写入 `.mewcode/skills/<name>/SKILL.md`。
 - eval case 写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`，用于检查候选 SOP 是否覆盖任务所需关键步骤、且不包含明确禁止的错误策略。
+- execution eval 报告写入 `.mewcode/evolution/candidates/<proposal_id>/eval_report.json` 和 `eval_report.md`，并同步记录到 candidate manifest。
 - `/learn` 是 Hermes 风格显式学习入口：同名项目 skill 存在时创建 `patch` 提案，否则创建 `create` 提案，避免重复 skill 膨胀。
 - `/learn` 会先记录 learn evidence，再把 evidence id 关联到生成的 proposal。
 
@@ -251,6 +254,8 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> approve -
 /learn <name> :: <description> :: <skill body>
 /evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]
 /evolve eval <proposal_id>       # parse + eval case gate
+/evolve run-eval <proposal_id>   # at least 3 execution eval rounds + report
+/evolve show-eval <proposal_id>  # user-visible eval report
 /evolve approve <proposal_id>
 /evolve apply <proposal_id>      # memory only
 /evolve promote <proposal_id>    # skill candidate only
@@ -263,6 +268,7 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> approve -
 - `docs/hermes-evolution-rewind-review.md`
 - `docs/hermes-skill-evolution-implementation.md`
 - `docs/verified-skill-evolution-recap-zh.md`
+- `docs/skill-execution-eval-gate-recap-zh.md`
 
 ---
 
@@ -286,8 +292,8 @@ PYTHONPATH=. pytest tests/test_commands.py -q
 最近一次相关验证：
 
 ```text
-PYTHONPATH=. pytest tests/test_evolution.py tests/test_checkpoint.py tests/test_commands.py -q
-84 passed
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
+203 passed
 ```
 
 ---
@@ -303,6 +309,7 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_checkpoint.py tests/test_
 | `docs/rewind-feature-design.md` | Rewind 设计文档 |
 | `docs/hermes-evolution-rewind-review.md` | Hermes 自进化与 Rewind 复盘 |
 | `docs/self-evolution-development-progress-recap-zh.md` | 当前自进化开发进度总复盘 |
+| `docs/skill-execution-eval-gate-recap-zh.md` | 候选 skill 多轮执行评估门禁复盘 |
 | `docs/agent-interview-qa.md` | Agent 项目问答材料 |
 
 ---

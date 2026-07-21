@@ -12,6 +12,8 @@ Usage:
     /evolve apply <proposal_id>
     /evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]
     /evolve eval <proposal_id>
+    /evolve run-eval <proposal_id>
+    /evolve show-eval <proposal_id>
     /evolve promote <proposal_id>
 """
 
@@ -68,6 +70,10 @@ async def handle_evolve(ctx: CommandContext) -> None:
         _handle_add_eval_case(ctx, engine, rest)
     elif subcmd == "eval":
         _handle_eval(ctx, engine, rest)
+    elif subcmd == "run-eval":
+        _handle_run_eval(ctx, engine, rest)
+    elif subcmd == "show-eval":
+        _handle_show_eval(ctx, engine, rest)
     elif subcmd == "promote":
         _handle_promote(ctx, engine, rest)
     else:
@@ -89,12 +95,15 @@ def _show_help(ctx: CommandContext) -> None:
             "  /evolve apply <proposal_id>",
             "  /evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv>",
             "  /evolve eval <proposal_id>",
+            "  /evolve run-eval <proposal_id>",
+            "  /evolve show-eval <proposal_id>",
             "  /evolve promote <proposal_id>",
             "",
             "Approved memory proposals write .mewcode/memories.md via apply.",
             "Skill proposals first write candidates under .mewcode/evolution/candidates.",
             "Skill eval cases live under .mewcode/evolution/evals/<skill>/cases.jsonl.",
-            "After eval and review, promote writes the candidate into .mewcode/skills.",
+            "After eval, run-eval, show-eval, and review, promote writes",
+            "the candidate into .mewcode/skills.",
             "Skill learning should patch an existing project skill before creating",
             "a duplicate; /learn applies that priority automatically.",
             "Runtime evolution is intentionally limited to memory and skill.",
@@ -344,6 +353,34 @@ def _handle_eval(ctx: CommandContext, engine: EvolutionEngine, proposal_id: str)
     ctx.ui.add_system_message(f"Evolution eval passed: {message}")
 
 
+def _handle_run_eval(
+    ctx: CommandContext, engine: EvolutionEngine, proposal_id: str
+) -> None:
+    if not proposal_id:
+        ctx.ui.add_system_message("Usage: /evolve run-eval <proposal_id>")
+        return
+
+    ok, message = engine.run_execution_eval(proposal_id)
+    if not ok:
+        ctx.ui.add_system_message(f"Evolution execution eval failed: {message}")
+        return
+    ctx.ui.add_system_message(f"Execution eval passed: {message}")
+
+
+def _handle_show_eval(
+    ctx: CommandContext, engine: EvolutionEngine, proposal_id: str
+) -> None:
+    if not proposal_id:
+        ctx.ui.add_system_message("Usage: /evolve show-eval <proposal_id>")
+        return
+
+    ok, message = engine.read_execution_eval_report(proposal_id)
+    if not ok:
+        ctx.ui.add_system_message(f"Evolution execution eval report failed: {message}")
+        return
+    ctx.ui.add_system_message(message)
+
+
 def _handle_add_eval_case(
     ctx: CommandContext, engine: EvolutionEngine, rest: str
 ) -> None:
@@ -426,7 +463,8 @@ EVOLVE_COMMAND = Command(
     handler=handle_evolve,
     usage=(
         "/evolve [observe|propose|propose-skill|propose-skill-patch|"
-        "list|show|approve|reject|apply|add-eval-case|eval|promote]"
+        "list|show|approve|reject|apply|add-eval-case|eval|run-eval|"
+        "show-eval|promote]"
     ),
     aliases=["evolution"],
 )

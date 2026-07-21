@@ -1,8 +1,8 @@
 """Hermes-style /learn command.
 
 The command distills a reusable workflow into a skill proposal. It never writes
-the skill directly; users still add eval cases, evaluate, approve, and promote
-the proposal via /evolve.
+the skill directly; users still add eval cases, evaluate, run execution eval,
+review the report, approve, and promote the proposal via /evolve.
 """
 
 from __future__ import annotations
@@ -79,7 +79,10 @@ async def handle_learn(ctx: CommandContext) -> None:
     ctx.ui.add_system_message(
         f"Learning proposal created: {proposal.id} [{action}/{proposal.status}]."
         f"{suffix} Add an eval case with /evolve add-eval-case {proposal.id}, "
-        f"run /evolve eval {proposal.id}, approve with /evolve approve {proposal.id}, "
+        f"run /evolve eval {proposal.id}, "
+        f"run execution eval with /evolve run-eval {proposal.id}, "
+        f"review results with /evolve show-eval {proposal.id}, "
+        f"approve with /evolve approve {proposal.id}, "
         f"then promote with /evolve promote {proposal.id}."
     )
 
@@ -92,8 +95,9 @@ def _show_help(ctx: CommandContext) -> None:
             "",
             "If a project skill with the same name exists, /learn creates a patch",
             "proposal. Otherwise it creates a new skill proposal. Both paths still",
-            "require add-eval-case, /evolve eval, /evolve approve, and",
-            "/evolve promote before writing a formal project skill.",
+            "require add-eval-case, /evolve eval, /evolve run-eval,",
+            "/evolve show-eval, /evolve approve, and /evolve promote before",
+            "writing a formal project skill.",
         ])
     )
 

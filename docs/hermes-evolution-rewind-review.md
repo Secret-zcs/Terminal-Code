@@ -21,7 +21,7 @@
 
 ```text
 memory: observe -> propose -> validate -> approve -> apply
-skill:  learn/propose -> candidate -> validate -> eval -> approve -> promote
+skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval -> show-eval -> approve -> promote
 ```
 
 并用 Claude Code 风格 rewind/checkpoint 机制作为安全保护：
@@ -34,7 +34,7 @@ skill:  learn/propose -> candidate -> validate -> eval -> approve -> promote
   -> 如果结果不好，可用 /rewind 回退
 ```
 
-当前可自动落地的目标是 `memory` 和 `skill`，但路径不同：memory 经 `/evolve apply` 写入 `.mewcode/memories.md`；skill 先写入 candidate，并且至少记录一个任务 eval case，只有 `/evolve eval` 通过并 `/evolve promote` 后才进入 `.mewcode/skills/<name>/SKILL.md`。
+当前可自动落地的目标是 `memory` 和 `skill`，但路径不同：memory 经 `/evolve apply` 写入 `.mewcode/memories.md`；skill 先写入 candidate，并且至少记录三个任务 eval case，只有 `/evolve eval`、`/evolve run-eval` 通过且用户通过 `/evolve show-eval` 看过报告后，才能经 approve/promote 进入 `.mewcode/skills/<name>/SKILL.md`。
 
 这个边界是有意设计的：Hermes 风格运行时自进化应沉淀外部、可审计的行为资产，而不是直接修改工具实现、系统提示词或代码。
 
@@ -300,7 +300,7 @@ reject(proposal_id)
 apply(proposal_id)
 ```
 
-当前支持 memory 和 skill：
+当前 `apply()` 只支持 memory；skill 已从 direct apply 改为 candidate/promote：
 
 ```text
 approved memory proposal
@@ -308,8 +308,8 @@ approved memory proposal
   -> proposal.status = applied
 
 approved skill proposal
-  -> write .mewcode/skills/<name>/SKILL.md
-  -> proposal.status = applied
+  -> apply() 返回 promote 提示
+  -> 必须走 eval -> run-eval -> show-eval -> approve -> promote
 ```
 
 写入规则：
@@ -345,6 +345,11 @@ mewcode/commands/handlers/__init__.py
 /evolve approve <proposal_id>
 /evolve reject <proposal_id>
 /evolve apply <proposal_id>
+/evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]
+/evolve eval <proposal_id>
+/evolve run-eval <proposal_id>
+/evolve show-eval <proposal_id>
+/evolve promote <proposal_id>
 ```
 
 ### 4.1 使用示例
@@ -560,7 +565,7 @@ docker rm
 
 ```text
 memory -> approved 后可 apply
-skill  -> candidate + eval passed + approved 后可 promote
+skill  -> candidate + eval passed + execution eval report passed + approved 后可 promote
 code/tool/prompt -> 不属于 /evolve target
 ```
 
@@ -818,7 +823,7 @@ skill verifier
 
 ## 12. 与 Hermes 自进化的差距
 
-当前实现是 Hermes 风格的安全闭环，并已支持将 approved skill proposal 落地为项目级 `.mewcode/skills/<name>/SKILL.md`。2026-07-18 后，项目进一步补齐了 `/learn` 显式学习入口和已有项目 skill 的 patch 路径。
+当前实现是 Hermes 风格的安全闭环，并已支持将 approved 且通过 eval/execution eval 的 skill candidate 落地为项目级 `.mewcode/skills/<name>/SKILL.md`。2026-07-18 后，项目进一步补齐了 `/learn` 显式学习入口和已有项目 skill 的 patch 路径；2026-07-21 后，promote 前还必须展示多轮 execution eval 报告。
 
 差距：
 
@@ -827,9 +832,9 @@ skill verifier
 | evidence 来源 | 手动 observe | 自动从 trace、tests、rewind、feedback 提取 |
 | mutation | 手动 propose | 自动生成候选改进 |
 | selection | 人工 approve | 指标驱动排序 + 人工确认 |
-| validation | 简单规则 | 针对 memory/skill 的 verifier 和回归测试 |
-| application | 写 memory；创建或 patch 项目级 skill；支持 `/learn` 蒸馏 | skill references/templates/scripts 与回放验证 |
-| evaluation | 单元测试 | 长期任务 benchmark 和回放评估 |
+| validation | 简单规则 + eval case + execution eval report | 针对 memory/skill 的 verifier 和回归测试 |
+| application | 写 memory；candidate skill 经 eval/run-eval/show-eval/approve/promote 后创建或 patch 项目级 skill；支持 `/learn` 蒸馏 | skill references/templates/scripts 与回放验证 |
+| evaluation | 单元测试 + 确定性多轮报告 | 长期任务 benchmark 和真实回放评估 |
 
 下一步不应直接跳到自动改代码，而应先补：
 
@@ -849,6 +854,7 @@ skill verifier
   -> 无合适 skill 时创建新 skill
   -> 写入 candidate
   -> eval gate
+  -> execution eval report gate
   -> approve 后 promote
   -> reload
 ```
@@ -959,3 +965,21 @@ skill verifier
 - 扩展回归记录：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，198 个测试成功。
 - 格式检查记录：`git diff --check` 无输出。
 - 全量测试记录：`PYTHONPATH=. pytest -q -x` 停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次 eval case gate 修改无直接依赖。
+
+### 2026-07-21 补充：Skill Execution Eval Report Gate
+
+- 修改 `mewcode/evolution/engine.py`：新增 `run_execution_eval()`，要求 candidate skill 至少有 3 个 eval case，并逐轮生成执行评估结果。
+- 修改 `mewcode/evolution/engine.py`：新增 `read_execution_eval_report()`、`execution_eval_report_path()` 和 `execution_eval_markdown_path()`。
+- 修改 `mewcode/evolution/engine.py`：写入 `.mewcode/evolution/candidates/<proposal_id>/eval_report.json` 和 `eval_report.md`，并同步 `execution_eval_status`、报告路径、轮次结果和评估时间到 manifest。
+- 修改 `mewcode/evolution/engine.py`：`promote()` 新增 execution eval 门禁，只有 `execution_eval_status == "passed"` 才能启用正式 skill。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve run-eval <proposal_id>` 和 `/evolve show-eval <proposal_id>`。
+- 修改 `mewcode/commands/handlers/learn.py`：创建提示和 help 指向 `run-eval/show-eval`，要求用户先看报告再 approve/promote。
+- 修改 `tests/test_evolution.py`：新增少于三轮阻断、报告写入、新增 eval case 失效旧报告、promote 未 execution eval 拒绝、execution eval 后 promote 成功、命令层报告展示测试。
+- 修改 `README.md`、`docs/hermes-skill-evolution-implementation.md`、`docs/verified-skill-evolution-recap-zh.md`、`docs/self-evolution-development-progress-recap-zh.md` 和本文档：同步记录 execution eval gate。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 得到 1 个预期失败，覆盖命令层缺少 `run-eval/show-eval` 导致 promote 前门禁不通过。
+- 追加 `/learn` 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_command_points_to_eval_promote_flow -q` 得到 1 个预期失败，覆盖 `/learn` 未提示 `run-eval/show-eval`。
+- 绿灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，29 个测试成功。
+- 扩展回归记录：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，203 个测试成功。
+- 格式检查记录：`git diff --check` 无输出。
+- 全量测试记录：`PYTHONPATH=. pytest -q -x` 停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次 execution eval gate 修改无直接依赖。
+- 限制说明：当前 execution eval 是确定性 SOP 覆盖检查，不是真实模型沙盒执行；它用于提交应用前展示多轮测试效果，后续仍应补受限 fork agent 任务回放。
