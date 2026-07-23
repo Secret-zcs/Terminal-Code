@@ -239,6 +239,7 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 - candidate skill 必须先记录 eval case，通过 `/evolve eval <proposal_id>`，再通过 `/evolve run-eval <proposal_id>` 至少三轮任务评估，并用 `/evolve show-eval <proposal_id>` 向用户展示报告后，才能经 approve/promote 写入 `.mewcode/skills/<name>/SKILL.md`。
 - eval case 写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`，用于检查候选 SOP 是否覆盖任务所需关键步骤、且不包含明确禁止的错误策略。
 - execution eval 报告写入 `.mewcode/evolution/candidates/<proposal_id>/eval_report.json` 和 `eval_report.md`，并同步记录到 candidate manifest。
+- execution eval 每轮都会在 `.mewcode/evolution/candidates/<proposal_id>/execution_sandbox/` 下生成隔离产物，包括 `task.md`、候选 `SKILL.md` 快照、`rendered_prompt.md` 和 `result.json`。
 - `/learn` 是 Hermes 风格显式学习入口：同名项目 skill 存在时创建 `patch` 提案，否则创建 `create` 提案，避免重复 skill 膨胀。
 - `/learn` 会先记录 learn evidence，再把 evidence id 关联到生成的 proposal。
 
@@ -293,7 +294,7 @@ PYTHONPATH=. pytest tests/test_commands.py -q
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-203 passed
+204 passed
 ```
 
 ---

@@ -11,6 +11,7 @@ Runtime self-evolution intentionally excludes code, prompt, and tool targets.
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -83,6 +84,9 @@ class EvolutionEngine:
 
     def execution_eval_markdown_path(self, proposal_id: str) -> Path:
         return self.candidate_dir(proposal_id) / "eval_report.md"
+
+    def execution_eval_sandbox_path(self, proposal_id: str) -> Path:
+        return self.candidate_dir(proposal_id) / "execution_sandbox"
 
     def eval_cases_path(self, skill_name: str) -> Path:
         return self.evals_path / skill_name / "cases.jsonl"
@@ -472,10 +476,13 @@ class EvolutionEngine:
                 f"got {len(cases)}",
             )
 
+        sandbox_root = self._reset_execution_eval_sandbox(proposal.id)
         rounds: list[dict] = []
         for index, eval_case in enumerate(cases, 1):
             base_result = self._evaluate_eval_case(skill, eval_case)
-            rounds.append({
+            case_slug = self._artifact_slug(str(eval_case["id"]))
+            round_dir = sandbox_root / f"round_{index:02d}_{case_slug}"
+            round_record = {
                 "round": index,
                 "case_id": eval_case["id"],
                 "task": eval_case["task"],
@@ -483,21 +490,38 @@ class EvolutionEngine:
                 "errors": base_result["errors"],
                 "must_contain": eval_case["must_contain"],
                 "must_not_contain": eval_case.get("must_not_contain", []),
+                "sandbox_dir": str(round_dir),
+                "artifacts": {
+                    "task": str(round_dir / "task.md"),
+                    "skill": str(round_dir / "SKILL.md"),
+                    "rendered_prompt": str(round_dir / "rendered_prompt.md"),
+                    "result": str(round_dir / "result.json"),
+                },
                 "execution_summary": (
                     "Candidate skill SOP was loaded and checked against this "
                     "task case. Required behavior was covered."
                     if base_result["status"] == "passed"
                     else "Candidate skill SOP failed this task case."
                 ),
-            })
+            }
+            self._write_execution_round_artifacts(
+                round_dir,
+                candidate_path,
+                skill,
+                eval_case,
+                round_record,
+            )
+            rounds.append(round_record)
 
         passed = all(round_["status"] == "passed" for round_ in rounds)
         report = {
             "proposal_id": proposal.id,
             "skill_name": payload["name"],
             "status": "passed" if passed else "failed",
+            "runner": "sandbox_deterministic",
             "min_cases_required": min_cases,
             "candidate_skill": str(candidate_path),
+            "sandbox_root": str(sandbox_root),
             "generated_at": time.time(),
             "rounds": rounds,
             "summary": {
@@ -803,6 +827,79 @@ class EvolutionEngine:
             encoding="utf-8",
         )
 
+    def _reset_execution_eval_sandbox(self, proposal_id: str) -> Path:
+        sandbox_root = self.execution_eval_sandbox_path(proposal_id)
+        candidate_root = self.candidate_dir(proposal_id).resolve()
+        resolved = sandbox_root.resolve()
+        if resolved != candidate_root and not resolved.is_relative_to(candidate_root):
+            raise ValueError("execution eval sandbox must be under candidate dir")
+        if sandbox_root.exists():
+            shutil.rmtree(sandbox_root)
+        sandbox_root.mkdir(parents=True, exist_ok=True)
+        return sandbox_root
+
+    def _write_execution_round_artifacts(
+        self,
+        round_dir: Path,
+        candidate_path: Path,
+        skill,
+        eval_case: dict,
+        round_record: dict,
+    ) -> None:
+        sandbox_root = round_dir.parent.resolve()
+        resolved = round_dir.resolve()
+        if resolved != sandbox_root and not resolved.is_relative_to(sandbox_root):
+            raise ValueError("execution eval round dir must be under sandbox root")
+        round_dir.mkdir(parents=True, exist_ok=False)
+        rendered = substitute_arguments(skill.prompt_body, eval_case["task"])
+        task_lines = [
+            f"# Eval Task {eval_case['id']}",
+            "",
+            eval_case["task"],
+            "",
+            "## Must contain",
+            "",
+            *(f"- {term}" for term in eval_case["must_contain"]),
+            "",
+            "## Must not contain",
+            "",
+            *(f"- {term}" for term in eval_case.get("must_not_contain", [])),
+        ]
+        (round_dir / "task.md").write_text(
+            "\n".join(task_lines).rstrip() + "\n",
+            encoding="utf-8",
+        )
+        (round_dir / "SKILL.md").write_text(
+            candidate_path.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        (round_dir / "rendered_prompt.md").write_text(
+            rendered.rstrip() + "\n",
+            encoding="utf-8",
+        )
+        result = {
+            "case_id": round_record["case_id"],
+            "status": round_record["status"],
+            "errors": round_record["errors"],
+            "execution_summary": round_record["execution_summary"],
+            "checks": {
+                "must_contain": round_record["must_contain"],
+                "must_not_contain": round_record["must_not_contain"],
+            },
+        }
+        (round_dir / "result.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _artifact_slug(value: str) -> str:
+        slug = "".join(
+            char if char.isalnum() or char in {"-", "_"} else "_"
+            for char in value.strip()
+        ).strip("_")
+        return slug or "case"
+
     @staticmethod
     def _render_execution_eval_markdown(report: dict) -> str:
         lines = [
@@ -811,6 +908,8 @@ class EvolutionEngine:
             f"- Proposal: `{report['proposal_id']}`",
             f"- Skill: `{report['skill_name']}`",
             f"- Status: `{report['status']}`",
+            f"- Runner: `{report.get('runner', 'deterministic')}`",
+            f"- Sandbox: `{report.get('sandbox_root', '(none)')}`",
             f"- Rounds: {report['summary']['passed']}/{report['summary']['total']} passed",
             "",
             "## Rounds",
@@ -822,6 +921,7 @@ class EvolutionEngine:
                 "",
                 f"- Task: {round_['task']}",
                 f"- Status: `{round_['status']}`",
+                f"- Sandbox: `{round_.get('sandbox_dir', '(none)')}`",
                 f"- Must contain: {', '.join(round_['must_contain'])}",
                 f"- Must not contain: {', '.join(round_['must_not_contain']) or '(none)'}",
                 f"- Result: {round_['execution_summary']}",

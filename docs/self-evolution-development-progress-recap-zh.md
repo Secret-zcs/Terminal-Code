@@ -203,14 +203,14 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_comma
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-29 passed
+30 passed
 ```
 
 扩展回归记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-203 passed
+204 passed
 ```
 
 格式检查记录：
@@ -362,6 +362,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 - eval 必须至少有一个 eval case。
 - promote 必须先 execution eval passed。
 - execution eval 至少要求 3 个 eval case，并生成用户可见报告。
+- execution eval 在 candidate 目录内生成 deterministic sandbox artifacts，包含任务、候选 skill 快照、渲染 SOP 和结构化结果。
 - eval case 路径校验 skill name，避免路径逃逸。
 - 危险命令片段会被 validate 阻断。
 - 宽泛词如“永远/所有任务/必须/禁止”会产生 warning，提示人工 review scope。
@@ -376,6 +377,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 - 没有 `/evolve quarantine <skill-name>` 降级/隔离已启用 skill。
 - 没有 `/evolve preview <proposal_id>` 展示 apply/promote 前 diff。
 - 没有自动从失败任务或 rewind 事件反推 skill 需要 patch。
+- 没有受限 fork agent 真实执行 eval case；当前 sandbox runner 仍是 deterministic checker。
 
 ## 6. 与 Hermes 原版的差距
 
@@ -384,7 +386,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 | 触发方式 | 手动 `/learn`、`/evolve propose-skill*` | 回合结束 background review 自动触发 |
 | 生成位置 | 先写 candidate | 可由后台 review patch/create skill |
 | 启用方式 | eval case + eval + run-eval + show-eval + approve + promote | 更偏持续学习和自动沉淀 |
-| 验证方式 | parse + deterministic eval case + 3 轮执行评估报告 | skill verifier、reload、任务回放 |
+| 验证方式 | parse + deterministic eval case + 3 轮 sandbox artifact 报告 | skill verifier、reload、任务回放 |
 | 隔离方式 | 主命令流内受控执行 | fork review agent 隔离 |
 | 风险控制 | 候选区、manifest、checkpoint、手动 promote | 工具白名单、curator review、skill 管理 |
 | 反馈闭环 | evidence/proposal 记录 | 更完整的会话复盘、skill usage 和后续 patch |
@@ -406,6 +408,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 - eval case 通过/失败。
 - execution eval 少于三轮阻断。
 - execution eval 报告写入 JSON/Markdown。
+- execution eval sandbox artifacts 落地。
 - 新增 eval case 会失效既有 eval/execution eval，防止旧报告被复用。
 - promote 必须 execution eval passed。
 - 无效 skill name 不允许写 eval case。
@@ -424,7 +427,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-29 passed
+30 passed
 ```
 
 ## 8. 当前已知全量测试问题

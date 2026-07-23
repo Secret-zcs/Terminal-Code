@@ -194,7 +194,7 @@ skill proposal 创建后只会写入 `.mewcode/evolution/candidates/<proposal_id
 
 ## 4. 与完整 Hermes 的差距
 
-当前实现已经覆盖 Hermes 运行时自进化的安全核心：学习入口、skill create、skill patch、candidate 隔离、验证、eval case、eval、execution eval report、审批、promote、checkpoint、reload。与 Hermes 原版的差距主要在后台 fork review 和真实沙盒任务回放 eval 的自动化程度。
+当前实现已经覆盖 Hermes 运行时自进化的安全核心：学习入口、skill create、skill patch、candidate 隔离、验证、eval case、eval、execution eval report、sandbox artifacts、审批、promote、checkpoint、reload。与 Hermes 原版的差距主要在后台 fork review 和真实沙盒任务回放 eval 的自动化程度。
 
 | 能力 | 当前项目 | Hermes 更完整方向 |
 |---|---|---|
@@ -202,7 +202,7 @@ skill proposal 创建后只会写入 `.mewcode/evolution/candidates/<proposal_id
 | 来源 | 用户提供正文或复盘摘要 | 从会话、文件、URL、trace 自动蒸馏 |
 | 更新策略 | 同名项目 skill 优先 patch，否则 create | 优先 patch 已加载 skill，再 patch umbrella skill，最后创建新 skill |
 | 隔离 | 主命令流创建 candidate，eval/run-eval/show-eval/promote 门禁 | fork 隔离 review agent，限制工具白名单 |
-| 验证 | 静态格式、冲突校验、eval case 覆盖和三轮 execution eval 报告 | skill verifier + reload + 沙盒任务回放评估 |
+| 验证 | 静态格式、冲突校验、eval case 覆盖和三轮 sandbox artifact 报告 | skill verifier + reload + 沙盒任务回放评估 |
 
 ## 5. 修改清单
 
@@ -516,21 +516,21 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_comma
 - 修改 `mewcode/evolution/engine.py`：`promote()` 要求 `execution_eval_status == "passed"`。
 - 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve run-eval <proposal_id>` 和 `/evolve show-eval <proposal_id>`。
 - 修改 `mewcode/commands/handlers/learn.py`：提示用户执行 `run-eval/show-eval` 后再 approve/promote。
-- 修改 `tests/test_evolution.py`：新增三轮门禁、报告写入、新增 eval case 失效旧报告、命令层报告展示和 promote execution eval 门禁测试。
+- 修改 `tests/test_evolution.py`：新增三轮门禁、报告写入、sandbox artifacts 落地、新增 eval case 失效旧报告、命令层报告展示和 promote execution eval 门禁测试。
 - 修改 `README.md`、`docs/self-evolution-development-progress-recap-zh.md`、`docs/verified-skill-evolution-recap-zh.md` 和本文档：同步记录新的 execution eval gate。
 
 绿灯记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-29 passed
+30 passed
 ```
 
 扩展回归记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-203 passed
+204 passed
 ```
 
 格式检查记录：

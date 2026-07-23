@@ -832,9 +832,9 @@ skill verifier
 | evidence 来源 | 手动 observe | 自动从 trace、tests、rewind、feedback 提取 |
 | mutation | 手动 propose | 自动生成候选改进 |
 | selection | 人工 approve | 指标驱动排序 + 人工确认 |
-| validation | 简单规则 + eval case + execution eval report | 针对 memory/skill 的 verifier 和回归测试 |
+| validation | 简单规则 + eval case + execution eval report + sandbox artifacts | 针对 memory/skill 的 verifier 和回归测试 |
 | application | 写 memory；candidate skill 经 eval/run-eval/show-eval/approve/promote 后创建或 patch 项目级 skill；支持 `/learn` 蒸馏 | skill references/templates/scripts 与回放验证 |
-| evaluation | 单元测试 + 确定性多轮报告 | 长期任务 benchmark 和真实回放评估 |
+| evaluation | 单元测试 + 确定性 sandbox artifact 报告 | 长期任务 benchmark 和真实回放评估 |
 
 下一步不应直接跳到自动改代码，而应先补：
 
@@ -974,12 +974,12 @@ skill verifier
 - 修改 `mewcode/evolution/engine.py`：`promote()` 新增 execution eval 门禁，只有 `execution_eval_status == "passed"` 才能启用正式 skill。
 - 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve run-eval <proposal_id>` 和 `/evolve show-eval <proposal_id>`。
 - 修改 `mewcode/commands/handlers/learn.py`：创建提示和 help 指向 `run-eval/show-eval`，要求用户先看报告再 approve/promote。
-- 修改 `tests/test_evolution.py`：新增少于三轮阻断、报告写入、新增 eval case 失效旧报告、promote 未 execution eval 拒绝、execution eval 后 promote 成功、命令层报告展示测试。
+- 修改 `tests/test_evolution.py`：新增少于三轮阻断、报告写入、sandbox artifacts 落地、新增 eval case 失效旧报告、promote 未 execution eval 拒绝、execution eval 后 promote 成功、命令层报告展示测试。
 - 修改 `README.md`、`docs/hermes-skill-evolution-implementation.md`、`docs/verified-skill-evolution-recap-zh.md`、`docs/self-evolution-development-progress-recap-zh.md` 和本文档：同步记录 execution eval gate。
 - TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 得到 1 个预期失败，覆盖命令层缺少 `run-eval/show-eval` 导致 promote 前门禁不通过。
 - 追加 `/learn` 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_command_points_to_eval_promote_flow -q` 得到 1 个预期失败，覆盖 `/learn` 未提示 `run-eval/show-eval`。
-- 绿灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，29 个测试成功。
-- 扩展回归记录：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，203 个测试成功。
+- 绿灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，30 个测试成功。
+- 扩展回归记录：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，204 个测试成功。
 - 格式检查记录：`git diff --check` 无输出。
 - 全量测试记录：`PYTHONPATH=. pytest -q -x` 停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次 execution eval gate 修改无直接依赖。
 - 限制说明：当前 execution eval 是确定性 SOP 覆盖检查，不是真实模型沙盒执行；它用于提交应用前展示多轮测试效果，后续仍应补受限 fork agent 任务回放。

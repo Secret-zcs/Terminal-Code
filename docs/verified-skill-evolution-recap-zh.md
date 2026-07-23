@@ -244,6 +244,7 @@ promote 会检查 `eval_status == "passed"`，否则拒绝启用。
 - 对每个 case 加载 candidate SOP，检查 `must_contain` 和 `must_not_contain`；
 - 为每轮写入 `round`、`case_id`、`task`、`status`、`errors` 和 `execution_summary`；
 - 写入 `eval_report.json` 和 `eval_report.md`；
+- 在 `execution_sandbox/round_*` 下写入 `task.md`、候选 `SKILL.md` 快照、`rendered_prompt.md` 和 `result.json`；
 - 更新 manifest 的 `execution_eval_status` 和 `execution_eval_rounds`。
 
 少于三轮时会拒绝：
@@ -502,21 +503,21 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_comma
 - 修改 `mewcode/evolution/engine.py`：`promote()` 新增 `execution_eval_status == "passed"` 门禁。
 - 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve run-eval <proposal_id>` 和 `/evolve show-eval <proposal_id>`。
 - 修改 `mewcode/commands/handlers/learn.py`：创建提示和 help 同步要求 `run-eval/show-eval`。
-- 修改 `tests/test_evolution.py`：新增少于三轮阻断、报告写入、新增 eval case 失效旧报告、promote 未 execution eval 阻断、execution eval 后 promote 成功、命令层报告展示测试。
+- 修改 `tests/test_evolution.py`：新增少于三轮阻断、报告写入、sandbox artifacts 落地、新增 eval case 失效旧报告、promote 未 execution eval 阻断、execution eval 后 promote 成功、命令层报告展示测试。
 - 修改 `README.md`、`docs/self-evolution-development-progress-recap-zh.md` 和本文档：同步记录 execution eval gate。
 
 绿灯记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-29 passed
+30 passed
 ```
 
 扩展回归记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-203 passed
+204 passed
 ```
 
 格式检查记录：

@@ -311,6 +311,44 @@ class TestEvolutionEngine:
         assert manifest["execution_eval_status"] == "passed"
         assert manifest["execution_eval_report"].endswith("eval_report.json")
 
+    def test_run_execution_eval_creates_sandbox_artifacts(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="debug-regression-loop",
+            description="复杂调试任务的回归测试优先流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
+        )
+        _add_debug_eval_cases(engine, proposal.id)
+        engine.evaluate(proposal.id)
+
+        ok, _ = engine.run_execution_eval(proposal.id)
+
+        assert ok
+        report = json.loads(
+            engine.execution_eval_report_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert report["runner"] == "sandbox_deterministic"
+        sandbox_root = Path(report["sandbox_root"])
+        assert sandbox_root == engine.execution_eval_sandbox_path(proposal.id)
+        assert sandbox_root.is_dir()
+        for round_ in report["rounds"]:
+            round_dir = Path(round_["sandbox_dir"])
+            assert round_dir.is_relative_to(sandbox_root)
+            assert (round_dir / "task.md").is_file()
+            assert (round_dir / "SKILL.md").is_file()
+            assert (round_dir / "rendered_prompt.md").is_file()
+            assert (round_dir / "result.json").is_file()
+            result = json.loads((round_dir / "result.json").read_text(encoding="utf-8"))
+            assert result["case_id"] == round_["case_id"]
+            assert result["status"] == "passed"
+        markdown = engine.execution_eval_markdown_path(proposal.id).read_text(
+            encoding="utf-8"
+        )
+        assert "Runner: `sandbox_deterministic`" in markdown
+        assert "Sandbox" in markdown
+
     def test_approved_skill_proposal_cannot_apply_directly(
         self, tmp_path: Path
     ) -> None:

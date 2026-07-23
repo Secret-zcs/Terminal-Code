@@ -160,14 +160,14 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_comma
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-29 passed
+30 passed
 ```
 
 扩展回归记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-203 passed
+204 passed
 ```
 
 格式检查记录：
@@ -187,25 +187,89 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次 execution eval gate 修改无直接依赖。
 
+### 2026-07-23 Sandbox Artifact Runner 追加记录
+
+本次继续补齐 execution eval 的可审计性：`run-eval` 不再只写汇总报告，而是为每一轮任务评估生成隔离 sandbox 产物。
+
+新增路径：
+
+```text
+.mewcode/evolution/candidates/<proposal_id>/execution_sandbox/
+  round_01_<case_id>/
+    task.md
+    SKILL.md
+    rendered_prompt.md
+    result.json
+```
+
+新增报告字段：
+
+```json
+{
+  "runner": "sandbox_deterministic",
+  "sandbox_root": ".mewcode/evolution/candidates/prop_xxx/execution_sandbox",
+  "rounds": [
+    {
+      "sandbox_dir": ".../round_01_case_xxx",
+      "artifacts": {
+        "task": ".../task.md",
+        "skill": ".../SKILL.md",
+        "rendered_prompt": ".../rendered_prompt.md",
+        "result": ".../result.json"
+      }
+    }
+  ]
+}
+```
+
+实现约束：
+
+- sandbox 根目录固定在 candidate 目录下。
+- 每次 `run-eval` 前清理旧 sandbox，避免混入历史产物。
+- round 目录名会对 case id 做 slug 化，避免路径逃逸。
+- 每轮都保存任务说明、候选 skill 快照、渲染后的 SOP 和结构化结果。
+
+TDD 红灯记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_creates_sandbox_artifacts -q
+1 failed
+```
+
+失败原因符合预期：报告缺少 `runner` / `sandbox_root`，也没有每轮 sandbox artifact。
+
+绿灯记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_creates_sandbox_artifacts -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+30 passed
+```
+
 ## 4. 设计取舍
 
-当前 execution eval 不是完整 Hermes 式真实任务回放，也不是调用模型执行一组沙盒任务。它是一个确定性、可重复、低副作用的门禁：
+当前 execution eval 已经是确定性 sandbox artifact runner，但还不是完整 Hermes 式真实 fork agent 任务回放，也不是调用模型执行一组沙盒任务。它是一个确定性、可重复、低副作用的门禁：
 
 - 优点：不需要 LLM key，不会修改真实项目，结果稳定，适合单元测试。
 - 优点：能强制用户为 candidate skill 准备至少 3 个任务 case。
 - 优点：能在 approve/promote 前展示每轮 case 的测试效果。
+- 优点：每轮会落地 task、skill snapshot、rendered prompt 和 result，便于用户审计。
 - 缺点：只能证明 SOP 文本覆盖关键策略，不能证明模型加载该 skill 后一定能完成真实任务。
+- 缺点：sandbox 中的执行者仍是 deterministic checker，不是受限 fork agent。
 - 缺点：`must_contain` / `must_not_contain` 仍依赖人工定义，case 质量决定评估质量。
 
 因此它比原先的 eval case gate 更安全，但仍不是最终形态。
 
 ## 5. 后续建议
 
-下一阶段应把 execution eval 从 deterministic/mock runner 升级为 sandbox runner：
+下一阶段应把 execution eval 从 deterministic sandbox runner 升级为受限 fork agent runner：
 
 - 使用受限 fork agent 执行 eval case。
 - 限制工具白名单，禁止写真实项目。
 - 记录模型输出、工具调用、失败原因和最终判定。
+- 将当前 sandbox artifacts 扩展为真实执行轨迹。
 - 通过多轮 case 后只提交应用申请，不自动 promote。
 - 用户在 `show-eval` 中看到真实执行轨迹后，再决定 approve/promote。
 
