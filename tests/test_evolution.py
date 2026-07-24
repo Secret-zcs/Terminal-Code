@@ -668,6 +668,62 @@ class TestEvolutionEngine:
         assert not validation.ok
         assert any("dangerous command" in error for error in validation.errors)
 
+    def test_record_skill_usage_writes_jsonl(self, tmp_path: Path) -> None:
+        engine = EvolutionEngine(tmp_path)
+
+        record = engine.record_skill_usage(
+            "review-loop",
+            event="load",
+            source="LoadSkill",
+            metadata={"source_label": "project"},
+        )
+
+        assert record["skill_name"] == "review-loop"
+        assert record["event"] == "load"
+        assert record["source"] == "LoadSkill"
+        usage = engine.load_skill_usage()
+        assert usage == [record]
+        assert engine.skill_usage_path.exists()
+
+    def test_quarantine_project_skill_moves_it_out_of_loader_path(
+        self, tmp_path: Path
+    ) -> None:
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+
+        ok, message = engine.quarantine_skill(
+            "review-loop",
+            reason="用户纠正：该 skill 导致错误复盘流程。",
+        )
+
+        assert ok
+        quarantine_path = Path(message)
+        assert quarantine_path == (
+            tmp_path
+            / ".mewcode"
+            / "evolution"
+            / "quarantine"
+            / "review-loop"
+            / "SKILL.md"
+        )
+        assert quarantine_path.exists()
+        assert not skill_path.exists()
+        usage = engine.load_skill_usage()
+        assert usage[-1]["event"] == "quarantine"
+        assert usage[-1]["skill_name"] == "review-loop"
+        assert usage[-1]["metadata"]["reason"] == "用户纠正：该 skill 导致错误复盘流程。"
+
     def test_skill_patch_refuses_missing_project_skill(self, tmp_path: Path) -> None:
         engine = EvolutionEngine(tmp_path)
         proposal = engine.propose_skill_patch(
@@ -905,3 +961,41 @@ class TestEvolveCommand:
         assert "/evolve show-eval" in message
         assert "/evolve promote" in message
         assert "then apply" not in message
+
+    async def test_quarantine_command_moves_skill_and_reloads_loader(
+        self, tmp_path: Path
+    ) -> None:
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n",
+            encoding="utf-8",
+        )
+        ui = MockUI()
+        loader = MagicMock()
+        ctx = _ctx(
+            tmp_path,
+            "quarantine review-loop :: 用户纠正：该 skill 不再可靠。",
+            ui,
+        )
+        ctx.config = {"skill_loader": loader}
+
+        await handle_evolve(ctx)
+
+        assert not skill_path.exists()
+        assert (
+            tmp_path
+            / ".mewcode"
+            / "evolution"
+            / "quarantine"
+            / "review-loop"
+            / "SKILL.md"
+        ).exists()
+        assert any("quarantined" in msg for msg in ui.messages)
+        loader.reload.assert_called_once()

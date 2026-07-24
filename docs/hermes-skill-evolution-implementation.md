@@ -194,7 +194,7 @@ skill proposal 创建后只会写入 `.mewcode/evolution/candidates/<proposal_id
 
 ## 4. 与完整 Hermes 的差距
 
-当前实现已经覆盖 Hermes 运行时自进化的安全核心：学习入口、skill create、skill patch、candidate 隔离、验证、eval case、eval、execution eval report、sandbox artifacts、审批、promote、checkpoint、reload。与 Hermes 原版的差距主要在后台 fork review 和真实沙盒任务回放 eval 的自动化程度。
+当前实现已经覆盖 Hermes 运行时自进化的安全核心：学习入口、skill create、skill patch、candidate 隔离、验证、eval case、eval、execution eval report、sandbox artifacts、审批、promote、checkpoint、reload、usage log 和手动 quarantine。与 Hermes 原版的差距主要在后台 fork review、真实沙盒任务回放 eval、自动 usage 归因和自动降级建议。
 
 | 能力 | 当前项目 | Hermes 更完整方向 |
 |---|---|---|
@@ -203,6 +203,7 @@ skill proposal 创建后只会写入 `.mewcode/evolution/candidates/<proposal_id
 | 更新策略 | 同名项目 skill 优先 patch，否则 create | 优先 patch 已加载 skill，再 patch umbrella skill，最后创建新 skill |
 | 隔离 | 主命令流创建 candidate，eval/run-eval/show-eval/promote 门禁 | fork 隔离 review agent，限制工具白名单 |
 | 验证 | 静态格式、冲突校验、eval case 覆盖和三轮 sandbox artifact 报告 | skill verifier + reload + 沙盒任务回放评估 |
+| 降级 | `/evolve quarantine` 手动隔离项目级正式 skill | 根据 usage failure 自动建议 quarantine 或 patch |
 
 ## 5. 修改清单
 
@@ -210,6 +211,8 @@ skill proposal 创建后只会写入 `.mewcode/evolution/candidates/<proposal_id
 - 修改 `mewcode/evolution/engine.py`：2026-07-18 新增 `propose_skill_patch()`、`action=create|patch` 载荷、项目 skill 命中检查和 patch 写回逻辑。
 - 新增 `mewcode/commands/handlers/learn.py`：提供 `/learn` 显式学习入口，同名项目 skill 存在时自动创建 patch proposal，并自动记录 learn evidence。
 - 修改 `mewcode/commands/handlers/evolve.py`：新增 `propose-skill` / `propose-skill-patch` / `add-eval-case` / `eval` / `run-eval` / `show-eval` / `promote` 子命令、skill promote 前 checkpoint、promote 后 loader reload。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve quarantine <skill-name> [:: reason]`，隔离正式项目 skill 后 reload loader。
+- 修改 `mewcode/tools/load_skill.py` 和 `mewcode/skills/loader.py`：`LoadSkill` 成功激活 skill 后写入 usage log。
 - 修改 `mewcode/commands/handlers/__init__.py`：注册 `/learn`。
 - 修改 `tests/test_evolution.py`：新增 engine 与 slash command 的 skill 自进化测试，并覆盖损坏 skill proposal 的可读错误返回、eval case 成功/失败、无 case 阻断、execution eval 报告和 promote execution eval 门禁。
 - 修改 `tests/test_evolution.py`：2026-07-18 新增 skill patch、缺失 skill patch 拒绝、`/learn` patch/create 优先级和 evidence 关联测试。
@@ -523,14 +526,14 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_comma
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-34 passed
+37 passed
 ```
 
 扩展回归记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-208 passed
+212 passed
 ```
 
 格式检查记录：

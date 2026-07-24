@@ -73,4 +73,20 @@ class LoadSkill(Tool):
         parts = [f"Skill '{skill.name}' activated. SOP pinned to environment context."]
         if tool_count > 0:
             parts.append(f"{tool_count} specialized tool(s) registered.")
+        work_dir = getattr(self._loader, "work_dir", None)
+        if isinstance(work_dir, str) and work_dir:
+            try:
+                from mewcode.evolution import EvolutionEngine
+
+                EvolutionEngine(work_dir).record_skill_usage(
+                    skill.name,
+                    event="load",
+                    source="LoadSkill",
+                    metadata={
+                        "source_label": self._loader.get_source_label(skill.name),
+                        "tool_count": tool_count,
+                    },
+                )
+            except Exception:
+                pass
         return ToolResult(output=" ".join(parts))

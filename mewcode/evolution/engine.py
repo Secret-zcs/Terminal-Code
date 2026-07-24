@@ -71,6 +71,14 @@ class EvolutionEngine:
     def evals_path(self) -> Path:
         return self.project_root / ".mewcode" / "evolution" / "evals"
 
+    @property
+    def skill_usage_path(self) -> Path:
+        return self.project_root / ".mewcode" / "evolution" / "skill_usage.jsonl"
+
+    @property
+    def quarantine_skills_path(self) -> Path:
+        return self.project_root / ".mewcode" / "evolution" / "quarantine"
+
     def candidate_dir(self, proposal_id: str) -> Path:
         return self.candidate_skills_path / proposal_id
 
@@ -333,6 +341,102 @@ class EvolutionEngine:
         )
         self._invalidate_candidate_eval(proposal)
         return str(eval_case["id"])
+
+    def record_skill_usage(
+        self,
+        skill_name: str,
+        *,
+        event: str,
+        source: str = "manual",
+        metadata: dict | None = None,
+    ) -> dict:
+        clean_name = skill_name.strip()
+        clean_event = event.strip()
+        if not VALID_NAME_RE.match(clean_name):
+            raise ValueError("invalid skill name for usage log")
+        if not clean_event:
+            raise ValueError("skill usage event cannot be empty")
+        record = {
+            "id": new_evolution_id("use"),
+            "skill_name": clean_name,
+            "event": clean_event,
+            "source": source.strip() or "manual",
+            "metadata": metadata or {},
+            "created_at": time.time(),
+        }
+        self.skill_usage_path.parent.mkdir(parents=True, exist_ok=True)
+        existing = (
+            self.skill_usage_path.read_text(encoding="utf-8")
+            if self.skill_usage_path.exists()
+            else ""
+        )
+        self.skill_usage_path.write_text(
+            existing + json.dumps(record, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        return record
+
+    def load_skill_usage(self) -> list[dict]:
+        if not self.skill_usage_path.exists():
+            return []
+        records: list[dict] = []
+        for line in self.skill_usage_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                data = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict):
+                records.append(data)
+        return records
+
+    def quarantine_skill(self, skill_name: str, *, reason: str = "") -> tuple[bool, str]:
+        clean_name = skill_name.strip()
+        if not VALID_NAME_RE.match(clean_name):
+            return False, "invalid skill name"
+        existing_skill = self._existing_project_skill_path(clean_name)
+        if existing_skill is None:
+            return False, f"project skill '{clean_name}' not found"
+
+        if existing_skill.name == "SKILL.md" and existing_skill.parent.parent == self.project_skills_path:
+            source_path = existing_skill.parent
+            destination_path = self.quarantine_skills_path / clean_name
+            quarantined_skill = destination_path / "SKILL.md"
+        else:
+            source_path = existing_skill
+            destination_path = self.quarantine_skills_path / clean_name
+            quarantined_skill = destination_path / existing_skill.name
+
+        if destination_path.exists():
+            destination_path = (
+                self.quarantine_skills_path
+                / f"{clean_name}-{new_evolution_id('q')}"
+            )
+            quarantined_skill = (
+                destination_path / "SKILL.md"
+                if source_path.is_dir()
+                else destination_path / existing_skill.name
+            )
+
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        if source_path.is_dir():
+            shutil.move(str(source_path), str(destination_path))
+        else:
+            destination_path.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source_path), str(quarantined_skill))
+
+        self.record_skill_usage(
+            clean_name,
+            event="quarantine",
+            source="evolve",
+            metadata={
+                "reason": reason.strip(),
+                "quarantine_path": str(quarantined_skill),
+            },
+        )
+        return True, str(quarantined_skill)
 
     def apply(self, proposal_id: str) -> tuple[bool, str]:
         proposal = self.store.get_proposal(proposal_id)

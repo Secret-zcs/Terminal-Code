@@ -16,6 +16,7 @@ Usage:
     /evolve run-eval <proposal_id>
     /evolve show-eval <proposal_id>
     /evolve promote <proposal_id>
+    /evolve quarantine <skill-name> [:: reason]
 """
 
 from __future__ import annotations
@@ -79,6 +80,8 @@ async def handle_evolve(ctx: CommandContext) -> None:
         _handle_show_eval(ctx, engine, rest)
     elif subcmd == "promote":
         _handle_promote(ctx, engine, rest)
+    elif subcmd == "quarantine":
+        _handle_quarantine(ctx, engine, rest)
     else:
         ctx.ui.add_system_message(f"Unknown evolve subcommand: {subcmd}. Use /evolve help.")
 
@@ -102,6 +105,7 @@ def _show_help(ctx: CommandContext) -> None:
             "  /evolve run-eval <proposal_id>",
             "  /evolve show-eval <proposal_id>",
             "  /evolve promote <proposal_id>",
+            "  /evolve quarantine <skill-name> [:: reason]",
             "",
             "Approved memory proposals write .mewcode/memories.md via apply.",
             "Skill proposals first write candidates under .mewcode/evolution/candidates.",
@@ -424,6 +428,33 @@ def _handle_add_eval_case(
     ctx.ui.add_system_message(f"Evolution eval case recorded: {case_id}")
 
 
+def _handle_quarantine(
+    ctx: CommandContext, engine: EvolutionEngine, rest: str
+) -> None:
+    if not rest:
+        ctx.ui.add_system_message("Usage: /evolve quarantine <skill-name> [:: reason]")
+        return
+    if "::" in rest:
+        skill_name, reason = [part.strip() for part in rest.split("::", 1)]
+    else:
+        skill_name, reason = rest.strip(), ""
+    if not skill_name:
+        ctx.ui.add_system_message("Usage: /evolve quarantine <skill-name> [:: reason]")
+        return
+
+    ok, message = engine.quarantine_skill(skill_name, reason=reason)
+    if not ok:
+        ctx.ui.add_system_message(f"Evolution quarantine failed: {message}")
+        return
+    loader = ctx.config.get("skill_loader") if ctx.config else None
+    if loader is not None and hasattr(loader, "reload"):
+        try:
+            loader.reload()
+        except Exception:
+            pass
+    ctx.ui.add_system_message(f"Skill {skill_name} quarantined at {message}.")
+
+
 def _split_terms(text: str) -> list[str]:
     return [
         term.strip()
@@ -481,7 +512,7 @@ EVOLVE_COMMAND = Command(
     usage=(
         "/evolve [observe|propose|propose-skill|propose-skill-patch|"
         "list|show|preview|approve|reject|apply|add-eval-case|eval|"
-        "run-eval|show-eval|promote]"
+        "run-eval|show-eval|promote|quarantine]"
     ),
     aliases=["evolution"],
 )

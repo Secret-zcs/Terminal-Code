@@ -24,6 +24,10 @@ class SkillLoader:
         self._skills: dict[str, SkillDef] = {}
         self._cache: dict[str, SkillDef] = {}
 
+    @property
+    def work_dir(self) -> str:
+        return self._work_dir
+
 
     def load_all(self) -> dict[str, SkillDef]:
         seen: dict[str, SkillDef] = {}

@@ -847,7 +847,7 @@ skill verifier
 
 ## 12. 与 Hermes 自进化的差距
 
-当前实现是 Hermes 风格的安全闭环，并已支持将 approved 且通过 eval/execution eval 的 skill candidate 落地为项目级 `.mewcode/skills/<name>/SKILL.md`。2026-07-18 后，项目进一步补齐了 `/learn` 显式学习入口和已有项目 skill 的 patch 路径；2026-07-21 后，promote 前还必须展示多轮 execution eval 报告。
+当前实现是 Hermes 风格的安全闭环，并已支持将 approved 且通过 eval/execution eval 的 skill candidate 落地为项目级 `.mewcode/skills/<name>/SKILL.md`。2026-07-18 后，项目进一步补齐了 `/learn` 显式学习入口和已有项目 skill 的 patch 路径；2026-07-21 后，promote 前还必须展示多轮 execution eval 报告；当前版本又补齐了基础 usage log 和 `/evolve quarantine` 手动隔离。
 
 差距：
 
@@ -858,7 +858,7 @@ skill verifier
 | selection | 人工 approve | 指标驱动排序 + 人工确认 |
 | validation | 简单规则 + eval case + execution eval report + sandbox artifacts | 针对 memory/skill 的 verifier 和回归测试 |
 | application | 写 memory；candidate skill 经 eval/run-eval/show-eval/approve/promote 后创建或 patch 项目级 skill；支持 `/learn` 蒸馏 | skill references/templates/scripts 与回放验证 |
-| evaluation | 单元测试 + 确定性 sandbox artifact 报告 | 长期任务 benchmark 和真实回放评估 |
+| evaluation | 单元测试 + 确定性 sandbox artifact 报告 + usage/quarantine 记录 | 长期任务 benchmark、真实回放评估和自动降级建议 |
 
 下一步不应直接跳到自动改代码，而应先补：
 
@@ -881,9 +881,10 @@ skill verifier
   -> execution eval report gate
   -> approve 后 promote
   -> reload
+  -> usage log / quarantine
 ```
 
-准确边界是：当前项目实现的是手动 `/learn` 触发的候选学习闭环；Hermes 原版的后台 fork review、自动筛选会话片段、自动蒸馏正文和任务回放 eval 仍未接入主循环。
+准确边界是：当前项目实现的是手动 `/learn` 触发的候选学习闭环，并能对正式 skill 做基础 load 追踪和手动隔离；Hermes 原版的后台 fork review、自动筛选会话片段、自动蒸馏正文、任务回放 eval 和自动降级建议仍未接入主循环。
 
 ---
 
@@ -1007,3 +1008,18 @@ skill verifier
 - 格式检查记录：`git diff --check` 无输出。
 - 全量测试记录：`PYTHONPATH=. pytest -q -x` 停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次 execution eval gate 修改无直接依赖。
 - 限制说明：当前 execution eval 是确定性 SOP 覆盖检查，不是真实模型沙盒执行；它用于提交应用前展示多轮测试效果，后续仍应补受限 fork agent 任务回放。
+
+### 2026-07-24 补充：Skill Usage Log 与 Quarantine
+
+- 修改 `mewcode/evolution/engine.py`：新增 `skill_usage_path`、`quarantine_skills_path`、`record_skill_usage()`、`load_skill_usage()` 和 `quarantine_skill()`。
+- 修改 `mewcode/tools/load_skill.py`：`LoadSkill` 成功激活 skill 后记录 `event=load`，包括来源标签和注册工具数量。
+- 修改 `mewcode/skills/loader.py`：暴露 `work_dir`，供 `LoadSkill` 将 usage 写回当前项目的 `.mewcode/evolution/skill_usage.jsonl`。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve quarantine <skill-name> [:: reason]`，只隔离项目级正式 skill，隔离后 reload skill loader。
+- 修改 `tests/test_evolution.py`：新增 usage JSONL 写入、项目 skill 隔离、命令层 quarantine/reload 测试。
+- 修改 `tests/test_skills.py`：新增 `LoadSkill` 成功加载项目 skill 后记录 usage 的测试。
+- 修改 `README.md`、`docs/self-evolution-development-progress-recap-zh.md`、`docs/hermes-skill-evolution-implementation.md` 和 `docs/verified-skill-evolution-recap-zh.md`：同步记录 usage/quarantine 当前能力和剩余边界。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_record_skill_usage_writes_jsonl tests/test_evolution.py::TestEvolutionEngine::test_quarantine_project_skill_moves_it_out_of_loader_path tests/test_evolution.py::TestEvolveCommand::test_quarantine_command_moves_skill_and_reloads_loader tests/test_skills.py::TestLoadSkillTool::test_load_existing_project_skill_records_usage -q` 得到 4 个预期失败。
+- 绿灯记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，37 个测试成功；`PYTHONPATH=. pytest tests/test_skills.py -q` 通过，44 个测试成功。
+- 扩展回归记录：`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，212 个测试成功。
+- 格式检查记录：`git diff --check` 无输出。
+- 限制说明：当前 usage log 只覆盖 skill load/quarantine；任务成功、失败、用户纠正和自动 quarantine 建议仍需后续接入。

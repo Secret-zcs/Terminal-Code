@@ -512,6 +512,42 @@ class TestLoadSkillTool:
         assert tool.is_system_tool is True
         assert tool.category == "read"
 
+    @pytest.mark.asyncio
+    async def test_load_existing_project_skill_records_usage(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.evolution import EvolutionEngine
+        from mewcode.tools.load_skill import LoadSkill, LoadSkillParams
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n",
+            encoding="utf-8",
+        )
+        loader = SkillLoader(str(tmp_path))
+        loader.load_all()
+        agent = MagicMock()
+        agent.registry = ToolRegistry()
+        tool = LoadSkill()
+        tool.set_loader(loader)
+        tool.set_agent(agent)
+
+        result = await tool.execute(LoadSkillParams(name="review-loop"))
+
+        assert not result.is_error
+        usage = EvolutionEngine(tmp_path).load_skill_usage()
+        assert usage[-1]["skill_name"] == "review-loop"
+        assert usage[-1]["event"] == "load"
+        assert usage[-1]["source"] == "LoadSkill"
+        assert usage[-1]["metadata"]["source_label"] == "project"
+
 # ---------------------------------------------------------------------------
 # Agent 集成
 # ---------------------------------------------------------------------------
