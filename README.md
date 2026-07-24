@@ -185,6 +185,8 @@ mewcode --mode default
 | `/evolve run-eval <id>` | 对 candidate skill 执行至少三轮任务评估并生成报告 |
 | `/evolve show-eval <id>` | 展示 candidate skill 的执行评估报告 |
 | `/evolve promote <id>` | 将已批准的 candidate skill 提升为正式 skill |
+| `/evolve record-usage <name> :: <event> [:: summary]` | 手动记录正式 skill 的失败或用户反馈事件 |
+| `/evolve suggest-quarantine [name]` | 根据负面 usage 事件建议隔离不可靠 skill |
 | `/evolve quarantine <name> [:: reason]` | 将不可靠的项目级正式 skill 移入隔离区 |
 | `/learn <name> :: <description> :: <body>` | 将可复用流程蒸馏为 skill 提案；同名项目 skill 存在时优先 patch |
 | `/skill list` | 查看 skills |
@@ -263,10 +265,12 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 /evolve approve <proposal_id>
 /evolve apply <proposal_id>      # memory only
 /evolve promote <proposal_id>    # skill candidate only
+/evolve record-usage <skill-name> :: <event> [:: summary]
+/evolve suggest-quarantine [skill-name]
 /evolve quarantine <skill-name> [:: reason]
 ```
 
-`/evolve apply` 在写入 memory 前会尝试创建 checkpoint；`/evolve promote` 在启用 skill candidate 前会尝试创建 checkpoint，并在成功后 reload skill loader。`LoadSkill` 成功激活 skill 会记录到 `.mewcode/evolution/skill_usage.jsonl`；`/evolve quarantine` 会把项目级正式 skill 移入 `.mewcode/evolution/quarantine/<skill-name>/`，并 reload skill loader。
+`/evolve apply` 在写入 memory 前会尝试创建 checkpoint；`/evolve promote` 在启用 skill candidate 前会尝试创建 checkpoint，并在成功后 reload skill loader。`LoadSkill` 成功激活 skill 会记录到 `.mewcode/evolution/skill_usage.jsonl`；`/evolve record-usage` 可手动补充 `failure` / `user_feedback` 等事件，`/evolve suggest-quarantine` 会基于负面事件给出隔离建议；`/evolve quarantine` 会把项目级正式 skill 移入 `.mewcode/evolution/quarantine/<skill-name>/`，并 reload skill loader。
 
 详细说明：
 
@@ -298,7 +302,7 @@ PYTHONPATH=. pytest tests/test_commands.py -q
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-212 passed
+214 passed
 ```
 
 ---

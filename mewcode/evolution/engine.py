@@ -40,6 +40,7 @@ from mewcode.skills.parser import (
 PROJECT_MEMORY_HEADER = "### 项目知识"
 SUPPORTED_EVOLUTION_TARGETS = {"memory", "skill"}
 MIN_EXECUTION_EVAL_CASES = 3
+NEGATIVE_SKILL_USAGE_EVENTS = {"failure", "user_feedback"}
 DANGEROUS_SKILL_PATTERNS = (
     "rm -rf /",
     "sudo rm -rf",
@@ -391,6 +392,55 @@ class EvolutionEngine:
             if isinstance(data, dict):
                 records.append(data)
         return records
+
+    def suggest_quarantine(
+        self,
+        skill_name: str | None = None,
+        *,
+        failure_threshold: int = 2,
+    ) -> list[dict]:
+        threshold = max(1, failure_threshold)
+        wanted = skill_name.strip() if skill_name else ""
+        if wanted and not VALID_NAME_RE.match(wanted):
+            return []
+
+        by_skill: dict[str, list[dict]] = {}
+        for record in self.load_skill_usage():
+            name = str(record.get("skill_name", "")).strip()
+            event = str(record.get("event", "")).strip()
+            if not VALID_NAME_RE.match(name):
+                continue
+            if wanted and name != wanted:
+                continue
+            if event == "quarantine":
+                by_skill[name] = []
+                continue
+            if event in NEGATIVE_SKILL_USAGE_EVENTS:
+                by_skill.setdefault(name, []).append(record)
+
+        suggestions: list[dict] = []
+        for name, records in sorted(by_skill.items()):
+            if len(records) < threshold:
+                continue
+            if self._existing_project_skill_path(name) is None:
+                continue
+            summaries = [
+                str(record.get("metadata", {}).get("summary", "")).strip()
+                for record in records
+                if isinstance(record.get("metadata"), dict)
+            ]
+            summaries = [summary for summary in summaries if summary]
+            suggestions.append({
+                "skill_name": name,
+                "negative_events": len(records),
+                "events": [str(record.get("event", "")) for record in records],
+                "summaries": summaries,
+                "command": (
+                    f"/evolve quarantine {name} :: "
+                    f"{len(records)} negative usage events"
+                ),
+            })
+        return suggestions
 
     def quarantine_skill(self, skill_name: str, *, reason: str = "") -> tuple[bool, str]:
         clean_name = skill_name.strip()

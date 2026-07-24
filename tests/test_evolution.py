@@ -685,6 +685,49 @@ class TestEvolutionEngine:
         assert usage == [record]
         assert engine.skill_usage_path.exists()
 
+    def test_suggest_quarantine_after_repeated_negative_usage(
+        self, tmp_path: Path
+    ) -> None:
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="load",
+            source="LoadSkill",
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：该 skill 仍然遗漏验证。"},
+        )
+
+        suggestions = engine.suggest_quarantine(failure_threshold=2)
+
+        assert len(suggestions) == 1
+        suggestion = suggestions[0]
+        assert suggestion["skill_name"] == "review-loop"
+        assert suggestion["negative_events"] == 2
+        assert suggestion["events"] == ["failure", "user_feedback"]
+        assert suggestion["command"].startswith("/evolve quarantine review-loop ::")
+
     def test_quarantine_project_skill_moves_it_out_of_loader_path(
         self, tmp_path: Path
     ) -> None:
@@ -999,3 +1042,37 @@ class TestEvolveCommand:
         ).exists()
         assert any("quarantined" in msg for msg in ui.messages)
         loader.reload.assert_called_once()
+
+    async def test_record_usage_and_suggest_quarantine_commands(
+        self, tmp_path: Path
+    ) -> None:
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n",
+            encoding="utf-8",
+        )
+        ui = MockUI()
+
+        await handle_evolve(_ctx(
+            tmp_path,
+            "record-usage review-loop :: failure :: 错误地跳过复盘文档。",
+            ui,
+        ))
+        await handle_evolve(_ctx(
+            tmp_path,
+            "record-usage review-loop :: user_feedback :: 用户纠正：遗漏验证。",
+            ui,
+        ))
+        await handle_evolve(_ctx(tmp_path, "suggest-quarantine review-loop", ui))
+
+        message = "\n".join(ui.messages)
+        assert "Skill usage recorded" in message
+        assert "Quarantine suggestions" in message
+        assert "/evolve quarantine review-loop" in message

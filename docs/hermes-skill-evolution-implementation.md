@@ -194,7 +194,7 @@ skill proposal 创建后只会写入 `.mewcode/evolution/candidates/<proposal_id
 
 ## 4. 与完整 Hermes 的差距
 
-当前实现已经覆盖 Hermes 运行时自进化的安全核心：学习入口、skill create、skill patch、candidate 隔离、验证、eval case、eval、execution eval report、sandbox artifacts、审批、promote、checkpoint、reload、usage log 和手动 quarantine。与 Hermes 原版的差距主要在后台 fork review、真实沙盒任务回放 eval、自动 usage 归因和自动降级建议。
+当前实现已经覆盖 Hermes 运行时自进化的安全核心：学习入口、skill create、skill patch、candidate 隔离、验证、eval case、eval、execution eval report、sandbox artifacts、审批、promote、checkpoint、reload、usage log、手动 quarantine 和隔离建议。与 Hermes 原版的差距主要在后台 fork review、真实沙盒任务回放 eval、自动 usage 归因和自动 patch 建议。
 
 | 能力 | 当前项目 | Hermes 更完整方向 |
 |---|---|---|
@@ -203,7 +203,7 @@ skill proposal 创建后只会写入 `.mewcode/evolution/candidates/<proposal_id
 | 更新策略 | 同名项目 skill 优先 patch，否则 create | 优先 patch 已加载 skill，再 patch umbrella skill，最后创建新 skill |
 | 隔离 | 主命令流创建 candidate，eval/run-eval/show-eval/promote 门禁 | fork 隔离 review agent，限制工具白名单 |
 | 验证 | 静态格式、冲突校验、eval case 覆盖和三轮 sandbox artifact 报告 | skill verifier + reload + 沙盒任务回放评估 |
-| 降级 | `/evolve quarantine` 手动隔离项目级正式 skill | 根据 usage failure 自动建议 quarantine 或 patch |
+| 降级 | `/evolve suggest-quarantine` 只读建议，`/evolve quarantine` 手动隔离项目级正式 skill | 根据真实任务结果自动建议 quarantine 或 patch |
 
 ## 5. 修改清单
 
@@ -526,14 +526,14 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_comma
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-37 passed
+39 passed
 ```
 
 扩展回归记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-212 passed
+214 passed
 ```
 
 格式检查记录：

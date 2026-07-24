@@ -16,6 +16,8 @@ Usage:
     /evolve run-eval <proposal_id>
     /evolve show-eval <proposal_id>
     /evolve promote <proposal_id>
+    /evolve record-usage <skill-name> :: <event> [:: summary]
+    /evolve suggest-quarantine [skill-name]
     /evolve quarantine <skill-name> [:: reason]
 """
 
@@ -80,6 +82,10 @@ async def handle_evolve(ctx: CommandContext) -> None:
         _handle_show_eval(ctx, engine, rest)
     elif subcmd == "promote":
         _handle_promote(ctx, engine, rest)
+    elif subcmd == "record-usage":
+        _handle_record_usage(ctx, engine, rest)
+    elif subcmd == "suggest-quarantine":
+        _handle_suggest_quarantine(ctx, engine, rest)
     elif subcmd == "quarantine":
         _handle_quarantine(ctx, engine, rest)
     else:
@@ -105,6 +111,8 @@ def _show_help(ctx: CommandContext) -> None:
             "  /evolve run-eval <proposal_id>",
             "  /evolve show-eval <proposal_id>",
             "  /evolve promote <proposal_id>",
+            "  /evolve record-usage <skill-name> :: <event> [:: summary]",
+            "  /evolve suggest-quarantine [skill-name]",
             "  /evolve quarantine <skill-name> [:: reason]",
             "",
             "Approved memory proposals write .mewcode/memories.md via apply.",
@@ -455,6 +463,52 @@ def _handle_quarantine(
     ctx.ui.add_system_message(f"Skill {skill_name} quarantined at {message}.")
 
 
+def _handle_record_usage(
+    ctx: CommandContext, engine: EvolutionEngine, rest: str
+) -> None:
+    parts = [part.strip() for part in rest.split("::", 2)]
+    if len(parts) < 2 or not all(parts[:2]):
+        ctx.ui.add_system_message(
+            "Usage: /evolve record-usage <skill-name> :: <event> [:: summary]"
+        )
+        return
+    skill_name, event = parts[:2]
+    summary = parts[2] if len(parts) == 3 else ""
+    try:
+        record = engine.record_skill_usage(
+            skill_name,
+            event=event,
+            source="evolve-command",
+            metadata={"summary": summary} if summary else {},
+        )
+    except ValueError as e:
+        ctx.ui.add_system_message(f"Evolution usage failed: {e}")
+        return
+    ctx.ui.add_system_message(
+        f"Skill usage recorded: {record['id']} {skill_name}/{event}"
+    )
+
+
+def _handle_suggest_quarantine(
+    ctx: CommandContext, engine: EvolutionEngine, rest: str
+) -> None:
+    skill_name = rest.strip() or None
+    suggestions = engine.suggest_quarantine(skill_name)
+    if not suggestions:
+        ctx.ui.add_system_message("No quarantine suggestions.")
+        return
+    lines = ["Quarantine suggestions:"]
+    for suggestion in suggestions:
+        lines.append(
+            f"  {suggestion['skill_name']}: "
+            f"{suggestion['negative_events']} negative usage events"
+        )
+        if suggestion.get("summaries"):
+            lines.append(f"    Last: {suggestion['summaries'][-1]}")
+        lines.append(f"    Suggested command: {suggestion['command']}")
+    ctx.ui.add_system_message("\n".join(lines))
+
+
 def _split_terms(text: str) -> list[str]:
     return [
         term.strip()
@@ -512,7 +566,8 @@ EVOLVE_COMMAND = Command(
     usage=(
         "/evolve [observe|propose|propose-skill|propose-skill-patch|"
         "list|show|preview|approve|reject|apply|add-eval-case|eval|"
-        "run-eval|show-eval|promote|quarantine]"
+        "run-eval|show-eval|promote|record-usage|suggest-quarantine|"
+        "quarantine]"
     ),
     aliases=["evolution"],
 )
