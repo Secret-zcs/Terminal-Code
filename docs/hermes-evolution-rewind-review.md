@@ -698,34 +698,52 @@ evidence -> proposal -> approve -> apply
 - 写入 `### 参考资料`。
 - 根据 proposal target 自动选择 section。
 
-### 9.3 缺少 diff preview
+### 9.3 diff preview 已补齐
 
-`/evolve show` 能展示 change，但 `/evolve apply` 前没有专门 diff。
-
-目前依赖：
-
-```text
-/rewind --preview
-```
-
-但更好的交互应该是：
+`/evolve show` 能展示 proposal change，当前已新增专门的只读预览命令：
 
 ```text
 /evolve preview <proposal_id>
 ```
 
-展示即将写入的 memory 或 skill diff。
+当前行为：
 
-### 9.4 Skill patch 还没有落地通道
+- memory proposal 展示目标 `.mewcode/memories.md` 和即将追加的 bullet。
+- skill proposal 展示 candidate 路径、formal target 和 formal/candidate unified diff。
+- preview 不写正式 memory/skill，不改变 proposal 状态；candidate 缺失时也只从 proposal payload 内存渲染，不重建 candidate 目录。
 
-当前 `skill` 已支持审批后创建新项目级 skill，但还不支持 patch 已有 skill。
+这让 apply/promote 前的人工 review 不再只依赖 proposal JSON，也与 rewind 的预览体验形成对称。
 
-后续如果要更接近 Hermes，需要优先补齐：
+相关边界仍需注意：
+
+```text
+/rewind --preview
+```
+
+仍只展示 rewind 影响概览，还没有内容级文件 diff。
+
+### 9.4 Skill patch 已有主干落地
+
+当前 `skill` 已支持两条路径：
+
+- create：创建新的项目级 skill candidate，promote 后写入 `.mewcode/skills/<name>/SKILL.md`。
+- patch：对已有项目级 skill 创建 patch candidate，promote 后覆盖对应项目 skill。
+
+已具备的保护：
+
+- frontmatter 解析校验。
+- 同名 create 冲突检查。
+- patch 只允许已有项目级 skill，不 patch 内置 skill 或用户全局 skill。
+- diff preview。
+- checkpoint 尝试。
+- eval case gate 与 execution eval report gate。
+
+后续如果要更接近 Hermes，还需要补齐：
 
 | 能力 | 需要的保护 |
 |---|---|
-| 创建 skill | frontmatter 校验、allowedTools 校验、skill reload 测试 |
-| patch skill | diff preview、同名冲突检查、reload 测试、rewind checkpoint |
+| 创建 skill | 更严格 allowedTools 校验、reload 失败回滚 |
+| patch skill | 三方 diff/冲突提示、自动 usage 回归、失败 quarantine |
 | skill references/templates/scripts | 路径约束、文件类型约束、大小限制、人工 approve |
 
 ---
@@ -760,25 +778,31 @@ summary = "pytest failed after modifying context manager"
 - 能把失败模式转为长期经验。
 - 后续可以生成“修改该模块后必须跑某些测试”的 memory 或 skill。
 
-### 10.3 增加 `/evolve preview`
+### 10.3 强化 `/evolve preview`
 
-建议新增：
+当前已支持：
 
 ```text
 /evolve preview <proposal_id>
 ```
 
-输出：
+示例输出：
 
 ```diff
 ### 项目知识
 + - 自进化应用前必须创建 rewind checkpoint。
 ```
 
-价值：
+已实现价值：
 
 - apply 前可视化影响。
 - 与 `/rewind --preview` 形成对称体验。
+
+后续可继续增强：
+
+- preview 输出 candidate eval 状态摘要。
+- preview 同时展示最近 execution eval report 路径。
+- 对 patch skill 展示更清晰的“新增/删除/修改段落”摘要。
 
 ### 10.4 引入 proposal verifier
 

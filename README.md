@@ -177,6 +177,7 @@ mewcode --mode default
 | `/evolve propose <title> :: <change>` | 创建自进化 proposal |
 | `/evolve propose-skill <name> :: <description> :: <body>` | 创建新 skill 提案 |
 | `/evolve propose-skill-patch <name> :: <description> :: <body>` | 创建既有 skill patch 提案 |
+| `/evolve preview <id>` | 预览 memory 追加内容或 skill candidate diff |
 | `/evolve approve <id>` | 批准 proposal |
 | `/evolve apply <id>` | 应用已批准的 memory proposal |
 | `/evolve add-eval-case <id> :: <task> :: <must_contain_csv>` | 为 candidate skill 追加任务评估用例 |
@@ -253,6 +254,7 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 /evolve propose-skill <name> :: <description> :: <skill body>
 /evolve propose-skill-patch <name> :: <description> :: <skill body>
 /learn <name> :: <description> :: <skill body>
+/evolve preview <proposal_id>    # memory append or skill diff preview
 /evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]
 /evolve eval <proposal_id>       # parse + eval case gate
 /evolve run-eval <proposal_id>   # at least 3 execution eval rounds + report
@@ -294,7 +296,7 @@ PYTHONPATH=. pytest tests/test_commands.py -q
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-204 passed
+208 passed
 ```
 
 ---

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import shutil
 import time
+from difflib import unified_diff
 from pathlib import Path
 
 import yaml
@@ -360,6 +361,19 @@ class EvolutionEngine:
         self.store.update_proposal(proposal)
         return True, str(applied_path)
 
+    def preview(self, proposal_id: str) -> tuple[bool, str]:
+        proposal = self.store.get_proposal(proposal_id)
+        if proposal is None:
+            return False, f"proposal {proposal_id} not found"
+        if proposal.target == "memory":
+            return True, self._render_memory_preview(proposal)
+        if proposal.target == "skill":
+            try:
+                return True, self._render_skill_preview(proposal)
+            except ValueError as e:
+                return False, str(e)
+        return False, f"target {proposal.target} cannot be previewed"
+
     def promote(self, proposal_id: str) -> tuple[bool, str]:
         proposal = self.store.get_proposal(proposal_id)
         if proposal is None:
@@ -662,6 +676,71 @@ class EvolutionEngine:
         if not inserted:
             out.append(bullet)
         path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+
+    def _render_memory_preview(self, proposal: EvolutionProposal) -> str:
+        bullet = proposal.change.strip()
+        if not bullet.startswith("- "):
+            bullet = "- " + bullet
+        existing = self.project_memory_path.read_text(
+            encoding="utf-8"
+        ) if self.project_memory_path.exists() else ""
+        status = "already present" if bullet in existing.splitlines() else "will append"
+        return "\n".join([
+            "# Evolution Preview",
+            "",
+            f"Proposal: {proposal.id}",
+            "Target: memory",
+            f"File: {self.project_memory_path}",
+            f"Status: {status}",
+            "",
+            "## Change",
+            "",
+            bullet,
+            "",
+        ])
+
+    def _render_skill_preview(self, proposal: EvolutionProposal) -> str:
+        payload = self._decode_skill_change(proposal.change)
+        candidate_path = self.candidate_skill_path(proposal.id)
+        target_path = self._skill_target_path(payload)
+        candidate_text = (
+            candidate_path.read_text(encoding="utf-8")
+            if candidate_path.exists()
+            else self._render_skill_markdown(payload)
+        )
+        existing_text = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
+        action = payload.get("action", "create")
+        if target_path.exists():
+            diff_lines = list(unified_diff(
+                existing_text.splitlines(),
+                candidate_text.splitlines(),
+                fromfile="formal",
+                tofile="candidate",
+                lineterm="",
+            ))
+        else:
+            diff_lines = list(unified_diff(
+                [],
+                candidate_text.splitlines(),
+                fromfile="formal",
+                tofile="candidate",
+                lineterm="",
+            ))
+        body = "\n".join(diff_lines) if diff_lines else "(no content changes)"
+        return "\n".join([
+            "# Skill Preview",
+            "",
+            f"Proposal: {proposal.id}",
+            f"Action: {action}",
+            f"Skill: {payload.get('name')}",
+            f"Candidate: {candidate_path}",
+            f"Formal target: {target_path}",
+            "",
+            "## Diff",
+            "",
+            body,
+            "",
+        ])
 
     def _write_project_skill(self, proposal: EvolutionProposal) -> Path:
         payload = self._decode_skill_change(proposal.change)

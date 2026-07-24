@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -129,6 +130,24 @@ class TestEvolutionEngine:
         applied = engine.store.get_proposal(proposal.id)
         assert applied is not None
         assert applied.status == "applied"
+
+    def test_preview_memory_proposal_shows_append_without_writing(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose(
+            "remember-preview",
+            "预览必须展示将追加的 memory 内容。",
+        )
+
+        ok, preview = engine.preview(proposal.id)
+
+        assert ok
+        assert "Evolution Preview" in preview
+        assert "Target: memory" in preview
+        assert str(engine.project_memory_path) in preview
+        assert "- 预览必须展示将追加的 memory 内容。" in preview
+        assert not engine.project_memory_path.exists()
 
     def test_rejects_code_tool_prompt_targets(self, tmp_path: Path) -> None:
         engine = EvolutionEngine(tmp_path)
@@ -584,6 +603,56 @@ class TestEvolutionEngine:
         assert skill.context == "full"
         assert "优先 patch 已有 skill" in skill.prompt_body
 
+    def test_preview_skill_patch_shows_candidate_diff(self, tmp_path: Path) -> None:
+        existing = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        existing.parent.mkdir(parents=True)
+        existing.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Old review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Old\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill_patch(
+            name="review-loop",
+            description="Updated review flow",
+            body="# Updated\n\n优先 patch 已有 skill。\n",
+        )
+
+        ok, preview = engine.preview(proposal.id)
+
+        assert ok
+        assert "Skill Preview" in preview
+        assert "Action: patch" in preview
+        assert str(existing) in preview
+        assert "--- formal" in preview
+        assert "+++ candidate" in preview
+        assert "-# Old" in preview
+        assert "+# Updated" in preview
+        assert existing.read_text(encoding="utf-8").endswith("# Old\n")
+
+    def test_preview_missing_skill_candidate_is_read_only(self, tmp_path: Path) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="review-loop",
+            description="Review flow",
+            body="# Review\n\nUse this SOP for review tasks.\n",
+        )
+        candidate_dir = engine.candidate_dir(proposal.id)
+        shutil.rmtree(candidate_dir)
+
+        ok, preview = engine.preview(proposal.id)
+
+        assert ok
+        assert "Skill Preview" in preview
+        assert str(engine.candidate_skill_path(proposal.id)) in preview
+        assert "# Review" in preview
+        assert not candidate_dir.exists()
+
     def test_skill_static_policy_blocks_dangerous_candidate(
         self, tmp_path: Path
     ) -> None:
@@ -649,6 +718,22 @@ class TestEvolveCommand:
 
         memory = (tmp_path / ".mewcode" / "memories.md").read_text(encoding="utf-8")
         assert "自进化提案必须先 approve 再 apply" in memory
+
+    async def test_preview_command_shows_memory_change(self, tmp_path: Path) -> None:
+        ui = MockUI()
+        await handle_evolve(_ctx(
+            tmp_path,
+            "propose remember-preview :: 预览命令必须展示变更。",
+            ui,
+        ))
+        proposal = EvolutionEngine(tmp_path).store.load_proposals()[0]
+
+        await handle_evolve(_ctx(tmp_path, f"preview {proposal.id}", ui))
+
+        message = "\n".join(ui.messages)
+        assert "Evolution Preview" in message
+        assert "Target: memory" in message
+        assert "预览命令必须展示变更" in message
 
     async def test_propose_skill_command_promotes_and_reloads_loader(
         self, tmp_path: Path

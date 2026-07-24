@@ -138,6 +138,16 @@ promote 成功后，manifest 的 `status` 会变为 `enabled`，并写入 `promo
 skill proposals must be promoted with /evolve promote after review
 ```
 
+### `/evolve preview`
+
+新增只读预览命令：
+
+```text
+/evolve preview <proposal_id>
+```
+
+memory proposal 会展示目标 `.mewcode/memories.md` 和将追加的 bullet。skill proposal 会展示 candidate `SKILL.md`、formal target，并输出 formal 与 candidate 的 unified diff。preview 不写正式 memory/skill，也不改变 proposal 状态；如果 candidate 文件被清理，preview 只从 proposal payload 内存渲染，不会重建 candidate 目录。
+
 ### `/evolve promote`
 
 新增 skill 启用命令：
@@ -309,7 +319,7 @@ wget -qO-
 ## 7. 修改清单
 
 - 修改 `mewcode/evolution/engine.py`：新增 candidate 路径、candidate skill/manifest 写入、`evaluate()`、`add_eval_case()`、`run_execution_eval()`、`promote()`、skill direct apply 拒绝、eval case 执行、execution eval 报告和静态危险命令校验。
-- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve add-eval-case`、`/evolve eval`、`/evolve run-eval`、`/evolve show-eval` 和 `/evolve promote`，并让 `/evolve apply` 不再对 skill 做正式启用。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve preview`、`/evolve add-eval-case`、`/evolve eval`、`/evolve run-eval`、`/evolve show-eval` 和 `/evolve promote`，并让 `/evolve apply` 不再对 skill 做正式启用。
 - 修改 `tests/test_evolution.py`：新增 candidate 写入、eval manifest、eval case 缺失阻断、eval case 成功/失败、execution eval 报告、direct apply 拒绝、promote eval/execution eval 门禁、promote 启用、patch promote、危险命令阻断和命令层 eval/run-eval/show-eval/promote/reload 测试。
 - 修改 `README.md`：更新自进化命令和 memory/skill 分流语义。
 - 新增本文档：记录 Verified Skill Evolution 的设计和验证。
@@ -510,14 +520,14 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_comma
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-30 passed
+34 passed
 ```
 
 扩展回归记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-204 passed
+208 passed
 ```
 
 格式检查记录：

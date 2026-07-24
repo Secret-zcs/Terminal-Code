@@ -7,6 +7,7 @@ Usage:
     /evolve propose-skill <name> :: <description> :: <skill body>
     /evolve propose-skill-patch <name> :: <description> :: <skill body>
     /evolve list
+    /evolve preview <proposal_id>
     /evolve approve <proposal_id>
     /evolve reject <proposal_id>
     /evolve apply <proposal_id>
@@ -60,6 +61,8 @@ async def handle_evolve(ctx: CommandContext) -> None:
         _handle_list(ctx, engine)
     elif subcmd == "show":
         _handle_show(ctx, engine, rest)
+    elif subcmd == "preview":
+        _handle_preview(ctx, engine, rest)
     elif subcmd == "approve":
         _handle_approve(ctx, engine, rest)
     elif subcmd == "reject":
@@ -90,6 +93,7 @@ def _show_help(ctx: CommandContext) -> None:
             "  /evolve propose-skill-patch <name> :: <description> :: <skill body>",
             "  /evolve list",
             "  /evolve show <proposal_id>",
+            "  /evolve preview <proposal_id>",
             "  /evolve approve <proposal_id>",
             "  /evolve reject <proposal_id>",
             "  /evolve apply <proposal_id>",
@@ -249,6 +253,19 @@ def _handle_show(ctx: CommandContext, engine: EvolutionEngine, proposal_id: str)
     if validation.warnings:
         lines.append("Warnings: " + "; ".join(validation.warnings))
     ctx.ui.add_system_message("\n".join(lines))
+
+
+def _handle_preview(
+    ctx: CommandContext, engine: EvolutionEngine, proposal_id: str
+) -> None:
+    if not proposal_id:
+        ctx.ui.add_system_message("Usage: /evolve preview <proposal_id>")
+        return
+    ok, message = engine.preview(proposal_id)
+    if not ok:
+        ctx.ui.add_system_message(f"Evolution preview failed: {message}")
+        return
+    ctx.ui.add_system_message(message)
 
 
 def _handle_approve(ctx: CommandContext, engine: EvolutionEngine, proposal_id: str) -> None:
@@ -463,8 +480,8 @@ EVOLVE_COMMAND = Command(
     handler=handle_evolve,
     usage=(
         "/evolve [observe|propose|propose-skill|propose-skill-patch|"
-        "list|show|approve|reject|apply|add-eval-case|eval|run-eval|"
-        "show-eval|promote]"
+        "list|show|preview|approve|reject|apply|add-eval-case|eval|"
+        "run-eval|show-eval|promote]"
     ),
     aliases=["evolution"],
 )

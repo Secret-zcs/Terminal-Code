@@ -160,14 +160,14 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_comma
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-30 passed
+34 passed
 ```
 
 扩展回归记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-204 passed
+208 passed
 ```
 
 格式检查记录：
@@ -245,7 +245,7 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execu
 1 passed
 
 PYTHONPATH=. pytest tests/test_evolution.py -q
-30 passed
+34 passed
 ```
 
 ## 4. 设计取舍
