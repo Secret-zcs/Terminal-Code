@@ -247,6 +247,66 @@ class EvolutionEngine:
         self._write_candidate_skill(proposal, payload)
         return proposal
 
+    def propose_skill_patch_from_usage(
+        self,
+        skill_name: str,
+        *,
+        failure_threshold: int = 2,
+    ) -> EvolutionProposal:
+        clean_name = skill_name.strip()
+        existing = self._load_existing_project_skill(clean_name)
+        if existing is None:
+            raise ValueError(f"skill '{clean_name}' does not exist as a project skill")
+
+        records: list[dict] = []
+        for record in self.load_skill_usage():
+            name = str(record.get("skill_name", "")).strip()
+            event = str(record.get("event", "")).strip()
+            if name != clean_name:
+                continue
+            if event == "quarantine":
+                records = []
+                continue
+            if event in NEGATIVE_SKILL_USAGE_EVENTS:
+                records.append(record)
+        if len(records) < max(1, failure_threshold):
+            raise ValueError(
+                f"skill '{clean_name}' does not have enough negative usage events"
+            )
+
+        summaries = [
+            str(record.get("metadata", {}).get("summary", "")).strip()
+            for record in records
+            if isinstance(record.get("metadata"), dict)
+        ]
+        summaries = [summary for summary in summaries if summary]
+        feedback = "\n".join(f"- {summary}" for summary in summaries)
+        body = (
+            existing.prompt_body.rstrip()
+            + "\n\n## Usage Feedback Patch Notes\n\n"
+            + "Address these observed failures before this skill is used again:\n"
+            + (feedback or "- Negative usage was recorded without a summary.")
+            + "\n\n## Required Patch Behavior\n\n"
+            + "- Make the SOP auditable against the listed feedback.\n"
+            + "- Add or update eval cases before promotion.\n"
+        )
+        evidence = self.record_evidence(
+            f"Usage feedback suggests patching skill '{clean_name}'.",
+            kind="user_feedback",
+            source="skill-usage",
+            metadata={"skill": clean_name, "summaries": summaries},
+        )
+        return self.propose_skill_patch(
+            name=clean_name,
+            description=existing.description,
+            body=body,
+            allowed_tools=existing.allowed_tools,
+            mode=existing.mode,
+            context=existing.context,
+            rationale="Usage feedback generated a conservative skill patch proposal.",
+            evidence_ids=[evidence.id],
+        )
+
     def validate(self, proposal: EvolutionProposal) -> EvolutionValidation:
         errors: list[str] = []
         warnings: list[str] = []

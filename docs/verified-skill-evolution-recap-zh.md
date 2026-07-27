@@ -520,14 +520,14 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_comma
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-39 passed
+41 passed
 ```
 
 扩展回归记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-214 passed
+216 passed
 ```
 
 格式检查记录：
@@ -549,10 +549,10 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 ## 9. 后续方向
 
-当前已实现第一阶段 candidate/promote、eval gate、eval case gate、execution eval report gate，以及基础 usage log / quarantine / quarantine suggestion。下一阶段建议增加：
+当前已实现第一阶段 candidate/promote、eval gate、eval case gate、execution eval report gate，以及基础 usage log / quarantine / quarantine suggestion / usage-driven patch candidate。下一阶段建议增加：
 
 - 自动 usage 归因：记录 skill 触发后的任务结果、用户反馈和失败原因，用于后续自动降级或复盘。
-- patch 建议器：当同一 skill 多次失败或被用户纠正时，除提示 quarantine 外，还可生成 patch proposal。
+- patch 评审器：usage-driven patch candidate 生成后，自动补 eval case 建议并要求用户评审。
 - 更强的任务回放：由受限 fork agent 在沙盒中真实执行 case，而不只是检查候选 SOP 的关键步骤覆盖。
 - background review：只能生成 candidate，禁止自动 promote。
 

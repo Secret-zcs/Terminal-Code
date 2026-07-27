@@ -728,6 +728,47 @@ class TestEvolutionEngine:
         assert suggestion["events"] == ["failure", "user_feedback"]
         assert suggestion["command"].startswith("/evolve quarantine review-loop ::")
 
+    def test_propose_skill_patch_from_usage_creates_candidate(
+        self, tmp_path: Path
+    ) -> None:
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+
+        proposal = engine.propose_skill_patch_from_usage("review-loop")
+
+        payload = json.loads(proposal.change)
+        assert payload["action"] == "patch"
+        assert payload["name"] == "review-loop"
+        assert "原流程" in payload["body"]
+        assert "错误地跳过复盘文档" in payload["body"]
+        assert "用户纠正：遗漏验证" in payload["body"]
+        assert engine.candidate_skill_path(proposal.id).exists()
+        validation = engine.validate(proposal)
+        assert validation.ok
+
     def test_quarantine_project_skill_moves_it_out_of_loader_path(
         self, tmp_path: Path
     ) -> None:
@@ -1076,3 +1117,37 @@ class TestEvolveCommand:
         assert "Skill usage recorded" in message
         assert "Quarantine suggestions" in message
         assert "/evolve quarantine review-loop" in message
+
+    async def test_propose_patch_from_usage_command(self, tmp_path: Path) -> None:
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        ui = MockUI()
+        await handle_evolve(_ctx(
+            tmp_path,
+            "record-usage review-loop :: failure :: 错误地跳过复盘文档。",
+            ui,
+        ))
+        await handle_evolve(_ctx(
+            tmp_path,
+            "record-usage review-loop :: user_feedback :: 用户纠正：遗漏验证。",
+            ui,
+        ))
+
+        await handle_evolve(_ctx(tmp_path, "propose-patch-from-usage review-loop", ui))
+
+        proposal = EvolutionEngine(tmp_path).store.load_proposals()[0]
+        payload = json.loads(proposal.change)
+        message = "\n".join(ui.messages)
+        assert "Usage-driven skill patch proposal created" in message
+        assert payload["action"] == "patch"
+        assert "用户纠正：遗漏验证" in payload["body"]

@@ -18,6 +18,7 @@ Usage:
     /evolve promote <proposal_id>
     /evolve record-usage <skill-name> :: <event> [:: summary]
     /evolve suggest-quarantine [skill-name]
+    /evolve propose-patch-from-usage <skill-name>
     /evolve quarantine <skill-name> [:: reason]
 """
 
@@ -86,6 +87,8 @@ async def handle_evolve(ctx: CommandContext) -> None:
         _handle_record_usage(ctx, engine, rest)
     elif subcmd == "suggest-quarantine":
         _handle_suggest_quarantine(ctx, engine, rest)
+    elif subcmd == "propose-patch-from-usage":
+        _handle_propose_patch_from_usage(ctx, engine, rest)
     elif subcmd == "quarantine":
         _handle_quarantine(ctx, engine, rest)
     else:
@@ -113,6 +116,7 @@ def _show_help(ctx: CommandContext) -> None:
             "  /evolve promote <proposal_id>",
             "  /evolve record-usage <skill-name> :: <event> [:: summary]",
             "  /evolve suggest-quarantine [skill-name]",
+            "  /evolve propose-patch-from-usage <skill-name>",
             "  /evolve quarantine <skill-name> [:: reason]",
             "",
             "Approved memory proposals write .mewcode/memories.md via apply.",
@@ -509,6 +513,30 @@ def _handle_suggest_quarantine(
     ctx.ui.add_system_message("\n".join(lines))
 
 
+def _handle_propose_patch_from_usage(
+    ctx: CommandContext, engine: EvolutionEngine, skill_name: str
+) -> None:
+    if not skill_name:
+        ctx.ui.add_system_message("Usage: /evolve propose-patch-from-usage <skill-name>")
+        return
+    try:
+        proposal = engine.propose_skill_patch_from_usage(skill_name)
+    except ValueError as e:
+        ctx.ui.add_system_message(f"Evolution usage patch failed: {e}")
+        return
+    validation = engine.validate(proposal)
+    details = []
+    if validation.errors:
+        details.append("Errors: " + "; ".join(validation.errors))
+    if validation.warnings:
+        details.append("Warnings: " + "; ".join(validation.warnings))
+    suffix = " " + " ".join(details) if details else ""
+    ctx.ui.add_system_message(
+        f"Usage-driven skill patch proposal created: {proposal.id} "
+        f"[{proposal.status}].{suffix}"
+    )
+
+
 def _split_terms(text: str) -> list[str]:
     return [
         term.strip()
@@ -567,7 +595,7 @@ EVOLVE_COMMAND = Command(
         "/evolve [observe|propose|propose-skill|propose-skill-patch|"
         "list|show|preview|approve|reject|apply|add-eval-case|eval|"
         "run-eval|show-eval|promote|record-usage|suggest-quarantine|"
-        "quarantine]"
+        "propose-patch-from-usage|quarantine]"
     ),
     aliases=["evolution"],
 )
