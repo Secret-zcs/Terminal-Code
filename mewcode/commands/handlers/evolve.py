@@ -559,6 +559,9 @@ def _handle_suggest_eval_cases(
     for index, suggestion in enumerate(suggestions, 1):
         lines.extend([
             f"  {index}. Task: {suggestion['task']}",
+            f"     Quality: {suggestion['quality']} ({suggestion['score']}/3)",
+            f"     Coverage: {suggestion['coverage']}",
+            f"     Rationale: {suggestion['rationale']}",
             f"     Must contain: {', '.join(suggestion['must_contain'])}",
             f"     Command: {suggestion['command']}",
         ])

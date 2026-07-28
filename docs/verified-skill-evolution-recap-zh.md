@@ -551,7 +551,7 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 ### 2026-07-28 补充：Usage Patch Eval Case Suggestion
 
-当前新增了 `/evolve suggest-eval-cases <proposal_id>`，用于把 usage-driven patch candidate 的 evidence 转成三轮 eval case 建议命令。它是只读能力：不会写入 `cases.jsonl`，不会改变 manifest，也不会让 candidate 自动进入 eval 或 promote。
+当前新增了 `/evolve suggest-eval-cases <proposal_id>`，用于把 usage-driven patch candidate 的 evidence 转成三轮 eval case 建议命令，并展示 `quality`、`score`、`coverage` 和 `rationale`。它是只读能力：不会写入 `cases.jsonl`，不会改变 manifest，也不会让 candidate 自动进入 eval 或 promote。
 
 TDD 红灯记录：
 
@@ -559,6 +559,8 @@ TDD 红灯记录：
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_suggest_eval_cases_for_usage_patch_is_read_only tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_is_read_only -q
 2 failed
 ```
+
+追加红灯记录：加入质量评分断言后，同一命令得到 2 个预期失败，覆盖建议缺少 `quality` 字段和命令输出缺少 `Quality: high`。
 
 绿灯记录：
 
@@ -577,12 +579,12 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 
 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`，原因是旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略要求写前先读；和本次只读 eval case 建议修改无直接依赖。
 
-设计边界：测试用例本身也可能不正确，所以当前只给用户展示建议命令。用户需要显式执行 `/evolve add-eval-case`，再继续 `eval -> run-eval -> show-eval -> approve -> promote`。
+设计边界：测试用例本身也可能不正确，所以当前只给用户展示建议命令和基础质量评分。`high` 代表直接覆盖真实 usage feedback，`medium` 代表结构性 patch guard，`low` 代表描述兜底。用户需要显式执行 `/evolve add-eval-case`，再继续 `eval -> run-eval -> show-eval -> approve -> promote`。
 
-当前已实现第一阶段 candidate/promote、eval gate、eval case gate、execution eval report gate，以及基础 usage log / quarantine / quarantine suggestion / usage-driven patch candidate / 只读 eval case suggestion。下一阶段建议增加：
+当前已实现第一阶段 candidate/promote、eval gate、eval case gate、execution eval report gate，以及基础 usage log / quarantine / quarantine suggestion / usage-driven patch candidate / 带质量评分的只读 eval case suggestion。下一阶段建议增加：
 
 - 自动 usage 归因：记录 skill 触发后的任务结果、用户反馈和失败原因，用于后续自动降级或复盘。
-- patch 评审器增强：对只读 eval case 建议做质量评分，并提示哪些 case 覆盖真实用户反馈、哪些只是结构性检查。
+- patch 评审器增强：根据历史成功率校准质量评分，并提示哪些 case 仍缺少真实任务覆盖。
 - 更强的任务回放：由受限 fork agent 在沙盒中真实执行 case，而不只是检查候选 SOP 的关键步骤覆盖。
 - background review：只能生成 candidate，禁止自动 promote。
 

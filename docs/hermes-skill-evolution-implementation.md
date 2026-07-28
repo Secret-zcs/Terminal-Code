@@ -194,7 +194,7 @@ skill proposal 创建后只会写入 `.mewcode/evolution/candidates/<proposal_id
 
 ## 4. 与完整 Hermes 的差距
 
-当前实现已经覆盖 Hermes 运行时自进化的安全核心：学习入口、skill create、skill patch、candidate 隔离、验证、eval case、eval、execution eval report、sandbox artifacts、审批、promote、checkpoint、reload、usage log、手动 quarantine、隔离建议、usage-driven patch candidate 和只读 eval case 建议。与 Hermes 原版的差距主要在后台 fork review、真实沙盒任务回放 eval、自动 usage 归因和自动 patch 评审。
+当前实现已经覆盖 Hermes 运行时自进化的安全核心：学习入口、skill create、skill patch、candidate 隔离、验证、eval case、eval、execution eval report、sandbox artifacts、审批、promote、checkpoint、reload、usage log、手动 quarantine、隔离建议、usage-driven patch candidate 和带质量评分的只读 eval case 建议。与 Hermes 原版的差距主要在后台 fork review、真实沙盒任务回放 eval、自动 usage 归因和自动 patch 评审。
 
 | 能力 | 当前项目 | Hermes 更完整方向 |
 |---|---|---|
@@ -202,7 +202,7 @@ skill proposal 创建后只会写入 `.mewcode/evolution/candidates/<proposal_id
 | 来源 | 用户提供正文或复盘摘要 | 从会话、文件、URL、trace 自动蒸馏 |
 | 更新策略 | 同名项目 skill 优先 patch，否则 create | 优先 patch 已加载 skill，再 patch umbrella skill，最后创建新 skill |
 | 隔离 | 主命令流创建 candidate，eval/run-eval/show-eval/promote 门禁 | fork 隔离 review agent，限制工具白名单 |
-| 验证 | 静态格式、冲突校验、只读 eval case 建议、eval case 覆盖和三轮 sandbox artifact 报告 | skill verifier + reload + 沙盒任务回放评估 |
+| 验证 | 静态格式、冲突校验、带质量评分的只读 eval case 建议、eval case 覆盖和三轮 sandbox artifact 报告 | skill verifier + reload + 沙盒任务回放评估 |
 | 降级 | `/evolve suggest-quarantine` 只读建议，`/evolve propose-patch-from-usage` 生成 patch candidate，`/evolve quarantine` 手动隔离项目级正式 skill | 根据真实任务结果自动建议 quarantine 或 patch |
 
 ## 5. 修改清单
@@ -212,7 +212,7 @@ skill proposal 创建后只会写入 `.mewcode/evolution/candidates/<proposal_id
 - 新增 `mewcode/commands/handlers/learn.py`：提供 `/learn` 显式学习入口，同名项目 skill 存在时自动创建 patch proposal，并自动记录 learn evidence。
 - 修改 `mewcode/commands/handlers/evolve.py`：新增 `propose-skill` / `propose-skill-patch` / `add-eval-case` / `eval` / `run-eval` / `show-eval` / `promote` 子命令、skill promote 前 checkpoint、promote 后 loader reload。
 - 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve quarantine <skill-name> [:: reason]`，隔离正式项目 skill 后 reload loader。
-- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve suggest-eval-cases <proposal_id>`，输出只读 eval case 建议命令，不写入 `cases.jsonl`。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve suggest-eval-cases <proposal_id>`，输出带质量评分的只读 eval case 建议命令，不写入 `cases.jsonl`。
 - 修改 `mewcode/tools/load_skill.py` 和 `mewcode/skills/loader.py`：`LoadSkill` 成功激活 skill 后写入 usage log。
 - 修改 `mewcode/commands/handlers/__init__.py`：注册 `/learn`。
 - 修改 `tests/test_evolution.py`：新增 engine 与 slash command 的 skill 自进化测试，并覆盖损坏 skill proposal 的可读错误返回、eval case 成功/失败、无 case 阻断、execution eval 报告和 promote execution eval 门禁。
@@ -558,7 +558,7 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 ### 2026-07-28 Usage Patch Eval Case Suggestion 验证记录
 
-本次把 usage-driven patch candidate 的后续评审向前推进一步：系统可以根据 proposal evidence 输出三轮 eval case 建议命令，但不会自动写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`。理由是测试用例本身也可能由模型错误生成，必须让用户先看到测试意图和命令，再决定是否添加。
+本次把 usage-driven patch candidate 的后续评审向前推进一步：系统可以根据 proposal evidence 输出三轮 eval case 建议命令，并为每条建议标出质量评分、coverage 和 rationale，但不会自动写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`。理由是测试用例本身也可能由模型错误生成，必须让用户先看到测试意图、质量依据和命令，再决定是否添加。
 
 TDD 红灯记录：
 
@@ -567,13 +567,14 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_suggest_e
 2 failed
 ```
 
-失败原因符合预期：engine 尚无 `suggest_eval_cases()`，命令层也不识别 `suggest-eval-cases`。
+失败原因符合预期：engine 尚无 `suggest_eval_cases()`，命令层也不识别 `suggest-eval-cases`。追加质量评分断言后，同一命令再次得到 2 个预期失败，覆盖建议缺少 `quality` 字段和命令输出缺少 `Quality: high`。
 
 实现内容：
 
 - 修改 `mewcode/evolution/engine.py`：新增 `suggest_eval_cases()`，从 proposal evidence、usage feedback patch notes 和 candidate description 生成三轮建议。
+- 修改 `mewcode/evolution/engine.py`：新增 `quality`、`score`、`coverage` 和 `rationale` 字段；`high` 代表直接覆盖真实 usage feedback，`medium` 代表结构性 patch guard，`low` 代表描述或名称兜底。
 - 修改 `mewcode/evolution/engine.py`：新增只读命令模板渲染，避免写入 eval case 文件或改变 manifest 状态。
-- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve suggest-eval-cases <proposal_id>`，展示 task、must_contain 和建议的 `/evolve add-eval-case ...` 命令。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve suggest-eval-cases <proposal_id>`，展示 task、质量评分、coverage、rationale、must_contain 和建议的 `/evolve add-eval-case ...` 命令。
 - 修改 `tests/test_evolution.py`：新增 engine 和命令层只读建议测试。
 - 修改 `README.md`、`docs/self-evolution-development-progress-recap-zh.md`、`docs/verified-skill-evolution-recap-zh.md` 和本文档：同步记录能力和安全边界。
 
@@ -606,6 +607,6 @@ PYTHONPATH=. pytest -q -x
 FAILED tests/test_agent.py::test_multi_step_autonomous
 ```
 
-全量首个失败点仍为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次只读 eval case 建议修改无直接依赖。
+全量首个失败点仍为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次带质量评分的只读 eval case 建议修改无直接依赖。
 
-限制说明：当前建议器不判断“测试是否足够代表用户真实意图”，也不会自动执行 eval。用户仍需要显式添加 eval case，再运行 `eval -> run-eval -> show-eval -> approve -> promote`。
+限制说明：当前建议器只给出基础规则评分，不判断“测试是否足够代表用户真实意图”，也不会自动执行 eval。用户仍需要显式添加 eval case，再运行 `eval -> run-eval -> show-eval -> approve -> promote`。

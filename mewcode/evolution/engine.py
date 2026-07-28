@@ -424,7 +424,8 @@ class EvolutionEngine:
         target_count = max(1, count)
         suggestions: list[dict] = []
         for index in range(target_count):
-            term = terms[index % len(terms)]
+            term_info = terms[index % len(terms)]
+            term = term_info["term"]
             task = f"验证 {skill_name} 能处理 usage 反馈：{term}"
             must_contain = [term]
             suggestion = {
@@ -433,6 +434,10 @@ class EvolutionEngine:
                 "task": task,
                 "must_contain": must_contain,
                 "must_not_contain": [],
+                "quality": term_info["quality"],
+                "score": term_info["score"],
+                "coverage": term_info["coverage"],
+                "rationale": term_info["rationale"],
             }
             suggestion["command"] = self._render_add_eval_case_command(
                 proposal.id,
@@ -1330,32 +1335,68 @@ class EvolutionEngine:
         self,
         proposal: EvolutionProposal,
         payload: dict,
-    ) -> list[str]:
-        terms: list[str] = []
+    ) -> list[dict]:
+        terms: list[dict] = []
         for evidence_id in proposal.evidence_ids:
             evidence = self.store.get_evidence(evidence_id)
             if evidence is None:
                 continue
             summaries = evidence.metadata.get("summaries")
             if isinstance(summaries, list):
-                terms.extend(
-                    str(summary).strip()
-                    for summary in summaries
-                    if str(summary).strip()
-                )
+                for summary in summaries:
+                    term = str(summary).strip()
+                    if not term:
+                        continue
+                    terms.append({
+                        "term": term,
+                        "quality": "high",
+                        "score": 3,
+                        "coverage": "usage_feedback",
+                        "rationale": (
+                            "directly covers usage feedback recorded for this skill"
+                        ),
+                    })
         body = str(payload.get("body", ""))
         if "Usage Feedback Patch Notes" in body:
-            terms.append("Usage Feedback Patch Notes")
+            terms.append({
+                "term": "Usage Feedback Patch Notes",
+                "quality": "medium",
+                "score": 2,
+                "coverage": "structural_patch_guard",
+                "rationale": "checks that the patch keeps feedback traceability visible",
+            })
         if "Required Patch Behavior" in body:
-            terms.append("Required Patch Behavior")
+            terms.append({
+                "term": "Required Patch Behavior",
+                "quality": "medium",
+                "score": 2,
+                "coverage": "structural_patch_guard",
+                "rationale": "checks that the patch keeps explicit promotion requirements",
+            })
         if str(payload.get("description", "")).strip():
-            terms.append(str(payload["description"]).strip())
+            terms.append({
+                "term": str(payload["description"]).strip(),
+                "quality": "low",
+                "score": 1,
+                "coverage": "skill_description",
+                "rationale": "fallback coverage from the skill description",
+            })
 
-        deduped: list[str] = []
+        deduped: list[dict] = []
+        seen: set[str] = set()
         for term in terms:
-            if term not in deduped:
-                deduped.append(term)
-        return deduped or [str(payload["name"])]
+            text = str(term["term"])
+            if text in seen:
+                continue
+            seen.add(text)
+            deduped.append(term)
+        return deduped or [{
+            "term": str(payload["name"]),
+            "quality": "low",
+            "score": 1,
+            "coverage": "skill_name",
+            "rationale": "fallback coverage from the skill name",
+        }]
 
     @staticmethod
     def _render_add_eval_case_command(

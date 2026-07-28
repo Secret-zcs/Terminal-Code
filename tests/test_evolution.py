@@ -805,6 +805,13 @@ class TestEvolutionEngine:
         assert suggestions[0]["proposal_id"] == proposal.id
         assert suggestions[0]["skill_name"] == "review-loop"
         assert suggestions[0]["must_contain"]
+        assert suggestions[0]["quality"] == "high"
+        assert suggestions[0]["coverage"] == "usage_feedback"
+        assert "directly covers usage feedback" in suggestions[0]["rationale"]
+        assert suggestions[1]["quality"] == "high"
+        assert suggestions[1]["coverage"] == "usage_feedback"
+        assert suggestions[2]["quality"] == "medium"
+        assert suggestions[2]["coverage"] == "structural_patch_guard"
         assert suggestions[0]["command"].startswith(
             f"/evolve add-eval-case {proposal.id} ::"
         )
@@ -1234,5 +1241,7 @@ class TestEvolveCommand:
 
         message = "\n".join(ui.messages)
         assert "Suggested eval cases" in message
+        assert "Quality: high" in message
+        assert "Coverage: usage_feedback" in message
         assert f"/evolve add-eval-case {proposal.id}" in message
         assert not EvolutionEngine(tmp_path).eval_cases_path("review-loop").exists()
