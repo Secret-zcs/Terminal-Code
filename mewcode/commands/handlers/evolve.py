@@ -566,6 +566,10 @@ def _handle_suggest_eval_cases(
     ]
     if review["warnings"]:
         lines.append("Warnings: " + "; ".join(review["warnings"]))
+    if review.get("uncovered_usage_feedback"):
+        lines.append("Uncovered usage feedback:")
+        for feedback in review["uncovered_usage_feedback"]:
+            lines.append(f"  - {feedback}")
     suggestions = review["suggestions"]
     for index, suggestion in enumerate(suggestions, 1):
         lines.extend([

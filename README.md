@@ -187,7 +187,7 @@ mewcode --mode default
 | `/evolve promote <id>` | 将已批准的 candidate skill 提升为正式 skill |
 | `/evolve record-usage <name> :: <event> [:: summary]` | 手动记录正式 skill 的失败或用户反馈事件 |
 | `/evolve suggest-quarantine [name]` | 根据负面 usage 事件建议隔离不可靠 skill |
-| `/evolve suggest-eval-cases <id>` | 为候选 skill 输出带质量摘要的只读 eval case 建议 |
+| `/evolve suggest-eval-cases <id>` | 为候选 skill 输出带 coverage gap 的只读 eval case 建议 |
 | `/evolve propose-patch-from-usage <name>` | 根据负面 usage 生成 skill patch candidate |
 | `/evolve quarantine <name> [:: reason]` | 将不可靠的项目级正式 skill 移入隔离区 |
 | `/learn <name> :: <description> :: <body>` | 将可复用流程蒸馏为 skill 提案；同名项目 skill 存在时优先 patch |
@@ -274,7 +274,7 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 /evolve quarantine <skill-name> [:: reason]
 ```
 
-`/evolve apply` 在写入 memory 前会尝试创建 checkpoint；`/evolve promote` 在启用 skill candidate 前会尝试创建 checkpoint，并在成功后 reload skill loader。`LoadSkill` 成功激活 skill 会记录到 `.mewcode/evolution/skill_usage.jsonl`；`/evolve record-usage` 可手动补充 `failure` / `user_feedback` 等事件，`/evolve suggest-quarantine` 会基于负面事件给出隔离建议；`/evolve propose-patch-from-usage` 只生成 patch candidate，不自动启用；`/evolve suggest-eval-cases` 只输出建议命令、质量摘要、warnings 和 recommendation，不写入 eval case；`high` 表示直接覆盖真实 usage feedback，`medium` 表示结构性 patch guard，`low` 表示描述兜底；`/evolve quarantine` 会把项目级正式 skill 移入 `.mewcode/evolution/quarantine/<skill-name>/`，并 reload skill loader。
+`/evolve apply` 在写入 memory 前会尝试创建 checkpoint；`/evolve promote` 在启用 skill candidate 前会尝试创建 checkpoint，并在成功后 reload skill loader。`LoadSkill` 成功激活 skill 会记录到 `.mewcode/evolution/skill_usage.jsonl`；`/evolve record-usage` 可手动补充 `failure` / `user_feedback` 等事件，`/evolve suggest-quarantine` 会基于负面事件给出隔离建议；`/evolve propose-patch-from-usage` 只生成 patch candidate，不自动启用；`/evolve suggest-eval-cases` 只输出建议命令、质量摘要、coverage gap、warnings 和 recommendation，不写入 eval case；`high` 表示直接覆盖真实 usage feedback，`medium` 表示结构性 patch guard，`low` 表示描述兜底；`/evolve quarantine` 会把项目级正式 skill 移入 `.mewcode/evolution/quarantine/<skill-name>/`，并 reload skill loader。
 
 详细说明：
 
@@ -306,7 +306,7 @@ PYTHONPATH=. pytest tests/test_commands.py -q
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-219 passed
+221 passed
 ```
 
 ---

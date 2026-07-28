@@ -454,6 +454,11 @@ class EvolutionEngine:
         *,
         count: int = MIN_EXECUTION_EVAL_CASES,
     ) -> dict:
+        proposal = self.store.get_proposal(proposal_id)
+        if proposal is None:
+            raise ValueError(f"proposal {proposal_id} not found")
+        if proposal.target != "skill":
+            raise ValueError(f"proposal {proposal_id} is not a skill proposal")
         suggestions = self.suggest_eval_cases(proposal_id, count=count)
         quality_counts = {"high": 0, "medium": 0, "low": 0}
         coverage_counts: dict[str, int] = {}
@@ -468,6 +473,21 @@ class EvolutionEngine:
             warnings.append("no high-quality usage feedback eval case suggestions")
         if coverage_counts.get("usage_feedback", 0) == 0:
             warnings.append("no suggestion directly covers recorded usage feedback")
+        usage_feedback_terms = self._usage_feedback_terms_for_proposal(proposal)
+        covered_feedback = {
+            term
+            for suggestion in suggestions
+            if suggestion.get("coverage") == "usage_feedback"
+            for term in suggestion.get("must_contain", [])
+        }
+        uncovered_usage_feedback = [
+            term for term in usage_feedback_terms if term not in covered_feedback
+        ]
+        if uncovered_usage_feedback:
+            warnings.append(
+                f"{len(uncovered_usage_feedback)} usage feedback summaries are not "
+                "covered by suggested eval cases"
+            )
 
         proposal_id_value = suggestions[0]["proposal_id"] if suggestions else proposal_id
         skill_name = suggestions[0]["skill_name"] if suggestions else ""
@@ -483,6 +503,7 @@ class EvolutionEngine:
             "suggestions": suggestions,
             "quality_counts": quality_counts,
             "coverage_counts": coverage_counts,
+            "uncovered_usage_feedback": uncovered_usage_feedback,
             "warnings": warnings,
             "recommendation": recommendation,
         }
@@ -1376,25 +1397,16 @@ class EvolutionEngine:
         payload: dict,
     ) -> list[dict]:
         terms: list[dict] = []
-        for evidence_id in proposal.evidence_ids:
-            evidence = self.store.get_evidence(evidence_id)
-            if evidence is None:
-                continue
-            summaries = evidence.metadata.get("summaries")
-            if isinstance(summaries, list):
-                for summary in summaries:
-                    term = str(summary).strip()
-                    if not term:
-                        continue
-                    terms.append({
-                        "term": term,
-                        "quality": "high",
-                        "score": 3,
-                        "coverage": "usage_feedback",
-                        "rationale": (
-                            "directly covers usage feedback recorded for this skill"
-                        ),
-                    })
+        for term in self._usage_feedback_terms_for_proposal(proposal):
+            terms.append({
+                "term": term,
+                "quality": "high",
+                "score": 3,
+                "coverage": "usage_feedback",
+                "rationale": (
+                    "directly covers usage feedback recorded for this skill"
+                ),
+            })
         body = str(payload.get("body", ""))
         if "Usage Feedback Patch Notes" in body:
             terms.append({
@@ -1436,6 +1448,27 @@ class EvolutionEngine:
             "coverage": "skill_name",
             "rationale": "fallback coverage from the skill name",
         }]
+
+    def _usage_feedback_terms_for_proposal(
+        self,
+        proposal: EvolutionProposal,
+    ) -> list[str]:
+        terms: list[str] = []
+        seen: set[str] = set()
+        for evidence_id in proposal.evidence_ids:
+            evidence = self.store.get_evidence(evidence_id)
+            if evidence is None:
+                continue
+            summaries = evidence.metadata.get("summaries")
+            if not isinstance(summaries, list):
+                continue
+            for summary in summaries:
+                term = str(summary).strip()
+                if not term or term in seen:
+                    continue
+                seen.add(term)
+                terms.append(term)
+        return terms
 
     @staticmethod
     def _render_add_eval_case_command(

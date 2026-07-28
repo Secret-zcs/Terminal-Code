@@ -94,7 +94,7 @@ def _add_debug_eval_cases(engine: EvolutionEngine, proposal_id: str) -> list[str
     ]
 
 
-def _usage_patch_proposal(tmp_path: Path):
+def _usage_patch_proposal(tmp_path: Path, summaries: list[str] | None = None):
     skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
     skill_path.parent.mkdir(parents=True)
     skill_path.write_text(
@@ -108,18 +108,17 @@ def _usage_patch_proposal(tmp_path: Path):
         encoding="utf-8",
     )
     engine = EvolutionEngine(tmp_path)
-    engine.record_skill_usage(
-        "review-loop",
-        event="failure",
-        source="test",
-        metadata={"summary": "错误地跳过复盘文档。"},
-    )
-    engine.record_skill_usage(
-        "review-loop",
-        event="user_feedback",
-        source="test",
-        metadata={"summary": "用户纠正：遗漏验证。"},
-    )
+    usage_summaries = summaries or [
+        "错误地跳过复盘文档。",
+        "用户纠正：遗漏验证。",
+    ]
+    for index, summary in enumerate(usage_summaries):
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure" if index == 0 else "user_feedback",
+            source="test",
+            metadata={"summary": summary},
+        )
     return engine, engine.propose_skill_patch_from_usage("review-loop")
 
 
@@ -872,6 +871,29 @@ class TestEvolutionEngine:
         assert review["recommendation"].startswith("Add high-quality")
         assert len(review["suggestions"]) == 3
 
+    def test_review_eval_case_suggestions_reports_uncovered_usage_feedback(
+        self, tmp_path: Path
+    ) -> None:
+        engine, proposal = _usage_patch_proposal(
+            tmp_path,
+            [
+                "错误地跳过复盘文档。",
+                "用户纠正：遗漏验证。",
+                "没有展示测试结果。",
+                "未解释为什么该 skill 应该更新。",
+            ],
+        )
+
+        review = engine.review_eval_case_suggestions(proposal.id)
+
+        assert review["quality_counts"] == {"high": 3, "medium": 0, "low": 0}
+        assert review["coverage_counts"]["usage_feedback"] == 3
+        assert review["uncovered_usage_feedback"] == [
+            "未解释为什么该 skill 应该更新。"
+        ]
+        assert any("1 usage feedback summaries are not covered" in warning
+                   for warning in review["warnings"])
+
     def test_quarantine_project_skill_moves_it_out_of_loader_path(
         self, tmp_path: Path
     ) -> None:
@@ -1292,3 +1314,41 @@ class TestEvolveCommand:
         assert "Coverage: usage_feedback" in message
         assert f"/evolve add-eval-case {proposal.id}" in message
         assert not EvolutionEngine(tmp_path).eval_cases_path("review-loop").exists()
+
+    async def test_suggest_eval_cases_command_shows_uncovered_feedback(
+        self, tmp_path: Path
+    ) -> None:
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        ui = MockUI()
+        for index, summary in enumerate([
+            "错误地跳过复盘文档。",
+            "用户纠正：遗漏验证。",
+            "没有展示测试结果。",
+            "未解释为什么该 skill 应该更新。",
+        ]):
+            event = "failure" if index == 0 else "user_feedback"
+            await handle_evolve(_ctx(
+                tmp_path,
+                f"record-usage review-loop :: {event} :: {summary}",
+                ui,
+            ))
+        await handle_evolve(_ctx(tmp_path, "propose-patch-from-usage review-loop", ui))
+        proposal = EvolutionEngine(tmp_path).store.load_proposals()[0]
+
+        await handle_evolve(_ctx(tmp_path, f"suggest-eval-cases {proposal.id}", ui))
+
+        message = "\n".join(ui.messages)
+        assert "Warnings: 1 usage feedback summaries are not covered" in message
+        assert "Uncovered usage feedback:" in message
+        assert "未解释为什么该 skill 应该更新。" in message

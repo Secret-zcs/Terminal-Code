@@ -558,7 +558,7 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 ### 2026-07-28 Usage Patch Eval Case Suggestion 验证记录
 
-本次把 usage-driven patch candidate 的后续评审向前推进一步：系统可以根据 proposal evidence 输出三轮 eval case 建议命令，并为每条建议标出质量评分、coverage 和 rationale，同时输出建议集质量摘要、warnings 和 recommendation，但不会自动写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`。理由是测试用例本身也可能由模型错误生成，必须让用户先看到测试意图、质量依据和命令，再决定是否添加。
+本次把 usage-driven patch candidate 的后续评审向前推进一步：系统可以根据 proposal evidence 输出三轮 eval case 建议命令，并为每条建议标出质量评分、coverage 和 rationale，同时输出建议集质量摘要、coverage gap、warnings 和 recommendation，但不会自动写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`。理由是测试用例本身也可能由模型错误生成，必须让用户先看到测试意图、质量依据、未覆盖反馈和命令，再决定是否添加。
 
 TDD 红灯记录：
 
@@ -567,15 +567,16 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_suggest_e
 2 failed
 ```
 
-失败原因符合预期：engine 尚无 `suggest_eval_cases()`，命令层也不识别 `suggest-eval-cases`。追加质量评分断言后，同一命令再次得到 2 个预期失败，覆盖建议缺少 `quality` 字段和命令输出缺少 `Quality: high`。追加建议集摘要断言后得到 2 个预期失败，覆盖缺少 `review_eval_case_suggestions()` 和命令输出缺少 `Quality summary`。
+失败原因符合预期：engine 尚无 `suggest_eval_cases()`，命令层也不识别 `suggest-eval-cases`。追加质量评分断言后，同一命令再次得到 2 个预期失败，覆盖建议缺少 `quality` 字段和命令输出缺少 `Quality: high`。追加建议集摘要断言后得到 2 个预期失败，覆盖缺少 `review_eval_case_suggestions()` 和命令输出缺少 `Quality summary`。追加 coverage gap 断言后得到 1 个 engine 预期失败和 1 个命令层预期失败，覆盖缺少 `uncovered_usage_feedback` 和命令输出缺少具体未覆盖反馈。
 
 实现内容：
 
 - 修改 `mewcode/evolution/engine.py`：新增 `suggest_eval_cases()`，从 proposal evidence、usage feedback patch notes 和 candidate description 生成三轮建议。
 - 修改 `mewcode/evolution/engine.py`：新增 `quality`、`score`、`coverage` 和 `rationale` 字段；`high` 代表直接覆盖真实 usage feedback，`medium` 代表结构性 patch guard，`low` 代表描述或名称兜底。
 - 修改 `mewcode/evolution/engine.py`：新增 `review_eval_case_suggestions()`，汇总建议质量分布、coverage 分布、warnings 和 recommendation。
+- 修改 `mewcode/evolution/engine.py`：新增 `uncovered_usage_feedback`，列出默认建议没有覆盖到的真实 usage feedback。
 - 修改 `mewcode/evolution/engine.py`：新增只读命令模板渲染，避免写入 eval case 文件或改变 manifest 状态。
-- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve suggest-eval-cases <proposal_id>`，展示 quality summary、recommendation、task、质量评分、coverage、rationale、must_contain 和建议的 `/evolve add-eval-case ...` 命令。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve suggest-eval-cases <proposal_id>`，展示 quality summary、recommendation、未覆盖 feedback、task、质量评分、coverage、rationale、must_contain 和建议的 `/evolve add-eval-case ...` 命令。
 - 修改 `tests/test_evolution.py`：新增 engine 和命令层只读建议测试。
 - 修改 `README.md`、`docs/self-evolution-development-progress-recap-zh.md`、`docs/verified-skill-evolution-recap-zh.md` 和本文档：同步记录能力和安全边界。
 
@@ -586,10 +587,10 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_suggest_e
 2 passed
 
 PYTHONPATH=. pytest tests/test_evolution.py -q
-44 passed
+46 passed
 
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-219 passed
+221 passed
 ```
 
 编译和格式检查记录：
@@ -608,6 +609,6 @@ PYTHONPATH=. pytest -q -x
 FAILED tests/test_agent.py::test_multi_step_autonomous
 ```
 
-全量首个失败点仍为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次带质量摘要的只读 eval case 建议修改无直接依赖。
+全量首个失败点仍为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次带 coverage gap 的只读 eval case 建议修改无直接依赖。
 
 限制说明：当前建议器只给出基础规则评分，不判断“测试是否足够代表用户真实意图”，也不会自动执行 eval。用户仍需要显式添加 eval case，再运行 `eval -> run-eval -> show-eval -> approve -> promote`。
