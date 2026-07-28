@@ -548,14 +548,25 @@ def _handle_suggest_eval_cases(
         ctx.ui.add_system_message("Usage: /evolve suggest-eval-cases <proposal_id>")
         return
     try:
-        suggestions = engine.suggest_eval_cases(proposal_id)
+        review = engine.review_eval_case_suggestions(proposal_id)
     except ValueError as e:
         ctx.ui.add_system_message(f"Evolution eval case suggestions failed: {e}")
         return
+    quality = review["quality_counts"]
     lines = [
         f"Suggested eval cases for {proposal_id}:",
         "Review these commands before adding them; no eval files were written.",
+        (
+            "Quality summary: "
+            f"high={quality.get('high', 0)}, "
+            f"medium={quality.get('medium', 0)}, "
+            f"low={quality.get('low', 0)}"
+        ),
+        f"Recommendation: {review['recommendation']}",
     ]
+    if review["warnings"]:
+        lines.append("Warnings: " + "; ".join(review["warnings"]))
+    suggestions = review["suggestions"]
     for index, suggestion in enumerate(suggestions, 1):
         lines.extend([
             f"  {index}. Task: {suggestion['task']}",

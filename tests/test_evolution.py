@@ -94,6 +94,35 @@ def _add_debug_eval_cases(engine: EvolutionEngine, proposal_id: str) -> list[str
     ]
 
 
+def _usage_patch_proposal(tmp_path: Path):
+    skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+    skill_path.parent.mkdir(parents=True)
+    skill_path.write_text(
+        "---\n"
+        "name: review-loop\n"
+        "description: Review flow\n"
+        "mode: inline\n"
+        "context: recent\n"
+        "---\n\n"
+        "# Review\n\n原流程。\n",
+        encoding="utf-8",
+    )
+    engine = EvolutionEngine(tmp_path)
+    engine.record_skill_usage(
+        "review-loop",
+        event="failure",
+        source="test",
+        metadata={"summary": "错误地跳过复盘文档。"},
+    )
+    engine.record_skill_usage(
+        "review-loop",
+        event="user_feedback",
+        source="test",
+        metadata={"summary": "用户纠正：遗漏验证。"},
+    )
+    return engine, engine.propose_skill_patch_from_usage("review-loop")
+
+
 class TestEvolutionEngine:
     def test_records_evidence_and_proposal(self, tmp_path: Path) -> None:
         engine = EvolutionEngine(tmp_path)
@@ -827,6 +856,22 @@ class TestEvolutionEngine:
         ok, message = engine.evaluate(proposal.id)
         assert ok, message
 
+    def test_review_eval_case_suggestions_summarizes_quality(
+        self, tmp_path: Path
+    ) -> None:
+        engine, proposal = _usage_patch_proposal(tmp_path)
+
+        review = engine.review_eval_case_suggestions(proposal.id)
+
+        assert review["proposal_id"] == proposal.id
+        assert review["skill_name"] == "review-loop"
+        assert review["quality_counts"] == {"high": 2, "medium": 1, "low": 0}
+        assert review["coverage_counts"]["usage_feedback"] == 2
+        assert review["coverage_counts"]["structural_patch_guard"] == 1
+        assert review["warnings"] == []
+        assert review["recommendation"].startswith("Add high-quality")
+        assert len(review["suggestions"]) == 3
+
     def test_quarantine_project_skill_moves_it_out_of_loader_path(
         self, tmp_path: Path
     ) -> None:
@@ -1241,6 +1286,8 @@ class TestEvolveCommand:
 
         message = "\n".join(ui.messages)
         assert "Suggested eval cases" in message
+        assert "Quality summary: high=2, medium=1, low=0" in message
+        assert "Recommendation: Add high-quality" in message
         assert "Quality: high" in message
         assert "Coverage: usage_feedback" in message
         assert f"/evolve add-eval-case {proposal.id}" in message

@@ -448,6 +448,45 @@ class EvolutionEngine:
             suggestions.append(suggestion)
         return suggestions
 
+    def review_eval_case_suggestions(
+        self,
+        proposal_id: str,
+        *,
+        count: int = MIN_EXECUTION_EVAL_CASES,
+    ) -> dict:
+        suggestions = self.suggest_eval_cases(proposal_id, count=count)
+        quality_counts = {"high": 0, "medium": 0, "low": 0}
+        coverage_counts: dict[str, int] = {}
+        for suggestion in suggestions:
+            quality = str(suggestion.get("quality", "low"))
+            quality_counts[quality] = quality_counts.get(quality, 0) + 1
+            coverage = str(suggestion.get("coverage", "unknown"))
+            coverage_counts[coverage] = coverage_counts.get(coverage, 0) + 1
+
+        warnings: list[str] = []
+        if quality_counts.get("high", 0) == 0:
+            warnings.append("no high-quality usage feedback eval case suggestions")
+        if coverage_counts.get("usage_feedback", 0) == 0:
+            warnings.append("no suggestion directly covers recorded usage feedback")
+
+        proposal_id_value = suggestions[0]["proposal_id"] if suggestions else proposal_id
+        skill_name = suggestions[0]["skill_name"] if suggestions else ""
+        recommendation = (
+            "Add high-quality usage feedback cases first, then review medium/low "
+            "structural guards before adding them."
+            if quality_counts.get("high", 0)
+            else "Add real usage-feedback eval cases before relying on these suggestions."
+        )
+        return {
+            "proposal_id": proposal_id_value,
+            "skill_name": skill_name,
+            "suggestions": suggestions,
+            "quality_counts": quality_counts,
+            "coverage_counts": coverage_counts,
+            "warnings": warnings,
+            "recommendation": recommendation,
+        }
+
     def record_skill_usage(
         self,
         skill_name: str,

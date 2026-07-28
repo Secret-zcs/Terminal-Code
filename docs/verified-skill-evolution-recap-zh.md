@@ -551,7 +551,7 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 ### 2026-07-28 补充：Usage Patch Eval Case Suggestion
 
-当前新增了 `/evolve suggest-eval-cases <proposal_id>`，用于把 usage-driven patch candidate 的 evidence 转成三轮 eval case 建议命令，并展示 `quality`、`score`、`coverage` 和 `rationale`。它是只读能力：不会写入 `cases.jsonl`，不会改变 manifest，也不会让 candidate 自动进入 eval 或 promote。
+当前新增了 `/evolve suggest-eval-cases <proposal_id>`，用于把 usage-driven patch candidate 的 evidence 转成三轮 eval case 建议命令，并展示 `quality`、`score`、`coverage`、`rationale`、质量摘要、warnings 和 recommendation。它是只读能力：不会写入 `cases.jsonl`，不会改变 manifest，也不会让 candidate 自动进入 eval 或 promote。
 
 TDD 红灯记录：
 
@@ -562,6 +562,8 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_suggest_e
 
 追加红灯记录：加入质量评分断言后，同一命令得到 2 个预期失败，覆盖建议缺少 `quality` 字段和命令输出缺少 `Quality: high`。
 
+追加红灯记录：加入建议集摘要断言后，同一命令得到 2 个预期失败，覆盖缺少 `review_eval_case_suggestions()` 和命令输出缺少 `Quality summary`。
+
 绿灯记录：
 
 ```text
@@ -569,19 +571,19 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_suggest_e
 2 passed
 
 PYTHONPATH=. pytest tests/test_evolution.py -q
-43 passed
+44 passed
 
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-218 passed
+219 passed
 ```
 
 编译和格式检查记录：`python3 -m py_compile mewcode/evolution/engine.py mewcode/commands/handlers/evolve.py` 与 `git diff --check` 均无输出。
 
 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`，原因是旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略要求写前先读；和本次只读 eval case 建议修改无直接依赖。
 
-设计边界：测试用例本身也可能不正确，所以当前只给用户展示建议命令和基础质量评分。`high` 代表直接覆盖真实 usage feedback，`medium` 代表结构性 patch guard，`low` 代表描述兜底。用户需要显式执行 `/evolve add-eval-case`，再继续 `eval -> run-eval -> show-eval -> approve -> promote`。
+设计边界：测试用例本身也可能不正确，所以当前只给用户展示建议命令、基础质量评分和建议集摘要。`high` 代表直接覆盖真实 usage feedback，`medium` 代表结构性 patch guard，`low` 代表描述兜底。用户需要显式执行 `/evolve add-eval-case`，再继续 `eval -> run-eval -> show-eval -> approve -> promote`。
 
-当前已实现第一阶段 candidate/promote、eval gate、eval case gate、execution eval report gate，以及基础 usage log / quarantine / quarantine suggestion / usage-driven patch candidate / 带质量评分的只读 eval case suggestion。下一阶段建议增加：
+当前已实现第一阶段 candidate/promote、eval gate、eval case gate、execution eval report gate，以及基础 usage log / quarantine / quarantine suggestion / usage-driven patch candidate / 带质量摘要的只读 eval case suggestion。下一阶段建议增加：
 
 - 自动 usage 归因：记录 skill 触发后的任务结果、用户反馈和失败原因，用于后续自动降级或复盘。
 - patch 评审器增强：根据历史成功率校准质量评分，并提示哪些 case 仍缺少真实任务覆盖。

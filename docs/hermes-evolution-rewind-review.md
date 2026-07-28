@@ -1057,14 +1057,17 @@ skill verifier
 
 - 修改 `mewcode/evolution/engine.py`：新增 `suggest_eval_cases()`，基于 skill proposal evidence、usage feedback patch notes 和 candidate description 生成三轮 eval case 建议。
 - 修改 `mewcode/evolution/engine.py`：为每条建议新增 `quality`、`score`、`coverage` 和 `rationale`，区分真实 usage feedback 覆盖、结构性 patch guard 和描述兜底。
+- 修改 `mewcode/evolution/engine.py`：新增 `review_eval_case_suggestions()`，汇总 high/medium/low、coverage 分布、warnings 和 recommendation。
 - 修改 `mewcode/evolution/engine.py`：新增 `/evolve add-eval-case ...` 命令模板渲染，只移除会破坏命令结构的 `::` 和换行，不改写反馈正文。
-- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve suggest-eval-cases <proposal_id>`，只展示建议 task、质量评分、coverage、rationale、must_contain 和命令模板。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve suggest-eval-cases <proposal_id>`，只展示建议 task、质量评分、coverage、rationale、must_contain、质量摘要和命令模板。
 - 修改 `tests/test_evolution.py`：新增 engine 侧只读建议测试，并验证用户显式添加建议 case 后 `evaluate()` 可通过；新增命令层只读展示测试。
+- 修改 `tests/test_evolution.py`：新增 `review_eval_case_suggestions()` 摘要测试，验证 high=2、medium=1、low=0，且命令输出 recommendation。
 - 修改 `README.md`、`docs/self-evolution-development-progress-recap-zh.md`、`docs/hermes-skill-evolution-implementation.md` 和 `docs/verified-skill-evolution-recap-zh.md`：同步记录命令、能力边界和留档。
 - TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_suggest_eval_cases_for_usage_patch_is_read_only tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_is_read_only -q` 在实现前得到 2 个预期失败，覆盖缺少 engine API 和命令入口。
 - 追加红灯记录：同一命令在加入质量评分断言后得到 2 个预期失败，覆盖建议缺少 `quality` 字段和命令输出缺少 `Quality: high`。
+- 追加红灯记录：加入建议集摘要断言后得到 2 个预期失败，覆盖缺少 `review_eval_case_suggestions()` 和命令输出缺少 `Quality summary`。
 - 绿灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_suggest_eval_cases_for_usage_patch_is_read_only tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_is_read_only -q` 通过，2 个测试成功。
-- 扩展验证记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，43 个测试成功；`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，218 个测试成功。
+- 扩展验证记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，44 个测试成功；`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，219 个测试成功。
 - 编译检查记录：`python3 -m py_compile mewcode/evolution/engine.py mewcode/commands/handlers/evolve.py` 无输出。
 - 格式检查记录：`git diff --check` 无输出。
 - 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略返回 `Error: file has not been read yet. Read it first before editing.`，和本次只读 eval case 建议修改无直接依赖。
