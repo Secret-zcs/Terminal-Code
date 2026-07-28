@@ -403,6 +403,46 @@ class EvolutionEngine:
         self._invalidate_candidate_eval(proposal)
         return str(eval_case["id"])
 
+    def suggest_eval_cases(
+        self,
+        proposal_id: str,
+        *,
+        count: int = MIN_EXECUTION_EVAL_CASES,
+    ) -> list[dict]:
+        proposal = self.store.get_proposal(proposal_id)
+        if proposal is None:
+            raise ValueError(f"proposal {proposal_id} not found")
+        if proposal.target != "skill":
+            raise ValueError(f"proposal {proposal_id} is not a skill proposal")
+
+        payload = self._decode_skill_change(proposal.change)
+        skill_name = str(payload["name"])
+        if not VALID_NAME_RE.match(skill_name):
+            raise ValueError("invalid skill name for eval case suggestions")
+
+        terms = self._suggestion_terms_for_proposal(proposal, payload)
+        target_count = max(1, count)
+        suggestions: list[dict] = []
+        for index in range(target_count):
+            term = terms[index % len(terms)]
+            task = f"验证 {skill_name} 能处理 usage 反馈：{term}"
+            must_contain = [term]
+            suggestion = {
+                "proposal_id": proposal.id,
+                "skill_name": skill_name,
+                "task": task,
+                "must_contain": must_contain,
+                "must_not_contain": [],
+            }
+            suggestion["command"] = self._render_add_eval_case_command(
+                proposal.id,
+                task,
+                must_contain,
+                [],
+            )
+            suggestions.append(suggestion)
+        return suggestions
+
     def record_skill_usage(
         self,
         skill_name: str,
@@ -1285,6 +1325,56 @@ class EvolutionEngine:
             "status": "failed" if errors else "passed",
             "errors": errors,
         }
+
+    def _suggestion_terms_for_proposal(
+        self,
+        proposal: EvolutionProposal,
+        payload: dict,
+    ) -> list[str]:
+        terms: list[str] = []
+        for evidence_id in proposal.evidence_ids:
+            evidence = self.store.get_evidence(evidence_id)
+            if evidence is None:
+                continue
+            summaries = evidence.metadata.get("summaries")
+            if isinstance(summaries, list):
+                terms.extend(
+                    str(summary).strip()
+                    for summary in summaries
+                    if str(summary).strip()
+                )
+        body = str(payload.get("body", ""))
+        if "Usage Feedback Patch Notes" in body:
+            terms.append("Usage Feedback Patch Notes")
+        if "Required Patch Behavior" in body:
+            terms.append("Required Patch Behavior")
+        if str(payload.get("description", "")).strip():
+            terms.append(str(payload["description"]).strip())
+
+        deduped: list[str] = []
+        for term in terms:
+            if term not in deduped:
+                deduped.append(term)
+        return deduped or [str(payload["name"])]
+
+    @staticmethod
+    def _render_add_eval_case_command(
+        proposal_id: str,
+        task: str,
+        must_contain: list[str],
+        must_not_contain: list[str],
+    ) -> str:
+        def clean(value: str) -> str:
+            return value.replace("::", ":").replace("\n", " ").strip()
+
+        command = (
+            f"/evolve add-eval-case {proposal_id} :: "
+            f"{clean(task)} :: "
+            f"{','.join(clean(term) for term in must_contain)}"
+        )
+        if must_not_contain:
+            command += " :: " + ",".join(clean(term) for term in must_not_contain)
+        return command
 
     def _project_skill_path(self, name: str) -> Path:
         return self.project_skills_path / name / "SKILL.md"

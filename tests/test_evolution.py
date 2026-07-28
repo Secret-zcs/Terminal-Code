@@ -769,6 +769,57 @@ class TestEvolutionEngine:
         validation = engine.validate(proposal)
         assert validation.ok
 
+    def test_suggest_eval_cases_for_usage_patch_is_read_only(
+        self, tmp_path: Path
+    ) -> None:
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+        proposal = engine.propose_skill_patch_from_usage("review-loop")
+
+        suggestions = engine.suggest_eval_cases(proposal.id)
+
+        assert len(suggestions) == 3
+        assert suggestions[0]["proposal_id"] == proposal.id
+        assert suggestions[0]["skill_name"] == "review-loop"
+        assert suggestions[0]["must_contain"]
+        assert suggestions[0]["command"].startswith(
+            f"/evolve add-eval-case {proposal.id} ::"
+        )
+        assert not engine.eval_cases_path("review-loop").exists()
+
+        for suggestion in suggestions:
+            engine.add_eval_case(
+                proposal.id,
+                task=suggestion["task"],
+                must_contain=suggestion["must_contain"],
+                must_not_contain=suggestion["must_not_contain"],
+            )
+        ok, message = engine.evaluate(proposal.id)
+        assert ok, message
+
     def test_quarantine_project_skill_moves_it_out_of_loader_path(
         self, tmp_path: Path
     ) -> None:
@@ -1151,3 +1202,37 @@ class TestEvolveCommand:
         assert "Usage-driven skill patch proposal created" in message
         assert payload["action"] == "patch"
         assert "用户纠正：遗漏验证" in payload["body"]
+
+    async def test_suggest_eval_cases_command_is_read_only(self, tmp_path: Path) -> None:
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        ui = MockUI()
+        await handle_evolve(_ctx(
+            tmp_path,
+            "record-usage review-loop :: failure :: 错误地跳过复盘文档。",
+            ui,
+        ))
+        await handle_evolve(_ctx(
+            tmp_path,
+            "record-usage review-loop :: user_feedback :: 用户纠正：遗漏验证。",
+            ui,
+        ))
+        await handle_evolve(_ctx(tmp_path, "propose-patch-from-usage review-loop", ui))
+        proposal = EvolutionEngine(tmp_path).store.load_proposals()[0]
+
+        await handle_evolve(_ctx(tmp_path, f"suggest-eval-cases {proposal.id}", ui))
+
+        message = "\n".join(ui.messages)
+        assert "Suggested eval cases" in message
+        assert f"/evolve add-eval-case {proposal.id}" in message
+        assert not EvolutionEngine(tmp_path).eval_cases_path("review-loop").exists()

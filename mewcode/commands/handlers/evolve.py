@@ -18,6 +18,7 @@ Usage:
     /evolve promote <proposal_id>
     /evolve record-usage <skill-name> :: <event> [:: summary]
     /evolve suggest-quarantine [skill-name]
+    /evolve suggest-eval-cases <proposal_id>
     /evolve propose-patch-from-usage <skill-name>
     /evolve quarantine <skill-name> [:: reason]
 """
@@ -87,6 +88,8 @@ async def handle_evolve(ctx: CommandContext) -> None:
         _handle_record_usage(ctx, engine, rest)
     elif subcmd == "suggest-quarantine":
         _handle_suggest_quarantine(ctx, engine, rest)
+    elif subcmd == "suggest-eval-cases":
+        _handle_suggest_eval_cases(ctx, engine, rest)
     elif subcmd == "propose-patch-from-usage":
         _handle_propose_patch_from_usage(ctx, engine, rest)
     elif subcmd == "quarantine":
@@ -116,6 +119,7 @@ def _show_help(ctx: CommandContext) -> None:
             "  /evolve promote <proposal_id>",
             "  /evolve record-usage <skill-name> :: <event> [:: summary]",
             "  /evolve suggest-quarantine [skill-name]",
+            "  /evolve suggest-eval-cases <proposal_id>",
             "  /evolve propose-patch-from-usage <skill-name>",
             "  /evolve quarantine <skill-name> [:: reason]",
             "",
@@ -537,6 +541,30 @@ def _handle_propose_patch_from_usage(
     )
 
 
+def _handle_suggest_eval_cases(
+    ctx: CommandContext, engine: EvolutionEngine, proposal_id: str
+) -> None:
+    if not proposal_id:
+        ctx.ui.add_system_message("Usage: /evolve suggest-eval-cases <proposal_id>")
+        return
+    try:
+        suggestions = engine.suggest_eval_cases(proposal_id)
+    except ValueError as e:
+        ctx.ui.add_system_message(f"Evolution eval case suggestions failed: {e}")
+        return
+    lines = [
+        f"Suggested eval cases for {proposal_id}:",
+        "Review these commands before adding them; no eval files were written.",
+    ]
+    for index, suggestion in enumerate(suggestions, 1):
+        lines.extend([
+            f"  {index}. Task: {suggestion['task']}",
+            f"     Must contain: {', '.join(suggestion['must_contain'])}",
+            f"     Command: {suggestion['command']}",
+        ])
+    ctx.ui.add_system_message("\n".join(lines))
+
+
 def _split_terms(text: str) -> list[str]:
     return [
         term.strip()
@@ -595,7 +623,7 @@ EVOLVE_COMMAND = Command(
         "/evolve [observe|propose|propose-skill|propose-skill-patch|"
         "list|show|preview|approve|reject|apply|add-eval-case|eval|"
         "run-eval|show-eval|promote|record-usage|suggest-quarantine|"
-        "propose-patch-from-usage|quarantine]"
+        "suggest-eval-cases|propose-patch-from-usage|quarantine]"
     ),
     aliases=["evolution"],
 )

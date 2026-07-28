@@ -1052,3 +1052,18 @@ skill verifier
 - 格式检查记录：`git diff --check` 无输出。
 - 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略返回 `Error: file has not been read yet. Read it first before editing.`，和本次 usage-driven patch candidate 修改无直接依赖。
 - 限制说明：当前 patch candidate 只是把用户反馈落为候选 skill 修改；仍必须经过 preview、eval case、eval、run-eval、show-eval、approve 和 promote，才能成为正式长期 skill。
+
+### 2026-07-28 补充：Usage Patch Eval Case Suggestion
+
+- 修改 `mewcode/evolution/engine.py`：新增 `suggest_eval_cases()`，基于 skill proposal evidence、usage feedback patch notes 和 candidate description 生成三轮 eval case 建议。
+- 修改 `mewcode/evolution/engine.py`：新增 `/evolve add-eval-case ...` 命令模板渲染，只移除会破坏命令结构的 `::` 和换行，不改写反馈正文。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `/evolve suggest-eval-cases <proposal_id>`，只展示建议 task、must_contain 和命令模板。
+- 修改 `tests/test_evolution.py`：新增 engine 侧只读建议测试，并验证用户显式添加建议 case 后 `evaluate()` 可通过；新增命令层只读展示测试。
+- 修改 `README.md`、`docs/self-evolution-development-progress-recap-zh.md`、`docs/hermes-skill-evolution-implementation.md` 和 `docs/verified-skill-evolution-recap-zh.md`：同步记录命令、能力边界和留档。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_suggest_eval_cases_for_usage_patch_is_read_only tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_is_read_only -q` 在实现前得到 2 个预期失败，覆盖缺少 engine API 和命令入口。
+- 绿灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_suggest_eval_cases_for_usage_patch_is_read_only tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_is_read_only -q` 通过，2 个测试成功。
+- 扩展验证记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，43 个测试成功；`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，218 个测试成功。
+- 编译检查记录：`python3 -m py_compile mewcode/evolution/engine.py mewcode/commands/handlers/evolve.py` 无输出。
+- 格式检查记录：`git diff --check` 无输出。
+- 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略返回 `Error: file has not been read yet. Read it first before editing.`，和本次只读 eval case 建议修改无直接依赖。
+- 限制说明：建议器不会写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`，不会改变 manifest，也不会自动 eval/promote；测试用例仍需要用户审阅后显式添加。

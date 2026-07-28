@@ -1,8 +1,8 @@
 # 自进化开发进度总复盘
 
-> 日期：2026-07-21
+> 日期：2026-07-28
 > 基线提交：`f01966c 为候选 skill 增加 eval case 门禁`
-> 最新阶段：候选 skill 执行评估报告门禁、只读 preview、usage log、隔离建议与 usage-driven patch candidate
+> 最新阶段：候选 skill 执行评估报告门禁、只读 preview、usage log、隔离建议、usage-driven patch candidate 与只读 eval case 建议
 > 范围：`mewcode/evolution/`、`/evolve`、`/learn`、candidate skill、eval gate、checkpoint/rewind 保护和测试留档
 
 ## 1. 当前结论
@@ -27,11 +27,12 @@ skill:  learn/propose -> candidate -> validate -> add-eval-case -> eval -> run-e
 - 用户可用 `/evolve record-usage <skill-name> :: <event> [:: summary]` 手动记录失败或用户纠正。
 - 用户可用 `/evolve suggest-quarantine [skill-name]` 基于负面 usage 事件查看隔离建议。
 - 用户可用 `/evolve propose-patch-from-usage <skill-name>` 将负面 usage 转为 skill patch candidate。
+- 用户可用 `/evolve suggest-eval-cases <proposal_id>` 查看候选 skill 的三轮 eval case 建议命令，但不会自动写入 eval case。
 - 用户可用 `/evolve quarantine <skill-name> [:: reason]` 将不可靠的项目级正式 skill 移入隔离区。
 - promote 前会尝试 checkpoint，promote 后会尝试 reload skill loader。
 - 运行时自进化明确只允许 `memory | skill`，不允许 `code | tool | prompt` 自动落地。
 
-整体进度可以概括为：**安全版 Hermes skill evolution 的主干闭环已完成，并新增了多轮评估报告门禁、只读预览、usage log、手动 quarantine、隔离建议和 usage-driven patch candidate；Hermes 原版的后台自动 review、真实模型沙盒任务执行、自动 usage 归因/自动降级还未完成。**
+整体进度可以概括为：**安全版 Hermes skill evolution 的主干闭环已完成，并新增了多轮评估报告门禁、只读预览、usage log、手动 quarantine、隔离建议、usage-driven patch candidate 和只读 eval case 建议；Hermes 原版的后台自动 review、真实模型沙盒任务执行、自动 usage 归因/自动降级还未完成。**
 
 ## 2. 版本演进时间线
 
@@ -209,14 +210,14 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_learn_comma
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-41 passed
+43 passed
 ```
 
 扩展回归记录：
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
-216 passed
+218 passed
 ```
 
 格式检查记录：
@@ -430,11 +431,12 @@ ProposalRisk = Literal["low", "medium", "high"]
 - patch skill 更新已有项目 skill。
 - 危险命令静态策略阻断。
 - skill usage log 写入与读取。
-- `/evolve` 命令 observe/propose/list/preview/apply/eval/run-eval/show-eval/promote/record-usage/suggest-quarantine/propose-patch-from-usage/quarantine。
+- `/evolve` 命令 observe/propose/list/preview/apply/eval/run-eval/show-eval/promote/record-usage/suggest-quarantine/suggest-eval-cases/propose-patch-from-usage/quarantine。
 - `/evolve preview` 的只读语义：memory preview 不创建 memory 文件，skill candidate 缺失时不重建 candidate 目录。
 - `/evolve record-usage` 手动记录正式 skill 失败、用户纠正等 usage 事件。
 - `/evolve suggest-quarantine` 基于负面 usage 事件给出只读隔离建议，不自动隔离。
 - `/evolve propose-patch-from-usage` 基于负面 usage 生成 patch proposal 和 candidate，不自动启用。
+- `/evolve suggest-eval-cases` 基于 proposal evidence 生成三轮 eval case 建议命令，不自动写入 cases.jsonl。
 - `/evolve quarantine` 移动正式项目 skill 到隔离区并 reload loader。
 - `/learn` create/patch 优先级。
 - `/learn` evidence 关联。
@@ -444,7 +446,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-41 passed
+43 passed
 ```
 
 ## 8. 当前已知全量测试问题
@@ -476,9 +478,10 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 已增加 `/evolve record-usage <skill-name> :: <event> [:: summary]`，支持手动记录 `failure`、`user_feedback` 等事件。
 - 已增加 `/evolve suggest-quarantine [skill-name]`，当负面 usage 事件达到阈值时输出建议命令。
 - 已增加 `/evolve propose-patch-from-usage <skill-name>`，把负面 usage 汇总进 patch candidate。
+- 已增加 `/evolve suggest-eval-cases <proposal_id>`，把 patch candidate 的 evidence 转为可审阅的三轮 eval case 建议命令。
 - 已增加 `/evolve quarantine <skill-name> [:: reason]`，把项目级正式 skill 移入 `.mewcode/evolution/quarantine/<skill-name>/`。
 - 已在 command 层隔离后 reload skill loader，避免后续任务继续使用该正式 skill。
-- 尚未自动记录任务成功/失败、用户纠正，也不会自动执行 quarantine 或自动 promote patch proposal。
+- 尚未自动记录任务成功/失败、用户纠正，也不会自动执行 quarantine、自动写入 eval case 或自动 promote patch proposal。
 
 理由：skill 一旦启用会长期影响行为，必须有降级和追责机制。
 
@@ -517,4 +520,4 @@ evidence -> proposal -> candidate -> eval case -> eval -> run-eval -> show-eval 
 
 它已经能支持用户显式把复杂问题的解决流程沉淀为 project skill，并通过 candidate、eval、execution eval report、manifest、checkpoint 和 promote 控制风险。
 
-但它还不是完整 Hermes：缺少后台 review、真实模型沙盒任务回放、自动 usage feedback 归因和自动 patch 评审。下一阶段不建议直接追求“自动生成并启用 skill”，而应优先补齐 **任务成功/失败自动归因、patch candidate 自动评估、受限 fork-agent eval runner**，让 skill 在隔离环境中真实完成一些任务后再进入长期能力库。
+但它还不是完整 Hermes：缺少后台 review、真实模型沙盒任务回放、自动 usage feedback 归因和自动 patch 评审。下一阶段不建议直接追求“自动生成并启用 skill”，而应优先补齐 **任务成功/失败自动归因、patch candidate 评估建议、受限 fork-agent eval runner**，让 skill 在隔离环境中真实完成一些任务后再进入长期能力库。
