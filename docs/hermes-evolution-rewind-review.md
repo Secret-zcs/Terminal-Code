@@ -1075,3 +1075,18 @@ skill verifier
 - 格式检查记录：`git diff --check` 无输出。
 - 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略返回 `Error: file has not been read yet. Read it first before editing.`，和本次只读 eval case 建议修改无直接依赖。
 - 限制说明：建议器不会写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`，不会改变 manifest，也不会自动 eval/promote；测试用例仍需要用户审阅后显式添加。
+
+### 2026-07-29 补充：Eval Case Suggestion 数量参数
+
+- 修改 `mewcode/commands/handlers/evolve.py`：`/evolve suggest-eval-cases` 支持 `/evolve suggest-eval-cases <proposal_id> [count]`。
+- 设计理由：默认三条建议可能无法覆盖四条及以上真实 usage feedback；提高 `count` 可以让用户继续审阅更多建议，而不是让系统自动写入 eval case。
+- 行为边界：`count` 只影响只读建议数量；不会写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`，不会改变 manifest，不会触发 eval/promote。
+- 修改 `tests/test_evolution.py`：新增命令层测试，验证传入 `4` 后四条 usage feedback 均被 high-quality suggestion 覆盖，且不再输出 `Uncovered usage feedback`。
+- 修改 `README.md`、`docs/self-evolution-development-progress-recap-zh.md`、`docs/hermes-skill-evolution-implementation.md`、`docs/verified-skill-evolution-recap-zh.md` 和本文档：同步记录命令参数、使用理由和验证结果。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q` 在实现前得到 1 个预期失败，失败原因为命令把 `<proposal_id> 4` 当成完整 proposal id。
+- 绿灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q` 通过，1 个测试成功。
+- 相关回归记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_review_eval_case_suggestions_reports_uncovered_usage_feedback tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_shows_uncovered_feedback tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q` 通过，3 个测试成功。
+- 扩展验证记录：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，47 个测试成功；`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q` 通过，222 个测试成功。
+- 编译检查记录：`python3 -m py_compile mewcode/evolution/engine.py mewcode/commands/handlers/evolve.py` 无输出。
+- 格式检查记录：`git diff --check` 无输出。
+- 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为旧测试仍要求 `WriteFile` 写前不需要 `ReadFile`，当前安全策略返回 `Error: file has not been read yet. Read it first before editing.`，和本次 count 参数修改无直接依赖。

@@ -1352,3 +1352,26 @@ class TestEvolveCommand:
         assert "Warnings: 1 usage feedback summaries are not covered" in message
         assert "Uncovered usage feedback:" in message
         assert "未解释为什么该 skill 应该更新。" in message
+
+    async def test_suggest_eval_cases_command_accepts_count_to_cover_feedback(
+        self, tmp_path: Path
+    ) -> None:
+        engine, proposal = _usage_patch_proposal(
+            tmp_path,
+            [
+                "错误地跳过复盘文档。",
+                "用户纠正：遗漏验证。",
+                "没有展示测试结果。",
+                "未解释为什么该 skill 应该更新。",
+            ],
+        )
+        ui = MockUI()
+
+        await handle_evolve(_ctx(tmp_path, f"suggest-eval-cases {proposal.id} 4", ui))
+
+        message = "\n".join(ui.messages)
+        assert "Quality summary: high=4, medium=0, low=0" in message
+        assert "Uncovered usage feedback:" not in message
+        assert "not covered" not in message
+        assert "未解释为什么该 skill 应该更新。" in message
+        assert not engine.eval_cases_path("review-loop").exists()

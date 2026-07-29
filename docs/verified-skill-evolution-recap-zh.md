@@ -551,7 +551,7 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 ### 2026-07-28 补充：Usage Patch Eval Case Suggestion
 
-当前新增了 `/evolve suggest-eval-cases <proposal_id>`，用于把 usage-driven patch candidate 的 evidence 转成三轮 eval case 建议命令，并展示 `quality`、`score`、`coverage`、`rationale`、质量摘要、coverage gap、warnings 和 recommendation。它会列出未被默认建议覆盖的真实 usage feedback；同时它是只读能力：不会写入 `cases.jsonl`，不会改变 manifest，也不会让 candidate 自动进入 eval 或 promote。
+当前新增了 `/evolve suggest-eval-cases <proposal_id>`，用于把 usage-driven patch candidate 的 evidence 转成默认三轮 eval case 建议命令，并展示 `quality`、`score`、`coverage`、`rationale`、质量摘要、coverage gap、warnings 和 recommendation。它会列出未被默认建议覆盖的真实 usage feedback；同时它是只读能力：不会写入 `cases.jsonl`，不会改变 manifest，也不会让 candidate 自动进入 eval 或 promote。
 
 TDD 红灯记录：
 
@@ -591,6 +591,42 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 - patch 评审器增强：根据历史成功率校准质量评分，并提示哪些 case 仍缺少真实任务覆盖。
 - 更强的任务回放：由受限 fork agent 在沙盒中真实执行 case，而不只是检查候选 SOP 的关键步骤覆盖。
 - background review：只能生成 candidate，禁止自动 promote。
+
+### 2026-07-29 补充：Eval Case Suggestion Count 参数
+
+本次新增 `/evolve suggest-eval-cases <proposal_id> [count]`。默认仍输出 3 条建议；当真实 usage feedback 多于默认建议数量时，用户可以提高 `count` 来查看更多候选 eval case，直到 coverage gap 消失或用户判断仍需手写 case。
+
+修改内容：
+
+- 修改 `mewcode/commands/handlers/evolve.py`：更新 usage/help，并解析可选正整数 `count`。
+- 修改 `mewcode/commands/handlers/evolve.py`：把 `count` 传入 `review_eval_case_suggestions()`；未传入时保持原默认行为。
+- 修改 `tests/test_evolution.py`：新增四条 usage feedback 的命令层测试，验证 `count=4` 能覆盖全部反馈且仍保持只读。
+- 修改 `README.md` 和自进化复盘文档：记录命令参数、边界和验证结果。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q
+1 failed  # 实现前红灯：命令把 "<proposal_id> 4" 当成完整 proposal id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_review_eval_case_suggestions_reports_uncovered_usage_feedback tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_shows_uncovered_feedback tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q
+3 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+47 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
+222 passed
+```
+
+编译和格式检查记录：`python3 -m py_compile mewcode/evolution/engine.py mewcode/commands/handlers/evolve.py` 与 `git diff --check` 均无输出。
+
+全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`，失败原因为旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略要求写前先读；和本次 count 参数修改无直接依赖。
+
+设计边界：`count` 不是自动生成并应用测试的开关，只是扩大只读建议列表。模型生成的 eval case 仍必须被用户审阅，并通过显式 `add-eval-case -> eval -> run-eval -> show-eval -> approve -> promote` 才能进入正式 skill 流程。
 
 ## 10. 设计取舍
 

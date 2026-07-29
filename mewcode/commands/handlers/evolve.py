@@ -18,7 +18,7 @@ Usage:
     /evolve promote <proposal_id>
     /evolve record-usage <skill-name> :: <event> [:: summary]
     /evolve suggest-quarantine [skill-name]
-    /evolve suggest-eval-cases <proposal_id>
+    /evolve suggest-eval-cases <proposal_id> [count]
     /evolve propose-patch-from-usage <skill-name>
     /evolve quarantine <skill-name> [:: reason]
 """
@@ -119,7 +119,7 @@ def _show_help(ctx: CommandContext) -> None:
             "  /evolve promote <proposal_id>",
             "  /evolve record-usage <skill-name> :: <event> [:: summary]",
             "  /evolve suggest-quarantine [skill-name]",
-            "  /evolve suggest-eval-cases <proposal_id>",
+            "  /evolve suggest-eval-cases <proposal_id> [count]",
             "  /evolve propose-patch-from-usage <skill-name>",
             "  /evolve quarantine <skill-name> [:: reason]",
             "",
@@ -542,13 +542,29 @@ def _handle_propose_patch_from_usage(
 
 
 def _handle_suggest_eval_cases(
-    ctx: CommandContext, engine: EvolutionEngine, proposal_id: str
+    ctx: CommandContext, engine: EvolutionEngine, rest: str
 ) -> None:
-    if not proposal_id:
-        ctx.ui.add_system_message("Usage: /evolve suggest-eval-cases <proposal_id>")
+    usage = "Usage: /evolve suggest-eval-cases <proposal_id> [count]"
+    parts = rest.split()
+    if not parts or len(parts) > 2:
+        ctx.ui.add_system_message(usage)
         return
+    proposal_id = parts[0]
+    count = None
+    if len(parts) == 2:
+        try:
+            count = int(parts[1])
+        except ValueError:
+            ctx.ui.add_system_message(usage)
+            return
+        if count < 1:
+            ctx.ui.add_system_message(usage)
+            return
     try:
-        review = engine.review_eval_case_suggestions(proposal_id)
+        if count is None:
+            review = engine.review_eval_case_suggestions(proposal_id)
+        else:
+            review = engine.review_eval_case_suggestions(proposal_id, count=count)
     except ValueError as e:
         ctx.ui.add_system_message(f"Evolution eval case suggestions failed: {e}")
         return

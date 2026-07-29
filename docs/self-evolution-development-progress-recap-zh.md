@@ -27,12 +27,12 @@ skill:  learn/propose -> candidate -> validate -> add-eval-case -> eval -> run-e
 - 用户可用 `/evolve record-usage <skill-name> :: <event> [:: summary]` 手动记录失败或用户纠正。
 - 用户可用 `/evolve suggest-quarantine [skill-name]` 基于负面 usage 事件查看隔离建议。
 - 用户可用 `/evolve propose-patch-from-usage <skill-name>` 将负面 usage 转为 skill patch candidate。
-- 用户可用 `/evolve suggest-eval-cases <proposal_id>` 查看候选 skill 的三轮 eval case 建议命令、质量摘要、coverage gap、warnings 和 recommendation，但不会自动写入 eval case。
+- 用户可用 `/evolve suggest-eval-cases <proposal_id> [count]` 查看候选 skill 的 eval case 建议命令、质量摘要、coverage gap、warnings 和 recommendation；默认三条，必要时可提高 count 覆盖更多真实 usage feedback，但不会自动写入 eval case。
 - 用户可用 `/evolve quarantine <skill-name> [:: reason]` 将不可靠的项目级正式 skill 移入隔离区。
 - promote 前会尝试 checkpoint，promote 后会尝试 reload skill loader。
 - 运行时自进化明确只允许 `memory | skill`，不允许 `code | tool | prompt` 自动落地。
 
-整体进度可以概括为：**安全版 Hermes skill evolution 的主干闭环已完成，并新增了多轮评估报告门禁、只读预览、usage log、手动 quarantine、隔离建议、usage-driven patch candidate、只读 eval case 建议和质量摘要和 coverage gap；Hermes 原版的后台自动 review、真实模型沙盒任务执行、自动 usage 归因/自动降级还未完成。**
+整体进度可以概括为：**安全版 Hermes skill evolution 的主干闭环已完成，并新增了多轮评估报告门禁、只读预览、usage log、手动 quarantine、隔离建议、usage-driven patch candidate、只读 eval case 建议、质量摘要、coverage gap 和可调建议数量；Hermes 原版的后台自动 review、真实模型沙盒任务执行、自动 usage 归因/自动降级还未完成。**
 
 ## 2. 版本演进时间线
 
@@ -436,7 +436,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 - `/evolve record-usage` 手动记录正式 skill 失败、用户纠正等 usage 事件。
 - `/evolve suggest-quarantine` 基于负面 usage 事件给出只读隔离建议，不自动隔离。
 - `/evolve propose-patch-from-usage` 基于负面 usage 生成 patch proposal 和 candidate，不自动启用。
-- `/evolve suggest-eval-cases` 基于 proposal evidence 生成三轮 eval case 建议命令、质量摘要、coverage gap、warnings 和 recommendation，不自动写入 cases.jsonl。
+- `/evolve suggest-eval-cases <proposal_id> [count]` 基于 proposal evidence 生成 eval case 建议命令、质量摘要、coverage gap、warnings 和 recommendation；默认三条，可提高 count 补齐更多 usage feedback，不自动写入 cases.jsonl。
 - `/evolve quarantine` 移动正式项目 skill 到隔离区并 reload loader。
 - `/learn` create/patch 优先级。
 - `/learn` evidence 关联。
@@ -446,7 +446,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 
 ```text
 PYTHONPATH=. pytest tests/test_evolution.py -q
-46 passed
+47 passed
 ```
 
 ## 8. 当前已知全量测试问题
@@ -478,7 +478,7 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 已增加 `/evolve record-usage <skill-name> :: <event> [:: summary]`，支持手动记录 `failure`、`user_feedback` 等事件。
 - 已增加 `/evolve suggest-quarantine [skill-name]`，当负面 usage 事件达到阈值时输出建议命令。
 - 已增加 `/evolve propose-patch-from-usage <skill-name>`，把负面 usage 汇总进 patch candidate。
-- 已增加 `/evolve suggest-eval-cases <proposal_id>`，把 patch candidate 的 evidence 转为可审阅的三轮 eval case 建议命令，并标出 high/medium/low 质量、coverage、rationale、summary 和 recommendation。
+- 已增加 `/evolve suggest-eval-cases <proposal_id> [count]`，把 patch candidate 的 evidence 转为可审阅的 eval case 建议命令，并标出 high/medium/low 质量、coverage、rationale、summary 和 recommendation；默认三条，可提高 count 覆盖更多真实 usage feedback。
 - 已增加 `/evolve quarantine <skill-name> [:: reason]`，把项目级正式 skill 移入 `.mewcode/evolution/quarantine/<skill-name>/`。
 - 已在 command 层隔离后 reload skill loader，避免后续任务继续使用该正式 skill。
 - 尚未自动记录任务成功/失败、用户纠正，也不会自动执行 quarantine、自动写入 eval case 或自动 promote patch proposal。
@@ -521,3 +521,39 @@ evidence -> proposal -> candidate -> eval case -> eval -> run-eval -> show-eval 
 它已经能支持用户显式把复杂问题的解决流程沉淀为 project skill，并通过 candidate、eval、execution eval report、manifest、checkpoint 和 promote 控制风险。
 
 但它还不是完整 Hermes：缺少后台 review、真实模型沙盒任务回放、自动 usage feedback 归因和自动 patch 评审。下一阶段不建议直接追求“自动生成并启用 skill”，而应优先补齐 **任务成功/失败自动归因、patch candidate 评估建议、受限 fork-agent eval runner**，让 skill 在隔离环境中真实完成一些任务后再进入长期能力库。
+
+## 11. 最新推进记录：Eval Case Suggestion Count
+
+本次推进补齐了 `/evolve suggest-eval-cases <proposal_id> [count]`。它解决的问题是：默认三条建议适合作为最小执行评估门槛，但当 usage-driven patch candidate 绑定了四条及以上真实用户反馈时，默认输出会留下 coverage gap。现在用户可以提高 `count`，先看到更多建议及其质量摘要，再决定是否显式写入 eval case。
+
+修改内容：
+
+- 修改 `mewcode/commands/handlers/evolve.py`：帮助文档和 usage 支持 `[count]`。
+- 修改 `mewcode/commands/handlers/evolve.py`：解析第二个参数为正整数，并传入 `review_eval_case_suggestions()`。
+- 修改 `tests/test_evolution.py`：新增四条 usage feedback 的命令层用例，验证 `count=4` 时全部反馈被 high-quality suggestion 覆盖，且仍不写入 `cases.jsonl`。
+- 修改 `README.md`、`docs/hermes-evolution-rewind-review.md`、`docs/hermes-skill-evolution-implementation.md` 和 `docs/verified-skill-evolution-recap-zh.md`：同步留档。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q
+1 failed  # 实现前红灯："<proposal_id> 4" 被误当成完整 proposal id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_review_eval_case_suggestions_reports_uncovered_usage_feedback tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_shows_uncovered_feedback tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q
+3 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+47 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
+222 passed
+```
+
+编译和格式检查记录：`python3 -m py_compile mewcode/evolution/engine.py mewcode/commands/handlers/evolve.py` 与 `git diff --check` 均无输出。
+
+全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`，失败原因为旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略要求写前先读；和本次 count 参数修改无直接依赖。
+
+边界说明：`count` 不改变自进化安全主线。系统仍只生成只读建议，不自动写入 eval case，不自动 approve，也不自动 promote；用户必须审阅测试意图后再执行 `add-eval-case -> eval -> run-eval -> show-eval -> approve -> promote`。

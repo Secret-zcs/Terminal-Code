@@ -612,3 +612,46 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 全量首个失败点仍为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次带 coverage gap 的只读 eval case 建议修改无直接依赖。
 
 限制说明：当前建议器只给出基础规则评分，不判断“测试是否足够代表用户真实意图”，也不会自动执行 eval。用户仍需要显式添加 eval case，再运行 `eval -> run-eval -> show-eval -> approve -> promote`。
+
+### 2026-07-29 补充：Eval Case Suggestion Count 参数
+
+本次在不改变 engine 核心策略的前提下，补齐命令层对可选数量参数的支持：用户现在可以执行 `/evolve suggest-eval-cases <proposal_id> [count]`。默认仍是 3 条建议；如果输出中仍存在 `Uncovered usage feedback`，可以把 count 提高到 4、5 或更多，让候选 skill 的真实 usage feedback 覆盖情况在提交 eval case 前更透明。
+
+实现内容：
+
+- 修改 `mewcode/commands/handlers/evolve.py`：帮助文档和 usage 更新为 `/evolve suggest-eval-cases <proposal_id> [count]`。
+- 修改 `mewcode/commands/handlers/evolve.py`：解析第二个参数为正整数 `count`，非法或小于 1 时返回 usage。
+- 修改 `mewcode/commands/handlers/evolve.py`：将 `count` 传给 `engine.review_eval_case_suggestions()`；未传入时保持默认三条建议。
+- 修改 `tests/test_evolution.py`：新增四条 usage feedback 场景，验证 `count=4` 时质量摘要为 `high=4, medium=0, low=0`，且不会写入 `cases.jsonl`。
+- 修改 `README.md`、`docs/self-evolution-development-progress-recap-zh.md`、`docs/hermes-evolution-rewind-review.md`、`docs/verified-skill-evolution-recap-zh.md` 和本文档：记录命令行为、设计边界和验证结果。
+
+TDD 红灯记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q
+1 failed
+```
+
+失败原因符合预期：命令层把 `<proposal_id> 4` 作为完整 proposal id 查询，返回 `proposal ... 4 not found`。
+
+绿灯与回归记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_review_eval_case_suggestions_reports_uncovered_usage_feedback tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_shows_uncovered_feedback tests/test_evolution.py::TestEvolveCommand::test_suggest_eval_cases_command_accepts_count_to_cover_feedback -q
+3 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+47 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
+222 passed
+```
+
+编译和格式检查记录：`python3 -m py_compile mewcode/evolution/engine.py mewcode/commands/handlers/evolve.py` 与 `git diff --check` 均无输出。
+
+全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`，失败原因为旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略要求写前先读；和本次 count 参数修改无直接依赖。
+
+设计边界：`count` 只增加建议数量，不代表系统已经认可这些 eval case。建议仍需用户审阅后用 `/evolve add-eval-case` 显式写入，再经过 `eval -> run-eval -> show-eval -> approve -> promote`。
