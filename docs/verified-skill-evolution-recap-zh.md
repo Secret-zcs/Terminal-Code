@@ -636,6 +636,35 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 
 未知 skill 加载失败现在会被记录为 `failure` usage。该变更只增加审计证据，不启用、不隔离、不修改任何 skill；不存在的 skill 也不会触发 quarantine suggestion，因为隔离建议仍要求项目级正式 skill 存在。新增红绿测试确认 usage log 会保存 `skill_name`、`event=failure`、`source=LoadSkill` 和 `summary=unknown skill requested`。最终验证为 `tests/test_skills.py` 45 个通过、核心扩展回归 223 个通过；full suite 仍停在既有 `test_multi_step_autonomous`。
 
+### 2026-07-29 补充：Agent Loop Scripted Execution Eval
+
+execution eval 现在新增 `agent_loop_scripted` runner。它不是外部 LLM 自主执行任务，而是用 eval-only scripted LLM client 驱动项目真实 `Agent.run()` 主循环，从而验证 candidate skill 的执行评测协议是否能穿过真实 Agent 事件流、工具执行、权限检查和 workspace 断言。
+
+修改内容：
+
+- 修改 `mewcode/evolution/engine.py`：`add_eval_case()` 新增 `execution_runner`，支持 `deterministic_replay` 和 `agent_loop_scripted`。
+- 修改 `mewcode/evolution/engine.py`：新增 `_ScriptedAgentLoopClient` 和 `_run_agent_loop_scripted()`。
+- 修改 `mewcode/evolution/engine.py`：`result.json` / `transcript.md` 记录 `ToolUseEvent` 和 `ToolResultEvent`。
+- 修改 `tests/test_evolution.py`：新增 Agent loop runner 测试，验证 runner、事件、工具结果和产物断言。
+- 修改 `README.md` 和自进化复盘文档：同步记录该 runner 的能力边界。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_can_drive_agent_loop_with_scripted_llm -q
+1 failed  # 实现前红灯：add_eval_case 不支持 execution_runner
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_can_drive_agent_loop_with_scripted_llm -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+50 passed
+```
+
+扩展验证：`python3 -m py_compile mewcode/evolution/engine.py` 无输出，`git diff --check` 无输出；核心回归 `PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q` 通过，230 个测试成功。全量 `PYTHONPATH=. pytest -q -x` 仍停在既有 `tests/test_agent.py::test_multi_step_autonomous`，和本次 Agent-loop scripted runner 修改无直接依赖。
+
+当前结论：verified skill evolution 已经具备 candidate 隔离、eval case、execution eval report、child-agent artifacts、workspace assertions、turn replay 和真实 Agent-loop scripted runner。下一阶段才是受限真实 LLM child-agent runner。
+
 ## 10. 设计取舍
 
 该方案牺牲了 Hermes 原版的学习速度，但降低了代码智能体长期行为污染风险。核心原则是：

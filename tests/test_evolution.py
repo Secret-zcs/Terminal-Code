@@ -505,6 +505,66 @@ class TestEvolutionEngine:
         assert "## Agent Turns" in transcript
         assert "ToolResult" in transcript
 
+    def test_run_execution_eval_can_drive_agent_loop_with_scripted_llm(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="agent-loop-repair",
+            description="通过真实 Agent loop 执行候选 skill 评测",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小补丁。\n",
+            allowed_tools=["ReadFile", "WriteFile"],
+        )
+        engine.add_eval_case(
+            proposal.id,
+            task="用 Agent loop 读取输入并写出修复文件。",
+            must_contain=["复现失败", "最小补丁"],
+            workspace_files={"bug.txt": "broken\n"},
+            scripted_agent_turns=[
+                {
+                    "assistant": "先读取失败输入。",
+                    "tool_calls": [{"tool": "ReadFile", "path": "bug.txt"}],
+                },
+                {
+                    "assistant": "写出修复结果。",
+                    "tool_calls": [
+                        {
+                            "tool": "WriteFile",
+                            "path": "result.txt",
+                            "content": "fixed\n",
+                        }
+                    ],
+                },
+                {"assistant": "修复已完成。"},
+            ],
+            expected_files={"result.txt": "fixed\n"},
+            execution_runner="agent_loop_scripted",
+        )
+        engine.evaluate(proposal.id)
+
+        ok, message = engine.run_execution_eval(proposal.id, min_cases=1)
+
+        assert ok, message
+        report = json.loads(
+            engine.execution_eval_report_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert report["runner"] == "fork_agent_sandbox_scripted_agent_loop"
+        round_dir = Path(report["rounds"][0]["sandbox_dir"])
+        result = json.loads((round_dir / "result.json").read_text(encoding="utf-8"))
+        fork_agent = result["fork_agent"]
+        assert fork_agent["runner"] == "agent_loop_scripted"
+        assert fork_agent["agent_loop"] is True
+        assert fork_agent["turns"][0]["events"][0]["type"] == "ToolUseEvent"
+        assert fork_agent["turns"][0]["events"][1]["type"] == "ToolResultEvent"
+        assert fork_agent["turns"][0]["tool_results"][0]["tool"] == "ReadFile"
+        assert fork_agent["turns"][1]["tool_results"][0]["tool"] == "WriteFile"
+        transcript = (round_dir / "child_agent" / "transcript.md").read_text(
+            encoding="utf-8"
+        )
+        assert "- Runner: agent_loop_scripted" in transcript
+        assert "ToolUseEvent: ReadFile" in transcript
+        assert "ToolResultEvent: WriteFile" in transcript
+
     def test_approved_skill_proposal_cannot_apply_directly(
         self, tmp_path: Path
     ) -> None:

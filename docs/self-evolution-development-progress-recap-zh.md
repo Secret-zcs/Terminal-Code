@@ -2,7 +2,7 @@
 
 > 日期：2026-07-29
 > 基线提交：`f01966c 为候选 skill 增加 eval case 门禁`
-> 最新阶段：候选 skill 执行评估报告门禁、确定性 child-agent fork 轨迹、只读 preview、usage log、隔离建议、usage-driven patch candidate、只读 eval case 建议与质量摘要
+> 最新阶段：候选 skill 执行评估报告门禁、scripted LLM 驱动的真实 Agent loop 评测、确定性 child-agent fork 轨迹、只读 preview、usage log、隔离建议、usage-driven patch candidate、只读 eval case 建议与质量摘要
 > 范围：`mewcode/evolution/`、`/evolve`、`/learn`、candidate skill、eval gate、checkpoint/rewind 保护和测试留档
 
 ## 1. 当前结论
@@ -20,7 +20,7 @@ skill:  learn/propose -> candidate -> validate -> add-eval-case -> eval -> run-e
 
 - memory 可以在用户 approve 后写入 `.mewcode/memories.md`。
 - skill 不会直接进入正式 skill loader，而是先进入 `.mewcode/evolution/candidates/<proposal_id>/`。
-- candidate skill 必须通过 deterministic eval，并且至少完成三轮带 child-agent 轨迹的 execution eval，才能被 promote。
+- candidate skill 必须通过 deterministic eval，并且至少完成三轮带 child-agent 轨迹的 execution eval，才能被 promote；eval case 可选择继续使用 deterministic replay，也可显式使用 `agent_loop_scripted` 让 scripted LLM 走真实 `Agent.run()`。
 - execution eval 会生成用户可见的 JSON/Markdown 报告和每轮 `child_agent/` 轨迹，用户可用 `/evolve show-eval` 先看测试效果再 approve/promote。
 - 用户可用 `/evolve preview <proposal_id>` 在 approve/apply/promote 前查看 memory 追加内容或 skill unified diff。
 - `LoadSkill` 成功激活 skill 会写入 `.mewcode/evolution/skill_usage.jsonl`，未知 skill 加载失败会自动写入 `failure` usage，用于后续追踪 skill 影响。
@@ -32,7 +32,7 @@ skill:  learn/propose -> candidate -> validate -> add-eval-case -> eval -> run-e
 - promote 前会尝试 checkpoint，promote 后会尝试 reload skill loader。
 - 运行时自进化明确只允许 `memory | skill`，不允许 `code | tool | prompt` 自动落地。
 
-整体进度可以概括为：**安全版 Hermes skill evolution 的主干闭环已完成，并新增了多轮评估报告门禁、确定性 child-agent fork 轨迹、只读预览、usage log、手动 quarantine、隔离建议、usage-driven patch candidate、只读 eval case 建议、质量摘要、coverage gap 和可调建议数量；Hermes 原版的后台自动 review、真实 LLM 子 Agent 沙盒任务执行、自动 usage 归因/自动降级还未完成。**
+整体进度可以概括为：**安全版 Hermes skill evolution 的主干闭环已完成，并新增了多轮评估报告门禁、scripted LLM 驱动的真实 Agent loop、确定性 child-agent fork 轨迹、只读预览、usage log、手动 quarantine、隔离建议、usage-driven patch candidate、只读 eval case 建议、质量摘要、coverage gap 和可调建议数量；Hermes 原版的后台自动 review、真实 LLM 子 Agent 沙盒任务执行、自动 usage 归因/自动降级还未完成。**
 
 ## 2. 版本演进时间线
 
@@ -801,3 +801,79 @@ PYTHONPATH=. pytest tests/test_evolution.py -q
 - 已实现：该回放已经比单条 `scripted_tool_calls` 更接近真实 Agent loop 的 turn/tool-result 结构。
 - 未实现：assistant 文本和工具调用仍来自 eval case，不是 LLM 自主生成。
 - 下一步：把 turn 来源替换为受限 LLM 子 Agent 的真实输出，保留同一套 transcript、tool result 和 expected-files 判定接口。
+
+## 17. 最新推进记录：Scripted LLM Agent Loop Runner
+
+日期：2026-07-29
+
+本次把 execution eval 从“手写函数回放 Agent turn”推进到“scripted LLM 驱动真实 `Agent.run()` 主循环”。这一步仍不调用外部模型，但它已经使用项目内真实 Agent loop、真实 `ReadFile` / `WriteFile` 工具、真实 permission checker 和真实 `ToolUseEvent` / `ToolResultEvent` 事件流。
+
+新增 eval case 字段：
+
+```json
+{
+  "execution_runner": "agent_loop_scripted",
+  "scripted_agent_turns": [
+    {
+      "assistant": "先读取失败输入。",
+      "tool_calls": [{"tool": "ReadFile", "path": "bug.txt"}]
+    },
+    {
+      "assistant": "写出修复结果。",
+      "tool_calls": [{"tool": "WriteFile", "path": "result.txt", "content": "fixed\n"}]
+    },
+    {
+      "assistant": "修复已完成。"
+    }
+  ],
+  "expected_files": {"result.txt": "fixed\n"}
+}
+```
+
+修改内容：
+
+- 修改 `mewcode/evolution/engine.py`：新增 `SUPPORTED_EXECUTION_RUNNERS`，`add_eval_case()` 支持 `execution_runner`，并校验 JSONL 中的 runner 值。
+- 修改 `mewcode/evolution/engine.py`：新增 `_ScriptedAgentLoopClient`，把 eval case 的 scripted turns 转成 LLM stream 事件，并将相对路径重写到 `child_agent/workspace/` 的绝对路径。
+- 修改 `mewcode/evolution/engine.py`：新增 `_run_agent_loop_scripted()`，创建受限 registry、workspace sandbox、permission checker，再调用真实 `Agent.run()`。
+- 修改 `mewcode/evolution/engine.py`：`fork_agent.turns` 现在可记录 `events`，包括 `ToolUseEvent` 和 `ToolResultEvent`；`transcript.md` 同步展示事件流。
+- 修改 `tests/test_evolution.py`：新增 `test_run_execution_eval_can_drive_agent_loop_with_scripted_llm`，验证 runner、Agent loop 标记、事件流、工具结果和 transcript。
+- 修改 `README.md` 和复盘文档：同步记录当前 runner 语义、边界和下一步。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_can_drive_agent_loop_with_scripted_llm -q
+1 failed  # 实现前红灯：add_eval_case 不支持 execution_runner
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_can_drive_agent_loop_with_scripted_llm -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+50 passed
+```
+
+扩展验证记录：
+
+```text
+python3 -m py_compile mewcode/evolution/engine.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+230 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次 Agent-loop scripted runner 修改无直接依赖。
+
+边界说明：
+
+- 已实现：`agent_loop_scripted` case 会走真实 Agent 主循环和真实工具执行，而不是 `_run_scripted_agent_turns()` 手写模拟。
+- 已实现：工具路径仍被限制在 `child_agent/workspace/`，并继续使用 `expected_files` 做产物断言。
+- 已实现：报告层会区分 `fork_agent_sandbox_deterministic`、`fork_agent_sandbox_scripted_agent_loop` 和 mixed runner。
+- 未实现：LLM 决策仍是 scripted，不是外部模型自主规划；当前只允许 `ReadFile` / `WriteFile`，不开放 Bash。
+- 下一步：把 `_ScriptedAgentLoopClient` 替换为受限真实 LLM child-agent client，在相同 sandbox、tool policy、transcript 和 expected-files 断言框架下跑多轮任务。

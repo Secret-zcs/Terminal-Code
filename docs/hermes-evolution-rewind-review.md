@@ -1133,3 +1133,16 @@ skill verifier
 - TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_replays_scripted_agent_turns -q` 在实现前得到 1 个预期失败，失败原因为 `add_eval_case()` 不支持 `scripted_agent_turns`。
 - 绿灯记录：同一目标测试实现后通过，`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，49 个测试成功。
 - 限制说明：当前仍是 scripted replay；下一步才是把 turns 由真实受限 LLM 子 Agent 生成。
+
+### 2026-07-29 补充：Scripted LLM Agent Loop Runner
+
+- 修改 `mewcode/evolution/engine.py`：新增 `SUPPORTED_EXECUTION_RUNNERS`，`add_eval_case()` 支持 `execution_runner`，并校验手写 JSONL 中的 runner 值。
+- 修改 `mewcode/evolution/engine.py`：新增 `_ScriptedAgentLoopClient`，把 `scripted_agent_turns` 转成 LLM stream 事件，交给真实 `Agent.run()`。
+- 修改 `mewcode/evolution/engine.py`：新增 `_run_agent_loop_scripted()`，使用受限 `ReadFile` / `WriteFile` registry、workspace sandbox 和 permission checker 执行 eval case。
+- 修改 `mewcode/evolution/engine.py`：`fork_agent.turns[].events` 和 `transcript.md` 现在记录 `ToolUseEvent` / `ToolResultEvent`。
+- 修改 `tests/test_evolution.py`：新增 `test_run_execution_eval_can_drive_agent_loop_with_scripted_llm`，验证 runner、真实 Agent loop 标记、事件流、工具结果和 workspace 断言。
+- 修改 `README.md`、`docs/self-evolution-development-progress-recap-zh.md`、`docs/skill-execution-eval-gate-recap-zh.md`、`docs/hermes-skill-evolution-implementation.md` 和 `docs/verified-skill-evolution-recap-zh.md`：同步记录能力边界。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_can_drive_agent_loop_with_scripted_llm -q` 在实现前得到 1 个预期失败，失败原因为 `add_eval_case()` 不支持 `execution_runner`。
+- 绿灯记录：同一目标测试实现后通过，`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，50 个测试成功。
+- 扩展验证记录：`python3 -m py_compile mewcode/evolution/engine.py` 无输出；`git diff --check` 无输出；`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q` 通过，230 个测试成功；`PYTHONPATH=. pytest -q -x` 仍停在既有 `tests/test_agent.py::test_multi_step_autonomous`，和本次修改无直接依赖。
+- 限制说明：当前真实的是 Agent 主循环、工具执行、权限检查、事件流和 workspace 断言；LLM 决策仍是 scripted，不是外部模型自主生成工具调用。下一步才是受限真实 LLM child-agent runner。

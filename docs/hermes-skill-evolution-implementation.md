@@ -685,3 +685,33 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 本次新增 `scripted_agent_turns`，让 execution eval 能按多轮 assistant/tool-call 回放，而不是只执行一条扁平工具调用列表。`result.json` 会记录 `fork_agent.turns`，`transcript.md` 会记录 `## Agent Turns` 和每轮 `ToolResult`。
 
 验证记录：新增 `test_run_execution_eval_replays_scripted_agent_turns`，实现前红灯为 `add_eval_case()` 不支持 `scripted_agent_turns`；实现后目标测试通过，`tests/test_evolution.py` 49 个测试通过。边界仍然明确：turn 仍由 eval case 脚本给出，不是 LLM 自主生成。
+
+### 2026-07-29 补充：Scripted LLM Agent Loop Runner
+
+本次把 execution eval 的 turn replay 接入真实 `Agent.run()` 主循环。新增 `execution_runner="agent_loop_scripted"` 后，eval case 中的 `scripted_agent_turns` 会由 eval-only scripted LLM client 输出为流式事件，再由项目正式 Agent loop 处理工具调用。
+
+实现内容：
+
+- 修改 `mewcode/evolution/engine.py`：新增 `SUPPORTED_EXECUTION_RUNNERS`，并让 `add_eval_case()` 写入 `execution_runner`。
+- 修改 `mewcode/evolution/engine.py`：新增 `_ScriptedAgentLoopClient`，将 scripted turns 转为 `TextDelta` / `ToolCallComplete` / `StreamEnd`。
+- 修改 `mewcode/evolution/engine.py`：新增 `_run_agent_loop_scripted()`，使用受限 registry、workspace sandbox 和 permission checker 调用真实 `Agent.run()`。
+- 修改 `mewcode/evolution/engine.py`：`result.json` 的 `fork_agent.turns[].events` 记录 `ToolUseEvent` / `ToolResultEvent`，`transcript.md` 同步展示事件流。
+- 修改 `tests/test_evolution.py`：新增 `test_run_execution_eval_can_drive_agent_loop_with_scripted_llm`。
+- 修改 `README.md` 与自进化复盘文档：记录 runner 语义和边界。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_can_drive_agent_loop_with_scripted_llm -q
+1 failed  # 实现前红灯：add_eval_case 不支持 execution_runner
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_can_drive_agent_loop_with_scripted_llm -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+50 passed
+```
+
+扩展验证记录：`python3 -m py_compile mewcode/evolution/engine.py` 无输出；`git diff --check` 无输出；核心回归通过，`PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q` 得到 230 个测试成功。全量 `PYTHONPATH=. pytest -q -x` 仍停在既有 `tests/test_agent.py::test_multi_step_autonomous`，与本次 Agent-loop runner 修改无直接依赖。
+
+边界说明：当前真实的是 Agent 主循环、工具执行、权限检查、事件流和 workspace 断言；不真实的是 LLM 决策，仍由 eval case 脚本给出。下一步是把 scripted LLM client 换成受限真实 LLM child-agent client。

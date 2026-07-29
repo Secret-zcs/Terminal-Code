@@ -10,14 +10,18 @@ Runtime self-evolution intentionally excludes code, prompt, and tool targets.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import time
 from difflib import unified_diff
 from pathlib import Path
+from typing import Any, AsyncIterator
 
 import yaml
 
+from mewcode.client import LLMClient
+from mewcode.conversation import ConversationManager
 from mewcode.evolution.models import (
     EvolutionEvidence,
     EvolutionProposal,
@@ -36,9 +40,11 @@ from mewcode.skills.parser import (
     parse_skill_file,
     substitute_arguments,
 )
+from mewcode.tools.base import StreamEnd, StreamEvent, TextDelta, ToolCallComplete
 
 PROJECT_MEMORY_HEADER = "### 项目知识"
 SUPPORTED_EVOLUTION_TARGETS = {"memory", "skill"}
+SUPPORTED_EXECUTION_RUNNERS = {"deterministic_replay", "agent_loop_scripted"}
 MIN_EXECUTION_EVAL_CASES = 3
 NEGATIVE_SKILL_USAGE_EVENTS = {"failure", "user_feedback"}
 DANGEROUS_SKILL_PATTERNS = (
@@ -49,6 +55,119 @@ DANGEROUS_SKILL_PATTERNS = (
     "curl -s | sh",
     "wget -qO-",
 )
+
+
+def _resolve_workspace_relative_path(workspace_path: Path, relative_path: str) -> Path:
+    if not relative_path:
+        raise ValueError("workspace path cannot be empty")
+    candidate = Path(relative_path)
+    if candidate.is_absolute():
+        raise ValueError(f"workspace path must be relative: {relative_path}")
+    root = workspace_path.resolve()
+    resolved = (workspace_path / candidate).resolve()
+    if resolved == root or not resolved.is_relative_to(root):
+        raise ValueError(f"workspace path escapes sandbox: {relative_path}")
+    return resolved
+
+
+class _ScriptedAgentLoopClient(LLMClient):
+    def __init__(self, workspace_path: Path, turns: list) -> None:
+        self.workspace_path = workspace_path
+        self.turns = turns
+        self.next_turn = 0
+        self.turn_records: list[dict] = []
+        self.tool_to_turn: dict[str, dict] = {}
+        self.tool_paths: dict[str, str] = {}
+        self.errors: list[str] = []
+
+    async def stream(
+        self,
+        conversation: ConversationManager,
+        system: str = "",
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        if self.next_turn < len(self.turns):
+            raw_turn = self.turns[self.next_turn]
+            self.next_turn += 1
+            if isinstance(raw_turn, dict):
+                assistant = str(raw_turn.get("assistant", ""))
+                raw_tool_calls = raw_turn.get("tool_calls", [])
+                if not isinstance(raw_tool_calls, list):
+                    self.errors.append(
+                        f"scripted agent turn {self.next_turn} tool_calls must be a list"
+                    )
+                    raw_tool_calls = []
+            else:
+                assistant = ""
+                raw_tool_calls = []
+                self.errors.append(
+                    f"scripted agent turn {self.next_turn} must be an object"
+                )
+        else:
+            self.next_turn += 1
+            assistant = "完成。"
+            raw_tool_calls = []
+
+        record = {
+            "turn": self.next_turn,
+            "assistant": assistant,
+            "events": [],
+            "tool_results": [],
+        }
+        self.turn_records.append(record)
+
+        yield TextDelta(assistant)
+        for call_index, raw_call in enumerate(raw_tool_calls, 1):
+            if not isinstance(raw_call, dict):
+                self.errors.append(
+                    f"scripted tool call {call_index} in turn {self.next_turn} must be an object"
+                )
+                continue
+            tool_name = str(raw_call.get("tool") or raw_call.get("name") or "").strip()
+            tool_id = f"scripted_turn_{self.next_turn}_tool_{call_index}"
+            arguments, original_path = self._build_arguments(tool_name, raw_call)
+            self.tool_to_turn[tool_id] = record
+            self.tool_paths[tool_id] = original_path
+            yield ToolCallComplete(
+                tool_id=tool_id,
+                tool_name=tool_name,
+                arguments=arguments,
+            )
+
+        yield StreamEnd(
+            stop_reason="tool_use" if raw_tool_calls else "end_turn",
+            input_tokens=1,
+            output_tokens=1,
+        )
+
+    def _build_arguments(self, tool_name: str, call: dict) -> tuple[dict[str, Any], str]:
+        raw_arguments = call.get("arguments", {})
+        arguments: dict[str, Any] = (
+            dict(raw_arguments) if isinstance(raw_arguments, dict) else {}
+        )
+        path_text = str(
+            call.get("path")
+            or call.get("file_path")
+            or arguments.get("file_path")
+            or ""
+        )
+        original_path = path_text
+        if tool_name in {"ReadFile", "WriteFile"}:
+            try:
+                target = _resolve_workspace_relative_path(self.workspace_path, path_text)
+                arguments["file_path"] = str(target)
+            except ValueError as exc:
+                self.errors.append(str(exc))
+                arguments["file_path"] = str(self.workspace_path / "__invalid_path__")
+            if tool_name == "WriteFile":
+                arguments["content"] = str(
+                    call.get("content", arguments.get("content", ""))
+                )
+            if "offset" in call:
+                arguments["offset"] = call["offset"]
+            if "limit" in call:
+                arguments["limit"] = call["limit"]
+        return arguments, original_path
 
 
 class EvolutionEngine:
@@ -364,6 +483,7 @@ class EvolutionEngine:
         scripted_tool_calls: list[dict] | None = None,
         scripted_agent_turns: list[dict] | None = None,
         expected_files: dict[str, str] | None = None,
+        execution_runner: str = "deterministic_replay",
         case_id: str | None = None,
     ) -> str:
         proposal = self.store.get_proposal(proposal_id)
@@ -387,6 +507,12 @@ class EvolutionEngine:
             raise ValueError("eval case task cannot be empty")
         if not required:
             raise ValueError("eval case must_contain cannot be empty")
+        runner = execution_runner.strip() or "deterministic_replay"
+        if runner not in SUPPORTED_EXECUTION_RUNNERS:
+            raise ValueError(
+                "execution_runner must be one of "
+                f"{sorted(SUPPORTED_EXECUTION_RUNNERS)}"
+            )
 
         eval_case = {
             "id": case_id or new_evolution_id("case"),
@@ -395,6 +521,7 @@ class EvolutionEngine:
             "task": clean_task,
             "must_contain": required,
             "must_not_contain": forbidden,
+            "execution_runner": runner,
             "created_at": time.time(),
         }
         if workspace_files:
@@ -868,11 +995,21 @@ class EvolutionEngine:
             rounds.append(round_record)
 
         passed = all(round_["status"] == "passed" for round_ in rounds)
+        round_runners = {
+            str(round_.get("runner", "deterministic_replay"))
+            for round_ in rounds
+        }
+        if round_runners == {"agent_loop_scripted"}:
+            report_runner = "fork_agent_sandbox_scripted_agent_loop"
+        elif round_runners == {"deterministic_replay"}:
+            report_runner = "fork_agent_sandbox_deterministic"
+        else:
+            report_runner = "fork_agent_sandbox_mixed"
         report = {
             "proposal_id": proposal.id,
             "skill_name": payload["name"],
             "status": "passed" if passed else "failed",
-            "runner": "fork_agent_sandbox_deterministic",
+            "runner": report_runner,
             "min_cases_required": min_cases,
             "candidate_skill": str(candidate_path),
             "sandbox_root": str(sandbox_root),
@@ -1345,13 +1482,16 @@ class EvolutionEngine:
             "scripted_tool_calls": eval_case.get("scripted_tool_calls", []),
             "scripted_agent_turns": eval_case.get("scripted_agent_turns", []),
             "expected_files": eval_case.get("expected_files", {}),
+            "execution_runner": eval_case.get("execution_runner", "deterministic_replay"),
         }
+        runner = str(eval_case.get("execution_runner", "deterministic_replay"))
         tool_policy = {
             "allowed_tools": skill.allowed_tools,
             "network": "disabled",
             "write_scope": "round_sandbox_only",
             "project_write": "disabled",
             "max_retries": 1,
+            "runner": runner,
         }
         workspace_path = child_dir / "workspace"
         workspace_path.mkdir(parents=True, exist_ok=False)
@@ -1359,28 +1499,40 @@ class EvolutionEngine:
             workspace_path,
             eval_case.get("workspace_files", {}),
         )
-        turns = self._run_scripted_agent_turns(
-            workspace_path,
-            skill.allowed_tools,
-            eval_case.get("scripted_agent_turns", []),
-        )
-        if turns:
-            tool_results = [
-                result
-                for turn in turns
-                for result in turn.get("tool_results", [])
-            ]
+        child_errors = list(workspace_errors)
+        agent_loop = runner == "agent_loop_scripted"
+        if agent_loop:
+            agent_loop_result = self._run_agent_loop_scripted(
+                workspace_path,
+                skill,
+                rendered,
+                eval_case,
+            )
+            turns = agent_loop_result["turns"]
+            tool_results = agent_loop_result["tool_results"]
+            child_errors.extend(agent_loop_result["errors"])
         else:
-            tool_results = self._run_scripted_tool_calls(
+            turns = self._run_scripted_agent_turns(
                 workspace_path,
                 skill.allowed_tools,
-                eval_case.get("scripted_tool_calls", []),
+                eval_case.get("scripted_agent_turns", []),
             )
+            if turns:
+                tool_results = [
+                    result
+                    for turn in turns
+                    for result in turn.get("tool_results", [])
+                ]
+            else:
+                tool_results = self._run_scripted_tool_calls(
+                    workspace_path,
+                    skill.allowed_tools,
+                    eval_case.get("scripted_tool_calls", []),
+                )
         assertions = self._assert_expected_files(
             workspace_path,
             eval_case.get("expected_files", {}),
         )
-        child_errors = list(workspace_errors)
         child_errors.extend(
             result["error"] for result in tool_results if result["status"] == "failed"
         )
@@ -1392,18 +1544,29 @@ class EvolutionEngine:
         if child_errors:
             round_record["errors"].extend(child_errors)
         round_record["status"] = "failed" if round_record["errors"] else "passed"
-        round_record["execution_summary"] = (
-            "Scripted child agent executed in the isolated workspace and all "
-            "workspace assertions passed."
-            if round_record["status"] == "passed"
-            else "Scripted child agent failed one or more workspace assertions."
-        )
+        round_record["runner"] = runner
+        if round_record["status"] == "passed":
+            round_record["execution_summary"] = (
+                "Scripted LLM drove the real Agent loop in an isolated workspace "
+                "and all workspace assertions passed."
+                if agent_loop
+                else (
+                    "Scripted child agent executed in the isolated workspace and "
+                    "all workspace assertions passed."
+                )
+            )
+        else:
+            round_record["execution_summary"] = (
+                "Scripted LLM Agent loop failed one or more workspace assertions."
+                if agent_loop
+                else "Scripted child agent failed one or more workspace assertions."
+            )
         transcript = [
             "# Forked Child Agent Transcript",
             "",
             f"- Case: `{eval_case['id']}`",
             f"- Skill: `{skill.name}`",
-            "- Runner: deterministic replay",
+            f"- Runner: {runner}",
             "- Network: disabled",
             "- Project writes: disabled",
             "",
@@ -1461,6 +1624,8 @@ class EvolutionEngine:
             "transcript": str(transcript_path),
             "final_answer": str(final_answer_path),
             "workspace": str(workspace_path),
+            "runner": runner,
+            "agent_loop": agent_loop,
             "tool_results": tool_results,
             "turns": turns,
             "assertions": assertions,
@@ -1537,6 +1702,137 @@ class EvolutionEngine:
             results.append(result)
         return results
 
+    def _run_agent_loop_scripted(
+        self,
+        workspace_path: Path,
+        skill,
+        rendered: str,
+        eval_case: dict,
+    ) -> dict:
+        turns = eval_case.get("scripted_agent_turns", [])
+        if not isinstance(turns, list):
+            return {
+                "turns": [{
+                    "turn": 1,
+                    "assistant": "",
+                    "events": [],
+                    "tool_results": [{
+                        "tool": "(invalid)",
+                        "path": "",
+                        "status": "failed",
+                        "error": "scripted_agent_turns must be a list",
+                    }],
+                }],
+                "tool_results": [{
+                    "tool": "(invalid)",
+                    "path": "",
+                    "status": "failed",
+                    "error": "scripted_agent_turns must be a list",
+                }],
+                "errors": ["scripted_agent_turns must be a list"],
+            }
+
+        async def collect() -> dict:
+            from mewcode.agent import (
+                Agent,
+                ErrorEvent,
+                PermissionRequest,
+                PermissionResponse,
+                ToolResultEvent,
+                ToolUseEvent,
+            )
+            from mewcode.permissions import (
+                DangerousCommandDetector,
+                PathSandbox,
+                PermissionChecker,
+                PermissionMode,
+                RuleEngine,
+            )
+            from mewcode.tools import create_default_registry
+
+            client = _ScriptedAgentLoopClient(workspace_path, turns)
+            registry = create_default_registry()
+            safe_allowed_tools = set(skill.allowed_tools) & {"ReadFile", "WriteFile"}
+            for tool in registry.list_tools():
+                if tool.name not in safe_allowed_tools:
+                    registry.disable(tool.name)
+
+            checker = PermissionChecker(
+                DangerousCommandDetector(),
+                PathSandbox(str(workspace_path)),
+                RuleEngine(),
+                mode=PermissionMode.ACCEPT_EDITS,
+            )
+            agent = Agent(
+                client=client,
+                registry=registry,
+                protocol="anthropic",
+                work_dir=str(workspace_path),
+                max_iterations=max(len(turns) + 2, 2),
+                permission_checker=checker,
+                context_window=1_000_000,
+                instructions_content=rendered,
+            )
+            conversation = ConversationManager()
+            conversation.add_user_message(str(eval_case["task"]))
+            errors: list[str] = []
+
+            async for event in agent.run(conversation):
+                if isinstance(event, ToolUseEvent):
+                    record = client.tool_to_turn.get(event.tool_id)
+                    if record is not None:
+                        record["events"].append({
+                            "type": "ToolUseEvent",
+                            "tool": event.tool_name,
+                            "path": client.tool_paths.get(event.tool_id, ""),
+                            "arguments": event.arguments,
+                        })
+                elif isinstance(event, ToolResultEvent):
+                    record = client.tool_to_turn.get(event.tool_id)
+                    tool_result = {
+                        "tool": event.tool_name,
+                        "path": client.tool_paths.get(event.tool_id, ""),
+                        "status": "failed" if event.is_error else "passed",
+                        "error": event.output if event.is_error else "",
+                        "output": event.output,
+                    }
+                    if record is not None:
+                        record["tool_results"].append(tool_result)
+                        record["events"].append({
+                            "type": "ToolResultEvent",
+                            "tool": event.tool_name,
+                            "path": tool_result["path"],
+                            "status": tool_result["status"],
+                            "is_error": event.is_error,
+                        })
+                elif isinstance(event, PermissionRequest):
+                    event.future.set_result(PermissionResponse.DENY)
+                    errors.append(f"permission request denied for {event.tool_name}")
+                elif isinstance(event, ErrorEvent):
+                    errors.append(event.message)
+
+            tool_results = [
+                result
+                for turn_record in client.turn_records
+                for result in turn_record.get("tool_results", [])
+            ]
+            errors.extend(client.errors)
+            return {
+                "turns": client.turn_records,
+                "tool_results": tool_results,
+                "errors": errors,
+            }
+
+        try:
+            return asyncio.run(collect())
+        except RuntimeError as exc:
+            error = f"agent loop execution failed: {exc}"
+            return {
+                "turns": [],
+                "tool_results": [],
+                "errors": [error],
+            }
+
     def _run_scripted_agent_turns(
         self,
         workspace_path: Path,
@@ -1589,6 +1885,19 @@ class EvolutionEngine:
             lines.append(f"### Turn {turn.get('turn', '')}")
             lines.append("")
             lines.append(f"Assistant: {turn.get('assistant', '')}")
+            for event in turn.get("events", []):
+                event_type = event.get("type", "")
+                if event_type == "ToolUseEvent":
+                    lines.append(
+                        "ToolUseEvent: "
+                        f"{event.get('tool', '')} {event.get('path', '')}"
+                    )
+                elif event_type == "ToolResultEvent":
+                    lines.append(
+                        "ToolResultEvent: "
+                        f"{event.get('tool', '')} {event.get('path', '')} "
+                        f"{event.get('status', '')}"
+                    )
             for result in turn.get("tool_results", []):
                 lines.append(
                     "ToolResult: "
@@ -1628,16 +1937,7 @@ class EvolutionEngine:
 
     @staticmethod
     def _workspace_child_path(workspace_path: Path, relative_path: str) -> Path:
-        if not relative_path:
-            raise ValueError("workspace path cannot be empty")
-        candidate = Path(relative_path)
-        if candidate.is_absolute():
-            raise ValueError(f"workspace path must be relative: {relative_path}")
-        root = workspace_path.resolve()
-        resolved = (workspace_path / candidate).resolve()
-        if resolved == root or not resolved.is_relative_to(root):
-            raise ValueError(f"workspace path escapes sandbox: {relative_path}")
-        return resolved
+        return _resolve_workspace_relative_path(workspace_path, relative_path)
 
     @staticmethod
     def _artifact_slug(value: str) -> str:
@@ -1722,6 +2022,11 @@ class EvolutionEngine:
             isinstance(term, str) and term.strip() for term in forbidden
         ):
             return f"eval case {data.get('id', line_no)} has invalid must_not_contain"
+        runner = data.get("execution_runner", "deterministic_replay")
+        if runner not in SUPPORTED_EXECUTION_RUNNERS:
+            return (
+                f"eval case {data.get('id', line_no)} has invalid execution_runner"
+            )
         return None
 
     @staticmethod

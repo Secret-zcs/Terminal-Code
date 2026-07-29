@@ -18,7 +18,7 @@ mewcode.__main__:main
 - **权限控制**：按 read/write/command 分类工具，结合 sandbox、规则引擎和危险命令检测。
 - **上下文压缩**：包含大工具结果预算控制、自动 compact、恢复附件和语义压缩计划。
 - **Checkpoint / Rewind**：支持 `/checkpoint`、`/rewind --preview`、`/rewind --undo`，可回退代码和对话状态。
-- **Hermes 自进化**：通过 `/evolve` 记录经验、生成提案、审批并受控写入项目记忆。
+- **Hermes 自进化**：通过 `/evolve` / `/learn` 记录经验、生成 memory 或 candidate skill 提案，并经 eval/run-eval/approve/promote 受控启用。
 - **Skills**：支持项目级、用户级和内置技能，技能可 inline 或 fork 执行。
 - **MCP**：支持 stdio / HTTP MCP server，并包装为可调用工具。
 - **子智能体与团队协作**：支持 task、team、mailbox、trace、worktree 等多智能体能力。
@@ -245,7 +245,7 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 - candidate skill 必须先记录 eval case，通过 `/evolve eval <proposal_id>`，再通过 `/evolve run-eval <proposal_id>` 至少三轮任务评估，并用 `/evolve show-eval <proposal_id>` 向用户展示报告后，才能经 approve/promote 写入 `.mewcode/skills/<name>/SKILL.md`。
 - eval case 写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`，用于检查候选 SOP 是否覆盖任务所需关键步骤、且不包含明确禁止的错误策略。
 - execution eval 报告写入 `.mewcode/evolution/candidates/<proposal_id>/eval_report.json` 和 `eval_report.md`，并同步记录到 candidate manifest。
-- execution eval 每轮都会在 `.mewcode/evolution/candidates/<proposal_id>/execution_sandbox/` 下生成隔离产物，包括 `task.md`、候选 `SKILL.md` 快照、`rendered_prompt.md`、`result.json` 和 `child_agent/` 下的输入、工具策略、workspace、transcript 与 final answer；eval case 可选携带多轮 `scripted_agent_turns`、脚本化 `ReadFile` / `WriteFile` 调用和 `expected_files` 断言，用于回放子 Agent 工具轨迹并验证隔离工作区产物。
+- execution eval 每轮都会在 `.mewcode/evolution/candidates/<proposal_id>/execution_sandbox/` 下生成隔离产物，包括 `task.md`、候选 `SKILL.md` 快照、`rendered_prompt.md`、`result.json` 和 `child_agent/` 下的输入、工具策略、workspace、transcript 与 final answer；eval case 可选携带多轮 `scripted_agent_turns`、脚本化 `ReadFile` / `WriteFile` 调用和 `expected_files` 断言，用于回放子 Agent 工具轨迹并验证隔离工作区产物；设置 `execution_runner="agent_loop_scripted"` 时，会用 scripted LLM 走真实 `Agent.run()` 主循环并记录 `ToolUseEvent` / `ToolResultEvent`。
 - `/learn` 是 Hermes 风格显式学习入口：同名项目 skill 存在时创建 `patch` 提案，否则创建 `create` 提案，避免重复 skill 膨胀。
 - `/learn` 会先记录 learn evidence，再把 evidence id 关联到生成的 proposal。
 
@@ -262,7 +262,7 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 /evolve preview <proposal_id>    # memory append or skill diff preview
 /evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]
 /evolve eval <proposal_id>       # parse + eval case gate
-/evolve run-eval <proposal_id>   # at least 3 execution eval rounds + report
+/evolve run-eval <proposal_id>   # at least 3 execution eval rounds + report; eval cases may opt into agent_loop_scripted
 /evolve show-eval <proposal_id>  # user-visible eval report
 /evolve approve <proposal_id>
 /evolve apply <proposal_id>      # memory only
@@ -293,7 +293,7 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 benchmarks/self_evolution_seed_cases.jsonl
 ```
 
-种子用例覆盖 SWE-bench、AgentBench、MBPP 和 HumanEval 风格任务族，但不复制原始 benchmark 实例。当前评测是确定性 SOP 覆盖检查：它验证 skill 是否包含任务所需关键步骤、且不包含禁止策略；它不是 fork-agent 真实任务胜率测试。
+种子用例覆盖 SWE-bench、AgentBench、MBPP 和 HumanEval 风格任务族，但不复制原始 benchmark 实例。当前数据集评测是确定性 SOP 覆盖检查：它验证 skill 是否包含任务所需关键步骤、且不包含禁止策略；execution eval 已支持 scripted LLM 驱动真实 Agent loop，但仍不是外部 LLM 自主完成真实 benchmark 的胜率测试。
 
 运行评测并生成报告：
 

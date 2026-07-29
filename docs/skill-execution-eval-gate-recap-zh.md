@@ -408,3 +408,56 @@ PYTHONPATH=. pytest tests/test_evolution.py -q
 ```
 
 边界说明：这一步仍是 scripted replay，不是 LLM 自主规划工具调用；但它已经具备真实 Agent loop 需要的 turn -> tool_use -> tool_result 轨迹结构。
+
+### 2026-07-29 Scripted LLM Agent Loop Runner 追加记录
+
+本次把 turn replay 接入项目真实 `Agent.run()` 主循环。eval case 可以显式设置：
+
+```json
+{
+  "execution_runner": "agent_loop_scripted"
+}
+```
+
+该 runner 会创建一个 eval-only scripted LLM client，把 `scripted_agent_turns` 转换为 `TextDelta`、`ToolCallComplete` 和 `StreamEnd`，再交给真实 Agent loop 执行。`ReadFile` / `WriteFile` 仍使用项目正式工具实现，路径会被重写到 `child_agent/workspace/`，并继续受 workspace sandbox 和 permission checker 约束。
+
+新增 `result.json` 语义：
+
+```json
+{
+  "fork_agent": {
+    "runner": "agent_loop_scripted",
+    "agent_loop": true,
+    "turns": [
+      {
+        "turn": 1,
+        "assistant": "先读取失败输入。",
+        "events": [
+          {"type": "ToolUseEvent", "tool": "ReadFile", "path": "bug.txt"},
+          {"type": "ToolResultEvent", "tool": "ReadFile", "path": "bug.txt"}
+        ],
+        "tool_results": [
+          {"tool": "ReadFile", "path": "bug.txt", "status": "passed"}
+        ]
+      }
+    ]
+  }
+}
+```
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_can_drive_agent_loop_with_scripted_llm -q
+1 failed  # 实现前红灯：add_eval_case 不支持 execution_runner
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_can_drive_agent_loop_with_scripted_llm -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+50 passed
+```
+
+扩展验证：`python3 -m py_compile mewcode/evolution/engine.py` 无输出，`git diff --check` 无输出；核心回归 `PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q` 通过，230 个测试成功。全量 `PYTHONPATH=. pytest -q -x` 仍停在既有 `tests/test_agent.py::test_multi_step_autonomous`，原因是旧测试要求 `WriteFile` 写前不需要 `ReadFile`，和本次 runner 修改无直接依赖。
+
+边界说明：当前已经接入真实 Agent loop 和真实工具执行，但 LLM 仍是 deterministic scripted client，不是外部模型自主判断。这样做的目的，是先稳定 tool event、sandbox、transcript、workspace assertion 这组评测协议，再替换为真实受限 LLM 子 Agent。
