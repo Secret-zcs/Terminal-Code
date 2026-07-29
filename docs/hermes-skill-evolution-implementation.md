@@ -554,7 +554,7 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍为既有 `WriteFile` 写前必须先 `ReadFile` 的安全策略与旧测试预期冲突，和本次 execution eval gate 修改无直接依赖。
 
-限制说明：当前 execution eval 是确定性评估，不是真实模型沙盒执行。它证明候选 SOP 覆盖了多个任务 case 的关键策略，并将测试效果展示给用户；后续仍需要受限 fork agent 执行真实任务回放。
+限制说明：当时 execution eval 是确定性评估，不是真实模型沙盒执行。它证明候选 SOP 覆盖了多个任务 case 的关键策略，并将测试效果展示给用户；后续仍需要受限 fork agent 执行真实任务回放。
 
 ### 2026-07-28 Usage Patch Eval Case Suggestion 验证记录
 
@@ -663,3 +663,11 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 本次增加了一个保守自动归因点：当 `LoadSkill` 请求未知 skill 时，系统记录 `failure` usage，但不改变工具返回、不自动隔离、不自动 patch。该能力为后续“失败任务/用户纠正自动归因”提供统一日志入口。
 
 验证记录：先新增 `test_load_unknown_project_skill_records_failure_usage` 得到红灯，原因是 usage log 为空；实现后该用例通过，`TestLoadSkillTool` 相关 6 个测试通过，`tests/test_skills.py` 45 个测试通过，核心扩展回归 223 个测试通过。`python3 -m py_compile ...` 和 `git diff --check` 均无输出；full suite 仍停在既有 `test_multi_step_autonomous`。
+
+### 2026-07-29 补充：Child Agent Fork Runner
+
+本次把 `run_execution_eval()` 的评测产物从普通 sandbox artifacts 升级为确定性 child-agent fork 轨迹。runner 名称改为 `fork_agent_sandbox_deterministic`，每轮 case 除了 `task.md`、`SKILL.md`、`rendered_prompt.md` 和 `result.json` 外，还会写入 `child_agent/input.json`、`tool_policy.json`、`transcript.md` 和 `final_answer.md`。
+
+设计理由：先固定“子 Agent 输入、工具策略、转写轨迹、最终输出”的文件接口，再接真实 LLM 子 Agent。这样可以保持当前测试稳定，同时为后续真实任务回放留出兼容落点。
+
+验证记录：先更新 `test_run_execution_eval_creates_sandbox_artifacts`，要求 runner 为 `fork_agent_sandbox_deterministic`，且每轮存在 `child_agent/`、工具策略和 transcript；实现前得到 1 个预期失败，实现后目标测试通过，`tests/test_evolution.py` 47 个测试通过。边界仍然明确：当前是 deterministic replay，不调用真实 LLM，不执行真实工具，不修改项目文件。

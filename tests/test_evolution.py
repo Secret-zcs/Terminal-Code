@@ -376,24 +376,37 @@ class TestEvolutionEngine:
         report = json.loads(
             engine.execution_eval_report_path(proposal.id).read_text(encoding="utf-8")
         )
-        assert report["runner"] == "sandbox_deterministic"
+        assert report["runner"] == "fork_agent_sandbox_deterministic"
         sandbox_root = Path(report["sandbox_root"])
         assert sandbox_root == engine.execution_eval_sandbox_path(proposal.id)
         assert sandbox_root.is_dir()
         for round_ in report["rounds"]:
             round_dir = Path(round_["sandbox_dir"])
+            child_agent_dir = round_dir / "child_agent"
             assert round_dir.is_relative_to(sandbox_root)
             assert (round_dir / "task.md").is_file()
             assert (round_dir / "SKILL.md").is_file()
             assert (round_dir / "rendered_prompt.md").is_file()
             assert (round_dir / "result.json").is_file()
+            assert child_agent_dir.is_dir()
+            assert (child_agent_dir / "input.json").is_file()
+            assert (child_agent_dir / "tool_policy.json").is_file()
+            assert (child_agent_dir / "transcript.md").is_file()
+            assert (child_agent_dir / "final_answer.md").is_file()
+            tool_policy = json.loads(
+                (child_agent_dir / "tool_policy.json").read_text(encoding="utf-8")
+            )
+            assert tool_policy["network"] == "disabled"
+            assert tool_policy["write_scope"] == "round_sandbox_only"
             result = json.loads((round_dir / "result.json").read_text(encoding="utf-8"))
             assert result["case_id"] == round_["case_id"]
             assert result["status"] == "passed"
+            assert result["fork_agent"]["transcript"].endswith("transcript.md")
         markdown = engine.execution_eval_markdown_path(proposal.id).read_text(
             encoding="utf-8"
         )
-        assert "Runner: `sandbox_deterministic`" in markdown
+        assert "Runner: `fork_agent_sandbox_deterministic`" in markdown
+        assert "Child Agent" in markdown
         assert "Sandbox" in markdown
 
     def test_approved_skill_proposal_cannot_apply_directly(

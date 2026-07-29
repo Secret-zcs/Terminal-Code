@@ -1,8 +1,8 @@
 # 自进化开发进度总复盘
 
-> 日期：2026-07-28
+> 日期：2026-07-29
 > 基线提交：`f01966c 为候选 skill 增加 eval case 门禁`
-> 最新阶段：候选 skill 执行评估报告门禁、只读 preview、usage log、隔离建议、usage-driven patch candidate、只读 eval case 建议与质量摘要
+> 最新阶段：候选 skill 执行评估报告门禁、确定性 child-agent fork 轨迹、只读 preview、usage log、隔离建议、usage-driven patch candidate、只读 eval case 建议与质量摘要
 > 范围：`mewcode/evolution/`、`/evolve`、`/learn`、candidate skill、eval gate、checkpoint/rewind 保护和测试留档
 
 ## 1. 当前结论
@@ -20,8 +20,8 @@ skill:  learn/propose -> candidate -> validate -> add-eval-case -> eval -> run-e
 
 - memory 可以在用户 approve 后写入 `.mewcode/memories.md`。
 - skill 不会直接进入正式 skill loader，而是先进入 `.mewcode/evolution/candidates/<proposal_id>/`。
-- candidate skill 必须通过 deterministic eval，并且至少完成三轮 execution eval，才能被 promote。
-- execution eval 会生成用户可见的 JSON/Markdown 报告，用户可用 `/evolve show-eval` 先看测试效果再 approve/promote。
+- candidate skill 必须通过 deterministic eval，并且至少完成三轮带 child-agent 轨迹的 execution eval，才能被 promote。
+- execution eval 会生成用户可见的 JSON/Markdown 报告和每轮 `child_agent/` 轨迹，用户可用 `/evolve show-eval` 先看测试效果再 approve/promote。
 - 用户可用 `/evolve preview <proposal_id>` 在 approve/apply/promote 前查看 memory 追加内容或 skill unified diff。
 - `LoadSkill` 成功激活 skill 会写入 `.mewcode/evolution/skill_usage.jsonl`，未知 skill 加载失败会自动写入 `failure` usage，用于后续追踪 skill 影响。
 - 用户可用 `/evolve record-usage <skill-name> :: <event> [:: summary]` 手动记录失败或用户纠正。
@@ -32,7 +32,7 @@ skill:  learn/propose -> candidate -> validate -> add-eval-case -> eval -> run-e
 - promote 前会尝试 checkpoint，promote 后会尝试 reload skill loader。
 - 运行时自进化明确只允许 `memory | skill`，不允许 `code | tool | prompt` 自动落地。
 
-整体进度可以概括为：**安全版 Hermes skill evolution 的主干闭环已完成，并新增了多轮评估报告门禁、只读预览、usage log、手动 quarantine、隔离建议、usage-driven patch candidate、只读 eval case 建议、质量摘要、coverage gap 和可调建议数量；Hermes 原版的后台自动 review、真实模型沙盒任务执行、自动 usage 归因/自动降级还未完成。**
+整体进度可以概括为：**安全版 Hermes skill evolution 的主干闭环已完成，并新增了多轮评估报告门禁、确定性 child-agent fork 轨迹、只读预览、usage log、手动 quarantine、隔离建议、usage-driven patch candidate、只读 eval case 建议、质量摘要、coverage gap 和可调建议数量；Hermes 原版的后台自动 review、真实 LLM 子 Agent 沙盒任务执行、自动 usage 归因/自动降级还未完成。**
 
 ## 2. 版本演进时间线
 
@@ -372,7 +372,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 - eval 必须至少有一个 eval case。
 - promote 必须先 execution eval passed。
 - execution eval 至少要求 3 个 eval case，并生成用户可见报告。
-- execution eval 在 candidate 目录内生成 deterministic sandbox artifacts，包含任务、候选 skill 快照、渲染 SOP 和结构化结果。
+- execution eval 在 candidate 目录内生成 deterministic child-agent sandbox artifacts，包含任务、候选 skill 快照、渲染 SOP、结构化结果、子 Agent 输入、工具策略、transcript 和 final answer。
 - `/evolve preview <proposal_id>` 已支持 memory 追加预览和 skill unified diff，且不会写正式 memory/skill；candidate 缺失时也只从 proposal payload 内存渲染。
 - `LoadSkill` 成功加载 skill 后会记录 `load` usage event；未知 skill 加载失败会记录 `failure` usage event。
 - `/evolve quarantine <skill-name> [:: reason]` 只隔离项目级正式 skill，不隔离内置 skill 或用户全局 skill。
@@ -384,12 +384,12 @@ ProposalRisk = Literal["low", "medium", "high"]
 ### 仍未实现
 
 - 没有后台 background review 自动从对话中蒸馏 skill。
-- 没有 fork reviewer 隔离运行自进化审查。
-- execution eval 目前是确定性 SOP 覆盖检查，不是真实模型沙盒任务执行。
+- 没有后台 fork reviewer 隔离运行自进化审查。
+- execution eval 目前是确定性 child-agent replay，不是真实 LLM 子 Agent 沙盒任务执行。
 - usage log 目前记录 skill load、未知 skill 加载失败和 quarantine，并支持手动记录 failure/user_feedback；尚未自动记录完整任务成功、失败和用户纠正。
 - quarantine 目前是手动命令，已能根据 usage failure 阈值给出建议，但不会自动执行隔离。
 - 没有自动从失败任务或 rewind 事件反推 skill 需要 patch。
-- 没有受限 fork agent 真实执行 eval case；当前 sandbox runner 仍是 deterministic checker。
+- 没有受限 LLM 子 Agent 真实执行 eval case；当前 child-agent runner 仍是 deterministic replay。
 
 ## 6. 与 Hermes 原版的差距
 
@@ -642,5 +642,68 @@ PYTHONPATH=. python3 scripts/run_self_evolution_dataset_eval.py \
 
 - 该评测测试的是候选 skill SOP 对任务关键步骤的覆盖能力，不是真实模型完成率。
 - seed cases 是基于公开 benchmark 任务族抽象出来的本地用例，不复制原始 benchmark 实例。
-- 当前不会 fork 一个真实 Agent 去执行仓库补丁、工具调用或函数实现。
-- 下一步更强评测应实现受限 fork-agent runner：给候选 skill、临时工作区、工具白名单和任务断言，让子 Agent 真实完成多轮任务后再产出 promote 申请。
+- 当前公开基准评测不会 fork 一个真实 Agent 去执行仓库补丁、工具调用或函数实现。
+- 下一步更强评测应把 deterministic child-agent runner 接入真实受限 LLM 子 Agent：给候选 skill、临时工作区、工具白名单和任务断言，让子 Agent 真实完成多轮任务后再产出 promote 申请。
+
+## 14. 最新推进记录：确定性 Child-Agent Fork 轨迹
+
+日期：2026-07-29
+
+本次推进回答了“是否已经 fork 一个 Agent 执行自进化评测”的阶段性问题：当前已经有每轮 eval case 的 **child-agent fork 轨迹**，但它是 deterministic replay，不是真实 LLM 子 Agent。这样做的理由是先稳定接口和审计产物，再接入真实模型执行，避免直接把不稳定 LLM 回放放进 promote 门禁。
+
+修改内容：
+
+- 修改 `mewcode/evolution/engine.py`：`run_execution_eval()` 的 runner 从 `sandbox_deterministic` 升级为 `fork_agent_sandbox_deterministic`。
+- 修改 `mewcode/evolution/engine.py`：每轮 sandbox 新增 `child_agent/input.json`、`tool_policy.json`、`transcript.md` 和 `final_answer.md`。
+- 修改 `mewcode/evolution/engine.py`：`result.json` 新增 `fork_agent` 字段，保存 child-agent artifact 路径。
+- 修改 `mewcode/evolution/engine.py`：Markdown 报告在每轮展示 `Child Agent` 路径。
+- 修改 `tests/test_evolution.py`：新增断言，确认 runner 名称、child-agent 目录、工具策略和 transcript 路径。
+- 修改 `README.md`、`docs/skill-execution-eval-gate-recap-zh.md` 和本文档：同步记录能力边界。
+
+每轮新增结构：
+
+```text
+.mewcode/evolution/candidates/<proposal_id>/execution_sandbox/
+  round_01_<case_id>/
+    task.md
+    SKILL.md
+    rendered_prompt.md
+    result.json
+    child_agent/
+      input.json
+      tool_policy.json
+      transcript.md
+      final_answer.md
+```
+
+工具策略固定记录：
+
+```json
+{
+  "network": "disabled",
+  "write_scope": "round_sandbox_only",
+  "project_write": "disabled",
+  "max_retries": 1
+}
+```
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_creates_sandbox_artifacts -q
+1 failed  # 实现前红灯：runner 仍是 sandbox_deterministic，缺少 child_agent 目录和工具策略
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_creates_sandbox_artifacts -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+47 passed
+```
+
+边界说明：
+
+- 已实现：候选 skill 的每轮 execution eval 都有独立 child-agent 输入、工具策略、transcript 和 final answer 产物。
+- 已实现：child-agent 产物只写在 candidate sandbox 下，不写真实项目。
+- 未实现：没有调用真实 LLM，也没有真实执行 Bash/ReadFile/EditFile 等工具。
+- 未实现：还没有基于真实任务断言判断子 Agent 是否完成仓库补丁或函数实现。
+- 下一步：把 `child_agent/input.json` 和 `tool_policy.json` 接入受限子 Agent 执行器，记录真实工具调用，并让 `show-eval` 展示真实执行轨迹后再提交 promote 申请。

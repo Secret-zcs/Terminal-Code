@@ -1105,3 +1105,12 @@ skill verifier
 - 绿灯记录：同一命令实现后通过，1 个测试成功；`PYTHONPATH=. pytest tests/test_skills.py::TestLoadSkillTool -q` 通过，6 个测试成功；`tests/test_skills.py` 通过，45 个测试成功；核心扩展回归通过，223 个测试成功。
 - 编译和格式检查记录：`python3 -m py_compile mewcode/tools/load_skill.py mewcode/evolution/engine.py mewcode/commands/handlers/evolve.py` 与 `git diff --check` 均无输出。
 - 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在既有 `tests/test_agent.py::test_multi_step_autonomous`，和本次 LoadSkill 失败归因修改无直接依赖。
+
+### 2026-07-29 补充：Child Agent Fork Runner
+
+- 修改 `mewcode/evolution/engine.py`：`run_execution_eval()` 的 runner 标识升级为 `fork_agent_sandbox_deterministic`。
+- 修改 `mewcode/evolution/engine.py`：每轮 eval case 额外写入 `child_agent/input.json`、`tool_policy.json`、`transcript.md` 和 `final_answer.md`，并在 `result.json` 中记录 `fork_agent` artifact 路径。
+- 设计理由：先把候选 skill 的子 Agent 输入、工具策略、执行轨迹和最终输出固定为可审计文件接口，再接入真实 LLM 子 Agent。
+- 安全边界：当前 child-agent 是 deterministic replay，不调用真实 LLM，不执行真实工具，不写项目文件；所有产物都限制在 candidate `execution_sandbox/` 下。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_creates_sandbox_artifacts -q` 在实现前得到 1 个预期失败，失败原因为 runner 仍是 `sandbox_deterministic` 且缺少 `child_agent/` 产物。
+- 绿灯记录：同一目标测试实现后通过，`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，47 个测试成功。

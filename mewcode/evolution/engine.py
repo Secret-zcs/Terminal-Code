@@ -837,12 +837,13 @@ class EvolutionEngine:
                     "skill": str(round_dir / "SKILL.md"),
                     "rendered_prompt": str(round_dir / "rendered_prompt.md"),
                     "result": str(round_dir / "result.json"),
+                    "child_agent": str(round_dir / "child_agent"),
                 },
                 "execution_summary": (
-                    "Candidate skill SOP was loaded and checked against this "
-                    "task case. Required behavior was covered."
+                    "Forked deterministic child agent loaded the candidate skill "
+                    "inside the round sandbox and covered required behavior."
                     if base_result["status"] == "passed"
-                    else "Candidate skill SOP failed this task case."
+                    else "Forked deterministic child agent failed this task case."
                 ),
             }
             self._write_execution_round_artifacts(
@@ -859,7 +860,7 @@ class EvolutionEngine:
             "proposal_id": proposal.id,
             "skill_name": payload["name"],
             "status": "passed" if passed else "failed",
-            "runner": "sandbox_deterministic",
+            "runner": "fork_agent_sandbox_deterministic",
             "min_cases_required": min_cases,
             "candidate_skill": str(candidate_path),
             "sandbox_root": str(sandbox_root),
@@ -1283,6 +1284,13 @@ class EvolutionEngine:
             rendered.rstrip() + "\n",
             encoding="utf-8",
         )
+        fork_agent = self._write_child_agent_artifacts(
+            round_dir,
+            skill,
+            eval_case,
+            rendered,
+            round_record,
+        )
         result = {
             "case_id": round_record["case_id"],
             "status": round_record["status"],
@@ -1292,11 +1300,94 @@ class EvolutionEngine:
                 "must_contain": round_record["must_contain"],
                 "must_not_contain": round_record["must_not_contain"],
             },
+            "fork_agent": fork_agent,
         }
         (round_dir / "result.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+
+    def _write_child_agent_artifacts(
+        self,
+        round_dir: Path,
+        skill,
+        eval_case: dict,
+        rendered: str,
+        round_record: dict,
+    ) -> dict:
+        child_dir = round_dir / "child_agent"
+        child_dir.mkdir(parents=True, exist_ok=False)
+        input_path = child_dir / "input.json"
+        tool_policy_path = child_dir / "tool_policy.json"
+        transcript_path = child_dir / "transcript.md"
+        final_answer_path = child_dir / "final_answer.md"
+        input_payload = {
+            "case_id": eval_case["id"],
+            "task": eval_case["task"],
+            "skill_name": skill.name,
+            "skill_description": skill.description,
+            "rendered_prompt": rendered,
+            "must_contain": eval_case["must_contain"],
+            "must_not_contain": eval_case.get("must_not_contain", []),
+        }
+        tool_policy = {
+            "allowed_tools": skill.allowed_tools,
+            "network": "disabled",
+            "write_scope": "round_sandbox_only",
+            "project_write": "disabled",
+            "max_retries": 1,
+        }
+        transcript = [
+            "# Forked Child Agent Transcript",
+            "",
+            f"- Case: `{eval_case['id']}`",
+            f"- Skill: `{skill.name}`",
+            "- Runner: deterministic replay",
+            "- Network: disabled",
+            "- Project writes: disabled",
+            "",
+            "## User Task",
+            "",
+            eval_case["task"],
+            "",
+            "## Loaded Skill Prompt",
+            "",
+            rendered.rstrip(),
+            "",
+            "## Verification",
+            "",
+            f"- Status: `{round_record['status']}`",
+            f"- Required terms: {', '.join(round_record['must_contain'])}",
+            f"- Forbidden terms: {', '.join(round_record['must_not_contain']) or '(none)'}",
+        ]
+        if round_record["errors"]:
+            transcript.append("- Errors: " + "; ".join(round_record["errors"]))
+        final_answer = [
+            "# Child Agent Final Answer",
+            "",
+            round_record["execution_summary"],
+            "",
+            f"Status: {round_record['status']}",
+        ]
+        input_path.write_text(
+            json.dumps(input_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        tool_policy_path.write_text(
+            json.dumps(tool_policy, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        transcript_path.write_text("\n".join(transcript).rstrip() + "\n", encoding="utf-8")
+        final_answer_path.write_text(
+            "\n".join(final_answer).rstrip() + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "input": str(input_path),
+            "tool_policy": str(tool_policy_path),
+            "transcript": str(transcript_path),
+            "final_answer": str(final_answer_path),
+        }
 
     @staticmethod
     def _artifact_slug(value: str) -> str:
@@ -1328,6 +1419,7 @@ class EvolutionEngine:
                 f"- Task: {round_['task']}",
                 f"- Status: `{round_['status']}`",
                 f"- Sandbox: `{round_.get('sandbox_dir', '(none)')}`",
+                f"- Child Agent: `{round_.get('artifacts', {}).get('child_agent', '(none)')}`",
                 f"- Must contain: {', '.join(round_['must_contain'])}",
                 f"- Must not contain: {', '.join(round_['must_not_contain']) or '(none)'}",
                 f"- Result: {round_['execution_summary']}",

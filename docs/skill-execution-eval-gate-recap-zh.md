@@ -250,7 +250,7 @@ PYTHONPATH=. pytest tests/test_evolution.py -q
 
 ## 4. 设计取舍
 
-当前 execution eval 已经是确定性 sandbox artifact runner，但还不是完整 Hermes 式真实 fork agent 任务回放，也不是调用模型执行一组沙盒任务。它是一个确定性、可重复、低副作用的门禁：
+截至 2026-07-23，execution eval 已经是确定性 sandbox artifact runner，但还不是完整 Hermes 式真实 fork agent 任务回放，也不是调用模型执行一组沙盒任务。它是一个确定性、可重复、低副作用的门禁：
 
 - 优点：不需要 LLM key，不会修改真实项目，结果稳定，适合单元测试。
 - 优点：能强制用户为 candidate skill 准备至少 3 个任务 case。
@@ -279,3 +279,70 @@ PYTHONPATH=. pytest tests/test_evolution.py -q
 候选 skill 不是正式能力；
 只有经过多轮测试、报告展示和用户授权，才能进入长期 skill 库。
 ```
+
+### 2026-07-29 Child Agent Fork Runner 追加记录
+
+本次把 execution eval 从普通 sandbox artifact runner 推进为确定性 child-agent fork runner。它仍不调用真实 LLM，但每一轮 eval case 都会生成一个受限 child-agent 执行轨迹，便于后续替换为真实子 Agent。
+
+新增每轮路径：
+
+```text
+.mewcode/evolution/candidates/<proposal_id>/execution_sandbox/
+  round_01_<case_id>/
+    task.md
+    SKILL.md
+    rendered_prompt.md
+    result.json
+    child_agent/
+      input.json
+      tool_policy.json
+      transcript.md
+      final_answer.md
+```
+
+当前报告字段升级为：
+
+```json
+{
+  "runner": "fork_agent_sandbox_deterministic",
+  "sandbox_root": ".mewcode/evolution/candidates/prop_xxx/execution_sandbox",
+  "rounds": [
+    {
+      "sandbox_dir": ".../round_01_case_xxx",
+      "artifacts": {
+        "task": ".../task.md",
+        "skill": ".../SKILL.md",
+        "rendered_prompt": ".../rendered_prompt.md",
+        "result": ".../result.json",
+        "child_agent": ".../child_agent"
+      }
+    }
+  ]
+}
+```
+
+`child_agent/tool_policy.json` 明确记录：
+
+```json
+{
+  "network": "disabled",
+  "write_scope": "round_sandbox_only",
+  "project_write": "disabled",
+  "max_retries": 1
+}
+```
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_creates_sandbox_artifacts -q
+1 failed  # 实现前红灯：runner 仍是 sandbox_deterministic，缺少 child_agent 目录和工具策略
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_creates_sandbox_artifacts -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+47 passed
+```
+
+边界说明：当前已经有“fork 出来的 child-agent 评测轨迹”，但它是 deterministic replay，不是真实 LLM 子 Agent，也不会真正调用 Bash/ReadFile/EditFile 等工具。下一步应把 `child_agent/input.json`、`tool_policy.json` 和 `transcript.md` 作为接口，接入真实受限子 Agent 执行器，并记录真实工具调用与任务断言。

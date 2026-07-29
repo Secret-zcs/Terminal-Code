@@ -246,7 +246,7 @@ promote 会检查 `eval_status == "passed"`，否则拒绝启用。
 /evolve run-eval <proposal_id>
 ```
 
-当前 execution eval 仍是 deterministic/mock runner，不调用模型、不修改真实项目。它会：
+当前 execution eval 是 deterministic child-agent fork runner，不调用真实 LLM、不修改真实项目。它会：
 
 - 要求 proposal 是 skill proposal；
 - 要求普通 `/evolve eval` 已通过；
@@ -254,7 +254,7 @@ promote 会检查 `eval_status == "passed"`，否则拒绝启用。
 - 对每个 case 加载 candidate SOP，检查 `must_contain` 和 `must_not_contain`；
 - 为每轮写入 `round`、`case_id`、`task`、`status`、`errors` 和 `execution_summary`；
 - 写入 `eval_report.json` 和 `eval_report.md`；
-- 在 `execution_sandbox/round_*` 下写入 `task.md`、候选 `SKILL.md` 快照、`rendered_prompt.md` 和 `result.json`；
+- 在 `execution_sandbox/round_*` 下写入 `task.md`、候选 `SKILL.md` 快照、`rendered_prompt.md`、`result.json`，以及 `child_agent/input.json`、`tool_policy.json`、`transcript.md` 和 `final_answer.md`；
 - 更新 manifest 的 `execution_eval_status` 和 `execution_eval_rounds`。
 
 少于三轮时会拒绝：
@@ -589,7 +589,7 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 
 - 自动 usage 归因：记录 skill 触发后的任务结果、用户反馈和失败原因，用于后续自动降级或复盘。
 - patch 评审器增强：根据历史成功率校准质量评分，并提示哪些 case 仍缺少真实任务覆盖。
-- 更强的任务回放：由受限 fork agent 在沙盒中真实执行 case，而不只是检查候选 SOP 的关键步骤覆盖。
+- 更强的任务回放：把当前 deterministic child-agent 轨迹替换为受限 LLM 子 Agent 在沙盒中真实执行 case，而不只是检查候选 SOP 的关键步骤覆盖。
 - background review：只能生成 candidate，禁止自动 promote。
 
 ### 2026-07-29 补充：Eval Case Suggestion Count 参数
