@@ -285,6 +285,31 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 
 ---
 
+## 自进化数据集评测
+
+仓库包含一组公开基准族启发的自进化种子用例，用于比较“通用编码 SOP”和“自进化后 candidate skill SOP”的覆盖差异：
+
+```text
+benchmarks/self_evolution_seed_cases.jsonl
+```
+
+种子用例覆盖 SWE-bench、AgentBench、MBPP 和 HumanEval 风格任务族，但不复制原始 benchmark 实例。当前评测是确定性 SOP 覆盖检查：它验证 skill 是否包含任务所需关键步骤、且不包含禁止策略；它不是 fork-agent 真实任务胜率测试。
+
+运行评测并生成报告：
+
+```bash
+PYTHONPATH=. python3 scripts/run_self_evolution_dataset_eval.py \
+  --json-output docs/self-evolution-dataset-eval-results.json \
+  --md-output docs/self-evolution-dataset-eval-results-zh.md
+```
+
+当前报告输出：
+
+- `docs/self-evolution-dataset-eval-results.json`
+- `docs/self-evolution-dataset-eval-results-zh.md`
+
+---
+
 ## 测试
 
 运行全部测试：
@@ -323,6 +348,7 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 | `docs/hermes-evolution-rewind-review.md` | Hermes 自进化与 Rewind 复盘 |
 | `docs/self-evolution-development-progress-recap-zh.md` | 当前自进化开发进度总复盘 |
 | `docs/skill-execution-eval-gate-recap-zh.md` | 候选 skill 多轮执行评估门禁复盘 |
+| `docs/self-evolution-dataset-eval-results-zh.md` | 自进化公开基准种子评测结果 |
 | `docs/agent-interview-qa.md` | Agent 项目问答材料 |
 
 ---

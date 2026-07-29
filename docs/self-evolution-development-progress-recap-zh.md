@@ -588,3 +588,59 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`，失败原因为旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略要求写前先读；和本次 LoadSkill 失败归因修改无直接依赖。
 
 边界说明：该归因只记录失败事实，不会自动 quarantine、不会自动生成 patch candidate，也不会影响正式 skill loader。不存在的 skill 不会触发 quarantine suggestion，因为 quarantine 仍要求项目级正式 skill 存在。
+
+## 13. 最新推进记录：公开基准种子数据集评测
+
+日期：2026-07-29
+
+本次推进新增了一个离线、确定性的自进化效果评测基线。它使用公开基准族作为任务来源参考，把 SWE-bench、AgentBench、MBPP 和 HumanEval 风格任务抽象成仓库内 JSONL seed cases，然后比较两段 SOP：
+
+- baseline：自进化前的通用编码 SOP，只要求阅读需求、必要时运行测试、遇错继续。
+- evolved：自进化后的候选 skill SOP，要求复现失败、最小补丁、回归测试、工具失败有限重试、rewind 安全、函数规格、边界用例、断言和禁止硬编码等关键步骤。
+
+新增文件：
+
+- `benchmarks/self_evolution_seed_cases.jsonl`：6 条公开 benchmark 启发的 seed cases。
+- `mewcode/evolution/benchmark.py`：加载 JSONL、计算 required-term recall、生成 Markdown 报告。
+- `scripts/run_self_evolution_dataset_eval.py`：命令行评测入口。
+- `tests/test_self_evolution_benchmark.py`：评测加载、打分和报告结构测试。
+- `docs/self-evolution-dataset-eval-results.json`：结构化评测结果。
+- `docs/self-evolution-dataset-eval-results-zh.md`：用户可读评测报告。
+
+当前结果：
+
+```text
+Cases: 6
+Baseline Required Recall: 0.00%
+Evolved Required Recall: 100.00%
+Delta Required Recall: 100.00%
+Baseline Passed: 0
+Evolved Passed: 6
+```
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_benchmark.py -q
+1 failed, 3 passed  # 实现前红灯：报告缺少 Dataset Selection Rationale / Before/After Interpretation
+
+PYTHONPATH=. pytest tests/test_self_evolution_benchmark.py -q
+4 passed
+```
+
+编译与生成记录：
+
+```text
+python3 -m py_compile mewcode/evolution/benchmark.py scripts/run_self_evolution_dataset_eval.py
+
+PYTHONPATH=. python3 scripts/run_self_evolution_dataset_eval.py \
+  --json-output docs/self-evolution-dataset-eval-results.json \
+  --md-output docs/self-evolution-dataset-eval-results-zh.md
+```
+
+边界说明：
+
+- 该评测测试的是候选 skill SOP 对任务关键步骤的覆盖能力，不是真实模型完成率。
+- seed cases 是基于公开 benchmark 任务族抽象出来的本地用例，不复制原始 benchmark 实例。
+- 当前不会 fork 一个真实 Agent 去执行仓库补丁、工具调用或函数实现。
+- 下一步更强评测应实现受限 fork-agent runner：给候选 skill、临时工作区、工具白名单和任务断言，让子 Agent 真实完成多轮任务后再产出 promote 申请。
