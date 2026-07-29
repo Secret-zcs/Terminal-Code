@@ -497,6 +497,30 @@ class TestLoadSkillTool:
         assert "unknown skill" in result.output
 
     @pytest.mark.asyncio
+    async def test_load_unknown_project_skill_records_failure_usage(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.evolution import EvolutionEngine
+        from mewcode.tools.load_skill import LoadSkill, LoadSkillParams
+
+        loader = SkillLoader(str(tmp_path))
+        loader.load_all()
+        agent = MagicMock()
+        agent.registry = ToolRegistry()
+        tool = LoadSkill()
+        tool.set_loader(loader)
+        tool.set_agent(agent)
+
+        result = await tool.execute(LoadSkillParams(name="missing-review"))
+
+        assert result.is_error
+        usage = EvolutionEngine(tmp_path).load_skill_usage()
+        assert usage[-1]["skill_name"] == "missing-review"
+        assert usage[-1]["event"] == "failure"
+        assert usage[-1]["source"] == "LoadSkill"
+        assert usage[-1]["metadata"]["summary"] == "unknown skill requested"
+
+    @pytest.mark.asyncio
     async def test_not_initialized(self) -> None:
         from mewcode.tools.load_skill import LoadSkill, LoadSkillParams
 

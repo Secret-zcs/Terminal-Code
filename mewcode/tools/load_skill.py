@@ -57,6 +57,14 @@ class LoadSkill(Tool):
         skill = self._loader.get(params.name)
         if skill is None:
             available = ", ".join(n for n, _ in self._loader.get_catalog())
+            self._record_usage(
+                params.name,
+                event="failure",
+                metadata={
+                    "summary": "unknown skill requested",
+                    "available_skills": available,
+                },
+            )
             return ToolResult(
                 output=f"Error: unknown skill '{params.name}'. Available skills: {available}",
                 is_error=True,
@@ -73,20 +81,36 @@ class LoadSkill(Tool):
         parts = [f"Skill '{skill.name}' activated. SOP pinned to environment context."]
         if tool_count > 0:
             parts.append(f"{tool_count} specialized tool(s) registered.")
-        work_dir = getattr(self._loader, "work_dir", None)
-        if isinstance(work_dir, str) and work_dir:
-            try:
-                from mewcode.evolution import EvolutionEngine
-
-                EvolutionEngine(work_dir).record_skill_usage(
-                    skill.name,
-                    event="load",
-                    source="LoadSkill",
-                    metadata={
-                        "source_label": self._loader.get_source_label(skill.name),
-                        "tool_count": tool_count,
-                    },
-                )
-            except Exception:
-                pass
+        self._record_usage(
+            skill.name,
+            event="load",
+            metadata={
+                "source_label": self._loader.get_source_label(skill.name),
+                "tool_count": tool_count,
+            },
+        )
         return ToolResult(output=" ".join(parts))
+
+    def _record_usage(
+        self,
+        skill_name: str,
+        *,
+        event: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        if self._loader is None:
+            return
+        work_dir = getattr(self._loader, "work_dir", None)
+        if not isinstance(work_dir, str) or not work_dir:
+            return
+        try:
+            from mewcode.evolution import EvolutionEngine
+
+            EvolutionEngine(work_dir).record_skill_usage(
+                skill_name,
+                event=event,
+                source="LoadSkill",
+                metadata=metadata,
+            )
+        except Exception:
+            pass

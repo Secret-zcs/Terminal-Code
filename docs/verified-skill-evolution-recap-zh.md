@@ -630,6 +630,10 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 
 追加验证：coverage gap recommendation 已补强为“提高 count 或手写 eval case”。该变更只改变评审建议文本，不改变候选 skill、不写入 eval case、不改变 promote gate；新增红绿测试覆盖了推荐语必须包含 `Increase count` 和 `manual eval cases`。扩展验证保持 `tests/test_evolution.py` 47 个通过、核心回归 222 个通过，full suite 仍停在既有 `test_multi_step_autonomous`。
 
+### 2026-07-29 补充：LoadSkill 失败自动归因
+
+未知 skill 加载失败现在会被记录为 `failure` usage。该变更只增加审计证据，不启用、不隔离、不修改任何 skill；不存在的 skill 也不会触发 quarantine suggestion，因为隔离建议仍要求项目级正式 skill 存在。新增红绿测试确认 usage log 会保存 `skill_name`、`event=failure`、`source=LoadSkill` 和 `summary=unknown skill requested`。最终验证为 `tests/test_skills.py` 45 个通过、核心扩展回归 223 个通过；full suite 仍停在既有 `test_multi_step_autonomous`。
+
 ## 10. 设计取舍
 
 该方案牺牲了 Hermes 原版的学习速度，但降低了代码智能体长期行为污染风险。核心原则是：

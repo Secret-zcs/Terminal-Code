@@ -657,3 +657,9 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 设计边界：`count` 只增加建议数量，不代表系统已经认可这些 eval case。建议仍需用户审阅后用 `/evolve add-eval-case` 显式写入，再经过 `eval -> run-eval -> show-eval -> approve -> promote`。
 
 追加实现记录：当默认建议仍存在 coverage gap 时，`review_eval_case_suggestions()` 的 recommendation 现在会明确提示提高 `count` 或手写 eval case。TDD 红灯为 `test_review_eval_case_suggestions_reports_uncovered_usage_feedback` 失败，原因是旧推荐语没有包含 `Increase count` 和 `manual eval cases`；实现后该用例通过，相关三项回归也通过。扩展验证保持 `tests/test_evolution.py` 47 个通过、核心回归 222 个通过，full suite 仍停在既有 `test_multi_step_autonomous`。
+
+### 2026-07-29 补充：LoadSkill 失败自动归因
+
+本次增加了一个保守自动归因点：当 `LoadSkill` 请求未知 skill 时，系统记录 `failure` usage，但不改变工具返回、不自动隔离、不自动 patch。该能力为后续“失败任务/用户纠正自动归因”提供统一日志入口。
+
+验证记录：先新增 `test_load_unknown_project_skill_records_failure_usage` 得到红灯，原因是 usage log 为空；实现后该用例通过，`TestLoadSkillTool` 相关 6 个测试通过，`tests/test_skills.py` 45 个测试通过，核心扩展回归 223 个测试通过。`python3 -m py_compile ...` 和 `git diff --check` 均无输出；full suite 仍停在既有 `test_multi_step_autonomous`。

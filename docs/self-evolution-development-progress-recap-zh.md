@@ -23,7 +23,7 @@ skill:  learn/propose -> candidate -> validate -> add-eval-case -> eval -> run-e
 - candidate skill 必须通过 deterministic eval，并且至少完成三轮 execution eval，才能被 promote。
 - execution eval 会生成用户可见的 JSON/Markdown 报告，用户可用 `/evolve show-eval` 先看测试效果再 approve/promote。
 - 用户可用 `/evolve preview <proposal_id>` 在 approve/apply/promote 前查看 memory 追加内容或 skill unified diff。
-- `LoadSkill` 成功激活 skill 会写入 `.mewcode/evolution/skill_usage.jsonl`，用于后续追踪 skill 影响。
+- `LoadSkill` 成功激活 skill 会写入 `.mewcode/evolution/skill_usage.jsonl`，未知 skill 加载失败会自动写入 `failure` usage，用于后续追踪 skill 影响。
 - 用户可用 `/evolve record-usage <skill-name> :: <event> [:: summary]` 手动记录失败或用户纠正。
 - 用户可用 `/evolve suggest-quarantine [skill-name]` 基于负面 usage 事件查看隔离建议。
 - 用户可用 `/evolve propose-patch-from-usage <skill-name>` 将负面 usage 转为 skill patch candidate。
@@ -374,7 +374,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 - execution eval 至少要求 3 个 eval case，并生成用户可见报告。
 - execution eval 在 candidate 目录内生成 deterministic sandbox artifacts，包含任务、候选 skill 快照、渲染 SOP 和结构化结果。
 - `/evolve preview <proposal_id>` 已支持 memory 追加预览和 skill unified diff，且不会写正式 memory/skill；candidate 缺失时也只从 proposal payload 内存渲染。
-- `LoadSkill` 成功加载 skill 后会记录 `load` usage event。
+- `LoadSkill` 成功加载 skill 后会记录 `load` usage event；未知 skill 加载失败会记录 `failure` usage event。
 - `/evolve quarantine <skill-name> [:: reason]` 只隔离项目级正式 skill，不隔离内置 skill 或用户全局 skill。
 - eval case 路径校验 skill name，避免路径逃逸。
 - 危险命令片段会被 validate 阻断。
@@ -386,7 +386,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 - 没有后台 background review 自动从对话中蒸馏 skill。
 - 没有 fork reviewer 隔离运行自进化审查。
 - execution eval 目前是确定性 SOP 覆盖检查，不是真实模型沙盒任务执行。
-- usage log 目前记录 skill load/quarantine，并支持手动记录 failure/user_feedback；尚未自动记录任务成功、失败和用户纠正。
+- usage log 目前记录 skill load、未知 skill 加载失败和 quarantine，并支持手动记录 failure/user_feedback；尚未自动记录完整任务成功、失败和用户纠正。
 - quarantine 目前是手动命令，已能根据 usage failure 阈值给出建议，但不会自动执行隔离。
 - 没有自动从失败任务或 rewind 事件反推 skill 需要 patch。
 - 没有受限 fork agent 真实执行 eval case；当前 sandbox runner 仍是 deterministic checker。
@@ -474,7 +474,7 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 ### P1：引入 usage log、quarantine、建议器与 patch candidate（基础版已完成）
 
 - 已增加 `.mewcode/evolution/skill_usage.jsonl`。
-- 已记录 `LoadSkill` 成功加载事件和 `/evolve quarantine` 隔离事件。
+- 已记录 `LoadSkill` 成功加载事件、未知 skill 加载失败事件和 `/evolve quarantine` 隔离事件。
 - 已增加 `/evolve record-usage <skill-name> :: <event> [:: summary]`，支持手动记录 `failure`、`user_feedback` 等事件。
 - 已增加 `/evolve suggest-quarantine [skill-name]`，当负面 usage 事件达到阈值时输出建议命令。
 - 已增加 `/evolve propose-patch-from-usage <skill-name>`，把负面 usage 汇总进 patch candidate。
@@ -559,3 +559,32 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 边界说明：`count` 不改变自进化安全主线。系统仍只生成只读建议，不自动写入 eval case，不自动 approve，也不自动 promote；用户必须审阅测试意图后再执行 `add-eval-case -> eval -> run-eval -> show-eval -> approve -> promote`。
 
 追加推进：coverage gap 的 recommendation 已从泛化建议升级为明确动作：提高 `count` 或手写 eval case。新增断言先红后绿，确保用户看到未覆盖反馈时能直接知道下一步该如何补齐测试覆盖。验证结果保持 `tests/test_evolution.py` 47 个通过、核心回归 222 个通过，full suite 仍停在既有 `test_multi_step_autonomous`。
+
+## 12. 最新推进记录：LoadSkill 失败自动归因
+
+本次推进补齐了第一个自动 usage 归因点：当 `LoadSkill` 请求一个不存在的 skill 时，系统在返回 unknown skill 错误的同时，会向 `.mewcode/evolution/skill_usage.jsonl` 记录 `event=failure`，metadata 中保存 `summary=unknown skill requested` 和当时可用 skill 列表。
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_skills.py::TestLoadSkillTool::test_load_unknown_project_skill_records_failure_usage -q
+1 failed  # 实现前红灯：usage log 为空
+
+PYTHONPATH=. pytest tests/test_skills.py::TestLoadSkillTool::test_load_unknown_project_skill_records_failure_usage -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_skills.py::TestLoadSkillTool -q
+6 passed
+
+PYTHONPATH=. pytest tests/test_skills.py -q
+45 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py -q
+223 passed
+```
+
+编译和格式检查记录：`python3 -m py_compile mewcode/tools/load_skill.py mewcode/evolution/engine.py mewcode/commands/handlers/evolve.py` 与 `git diff --check` 均无输出。
+
+全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`，失败原因为旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略要求写前先读；和本次 LoadSkill 失败归因修改无直接依赖。
+
+边界说明：该归因只记录失败事实，不会自动 quarantine、不会自动生成 patch candidate，也不会影响正式 skill loader。不存在的 skill 不会触发 quarantine suggestion，因为 quarantine 仍要求项目级正式 skill 存在。

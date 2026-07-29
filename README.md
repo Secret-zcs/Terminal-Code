@@ -274,7 +274,7 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 /evolve quarantine <skill-name> [:: reason]
 ```
 
-`/evolve apply` 在写入 memory 前会尝试创建 checkpoint；`/evolve promote` 在启用 skill candidate 前会尝试创建 checkpoint，并在成功后 reload skill loader。`LoadSkill` 成功激活 skill 会记录到 `.mewcode/evolution/skill_usage.jsonl`；`/evolve record-usage` 可手动补充 `failure` / `user_feedback` 等事件，`/evolve suggest-quarantine` 会基于负面事件给出隔离建议；`/evolve propose-patch-from-usage` 只生成 patch candidate，不自动启用；`/evolve suggest-eval-cases` 只输出建议命令、质量摘要、coverage gap、warnings 和 recommendation，不写入 eval case；默认输出 3 条建议，若仍有 `Uncovered usage feedback`，可传入 `[count]` 增加建议数量或手写 eval case 来覆盖更多真实反馈；`high` 表示直接覆盖真实 usage feedback，`medium` 表示结构性 patch guard，`low` 表示描述兜底；`/evolve quarantine` 会把项目级正式 skill 移入 `.mewcode/evolution/quarantine/<skill-name>/`，并 reload skill loader。
+`/evolve apply` 在写入 memory 前会尝试创建 checkpoint；`/evolve promote` 在启用 skill candidate 前会尝试创建 checkpoint，并在成功后 reload skill loader。`LoadSkill` 成功激活 skill 会记录到 `.mewcode/evolution/skill_usage.jsonl`，未知 skill 加载失败会自动记录 `failure` usage；`/evolve record-usage` 可手动补充 `failure` / `user_feedback` 等事件，`/evolve suggest-quarantine` 会基于负面事件给出隔离建议；`/evolve propose-patch-from-usage` 只生成 patch candidate，不自动启用；`/evolve suggest-eval-cases` 只输出建议命令、质量摘要、coverage gap、warnings 和 recommendation，不写入 eval case；默认输出 3 条建议，若仍有 `Uncovered usage feedback`，可传入 `[count]` 增加建议数量或手写 eval case 来覆盖更多真实反馈；`high` 表示直接覆盖真实 usage feedback，`medium` 表示结构性 patch guard，`low` 表示描述兜底；`/evolve quarantine` 会把项目级正式 skill 移入 `.mewcode/evolution/quarantine/<skill-name>/`，并 reload skill loader。
 
 详细说明：
 

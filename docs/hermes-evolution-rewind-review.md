@@ -1094,3 +1094,14 @@ skill verifier
 - 追加红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_review_eval_case_suggestions_reports_uncovered_usage_feedback -q` 在实现前得到 1 个预期失败，覆盖 recommendation 缺少具体补救动作。
 - 追加绿灯记录：同一命令实现后通过，1 个测试成功；相关回归 `test_review_eval_case_suggestions_summarizes_quality`、`test_suggest_eval_cases_command_shows_uncovered_feedback`、`test_suggest_eval_cases_command_accepts_count_to_cover_feedback` 通过，3 个测试成功。
 - 追加扩展验证：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，47 个测试成功；扩展回归通过，222 个测试成功；`python3 -m py_compile ...` 和 `git diff --check` 无输出；全量测试仍停在既有 `test_multi_step_autonomous`。
+
+### 2026-07-29 补充：LoadSkill 失败自动归因
+
+- 修改 `mewcode/tools/load_skill.py`：`LoadSkill` 请求未知 skill 时，仍返回 unknown skill 错误，同时自动记录 `event=failure` 到 `.mewcode/evolution/skill_usage.jsonl`。
+- 设计理由：这是自动 usage 归因的第一个安全切入点；它只记录失败事实，不修改 skill、不触发 quarantine、不生成 patch candidate。
+- 修改 `tests/test_skills.py`：新增 `test_load_unknown_project_skill_records_failure_usage`，验证 unknown skill 会写入 failure usage，metadata 包含 `summary=unknown skill requested`。
+- 修改 `README.md`、`docs/self-evolution-development-progress-recap-zh.md`、`docs/hermes-skill-evolution-implementation.md` 和 `docs/verified-skill-evolution-recap-zh.md`：同步记录能力边界。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_skills.py::TestLoadSkillTool::test_load_unknown_project_skill_records_failure_usage -q` 在实现前得到 1 个预期失败，失败原因为 usage log 为空。
+- 绿灯记录：同一命令实现后通过，1 个测试成功；`PYTHONPATH=. pytest tests/test_skills.py::TestLoadSkillTool -q` 通过，6 个测试成功；`tests/test_skills.py` 通过，45 个测试成功；核心扩展回归通过，223 个测试成功。
+- 编译和格式检查记录：`python3 -m py_compile mewcode/tools/load_skill.py mewcode/evolution/engine.py mewcode/commands/handlers/evolve.py` 与 `git diff --check` 均无输出。
+- 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在既有 `tests/test_agent.py::test_multi_step_autonomous`，和本次 LoadSkill 失败归因修改无直接依赖。
