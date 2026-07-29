@@ -346,3 +346,46 @@ PYTHONPATH=. pytest tests/test_evolution.py -q
 ```
 
 边界说明：当前已经有“fork 出来的 child-agent 评测轨迹”，但它是 deterministic replay，不是真实 LLM 子 Agent，也不会真正调用 Bash/ReadFile/EditFile 等工具。下一步应把 `child_agent/input.json`、`tool_policy.json` 和 `transcript.md` 作为接口，接入真实受限子 Agent 执行器，并记录真实工具调用与任务断言。
+
+### 2026-07-29 Scripted Workspace Assertion Runner 追加记录
+
+本次在 child-agent fork runner 上新增了隔离工作区产物断言。eval case 可以携带 `workspace_files`、`scripted_tool_calls` 和 `expected_files`，runner 会在 `child_agent/workspace/` 中执行脚本化 `ReadFile` / `WriteFile`，并对输出文件做精确匹配。
+
+新增 `result.json` 字段：
+
+```json
+{
+  "fork_agent": {
+    "workspace": ".../child_agent/workspace",
+    "tool_results": [
+      {"tool": "ReadFile", "path": "bug.txt", "status": "passed"},
+      {"tool": "WriteFile", "path": "result.txt", "status": "passed"}
+    ],
+    "assertions": [
+      {"path": "result.txt", "status": "passed"}
+    ]
+  }
+}
+```
+
+安全约束：
+
+- 仅支持脚本化 `ReadFile` 和 `WriteFile`。
+- 工具必须出现在 candidate skill 的 `allowed_tools` 中。
+- 文件路径必须是相对路径，且解析后必须位于 `child_agent/workspace/` 内。
+- `expected_files` 使用精确内容匹配，失败会让该轮 execution eval 失败。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_executes_scripted_workspace_assertions -q
+1 failed  # 实现前红灯：eval case 不支持 workspace/scripted/expected 字段
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_executes_scripted_workspace_assertions -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+48 passed
+```
+
+边界说明：这仍不是 LLM 自主执行任务。它是“可验证执行产物”的中间层：先把真实子 Agent 未来应该产生的工具轨迹和文件断言接口固定下来，再替换掉 scripted tool calls。

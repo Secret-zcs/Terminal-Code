@@ -707,3 +707,45 @@ PYTHONPATH=. pytest tests/test_evolution.py -q
 - 未实现：没有调用真实 LLM，也没有真实执行 Bash/ReadFile/EditFile 等工具。
 - 未实现：还没有基于真实任务断言判断子 Agent 是否完成仓库补丁或函数实现。
 - 下一步：把 `child_agent/input.json` 和 `tool_policy.json` 接入受限子 Agent 执行器，记录真实工具调用，并让 `show-eval` 展示真实执行轨迹后再提交 promote 申请。
+
+## 15. 最新推进记录：Scripted Workspace Assertion Runner
+
+日期：2026-07-29
+
+本次继续把 child-agent fork 轨迹从“只写 transcript”推进到“能验证隔离工作区产物”。`eval case` 现在可以携带可选字段：
+
+- `workspace_files`：评测开始前写入 child-agent workspace 的初始文件。
+- `scripted_tool_calls`：脚本化子 Agent 要执行的 `ReadFile` / `WriteFile` 调用。
+- `expected_files`：执行后必须在 workspace 中出现且内容精确匹配的文件断言。
+
+这一步仍不调用真实 LLM，但已经开始验证“执行产物”，不再只验证 SOP 文本和 transcript 是否存在。
+
+修改内容：
+
+- 修改 `mewcode/evolution/engine.py`：`add_eval_case()` 支持 `workspace_files`、`scripted_tool_calls` 和 `expected_files`。
+- 修改 `mewcode/evolution/engine.py`：child-agent runner 新增 `workspace/`，并在其中执行脚本化 `ReadFile` / `WriteFile`。
+- 修改 `mewcode/evolution/engine.py`：所有脚本化路径必须是相对路径，且不能逃逸 workspace。
+- 修改 `mewcode/evolution/engine.py`：`result.json` 的 `fork_agent` 字段新增 `workspace`、`tool_results` 和 `assertions`。
+- 修改 `tests/test_evolution.py`：新增 workspace assertion 测试，验证 runner 能写出 `result.txt` 并通过 `expected_files` 精确匹配。
+- 修改 `README.md` 和复盘文档：同步记录当前评测口径和边界。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_executes_scripted_workspace_assertions -q
+1 failed  # 实现前红灯：add_eval_case 不支持 workspace_files / scripted_tool_calls / expected_files
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_executes_scripted_workspace_assertions -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+48 passed
+```
+
+边界说明：
+
+- 已实现：可以在隔离 workspace 中执行脚本化 `ReadFile` / `WriteFile`，并校验实际文件产物。
+- 已实现：路径逃逸会被拒绝，脚本化工具调用只能落在 child-agent workspace 内。
+- 未实现：脚本化 tool calls 仍由 eval case 提供，不是 LLM 自主生成。
+- 未实现：还没有把真实 Agent loop 接进来，也没有真实模型根据任务自行选择工具。
+- 下一步：把 `scripted_tool_calls` 替换为受限 LLM 子 Agent 的真实工具调用轨迹，并用同一套 `expected_files` 断言做判定。

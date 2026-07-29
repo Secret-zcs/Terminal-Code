@@ -360,6 +360,9 @@ class EvolutionEngine:
         task: str,
         must_contain: list[str],
         must_not_contain: list[str] | None = None,
+        workspace_files: dict[str, str] | None = None,
+        scripted_tool_calls: list[dict] | None = None,
+        expected_files: dict[str, str] | None = None,
         case_id: str | None = None,
     ) -> str:
         proposal = self.store.get_proposal(proposal_id)
@@ -393,6 +396,12 @@ class EvolutionEngine:
             "must_not_contain": forbidden,
             "created_at": time.time(),
         }
+        if workspace_files:
+            eval_case["workspace_files"] = dict(workspace_files)
+        if scripted_tool_calls:
+            eval_case["scripted_tool_calls"] = list(scripted_tool_calls)
+        if expected_files:
+            eval_case["expected_files"] = dict(expected_files)
         path = self.eval_cases_path(skill_name)
         path.parent.mkdir(parents=True, exist_ok=True)
         existing = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -1329,6 +1338,9 @@ class EvolutionEngine:
             "rendered_prompt": rendered,
             "must_contain": eval_case["must_contain"],
             "must_not_contain": eval_case.get("must_not_contain", []),
+            "workspace_files": eval_case.get("workspace_files", {}),
+            "scripted_tool_calls": eval_case.get("scripted_tool_calls", []),
+            "expected_files": eval_case.get("expected_files", {}),
         }
         tool_policy = {
             "allowed_tools": skill.allowed_tools,
@@ -1337,6 +1349,39 @@ class EvolutionEngine:
             "project_write": "disabled",
             "max_retries": 1,
         }
+        workspace_path = child_dir / "workspace"
+        workspace_path.mkdir(parents=True, exist_ok=False)
+        workspace_errors = self._write_workspace_seed_files(
+            workspace_path,
+            eval_case.get("workspace_files", {}),
+        )
+        tool_results = self._run_scripted_tool_calls(
+            workspace_path,
+            skill.allowed_tools,
+            eval_case.get("scripted_tool_calls", []),
+        )
+        assertions = self._assert_expected_files(
+            workspace_path,
+            eval_case.get("expected_files", {}),
+        )
+        child_errors = list(workspace_errors)
+        child_errors.extend(
+            result["error"] for result in tool_results if result["status"] == "failed"
+        )
+        child_errors.extend(
+            assertion["error"]
+            for assertion in assertions
+            if assertion["status"] == "failed"
+        )
+        if child_errors:
+            round_record["errors"].extend(child_errors)
+        round_record["status"] = "failed" if round_record["errors"] else "passed"
+        round_record["execution_summary"] = (
+            "Scripted child agent executed in the isolated workspace and all "
+            "workspace assertions passed."
+            if round_record["status"] == "passed"
+            else "Scripted child agent failed one or more workspace assertions."
+        )
         transcript = [
             "# Forked Child Agent Transcript",
             "",
@@ -1359,6 +1404,14 @@ class EvolutionEngine:
             f"- Status: `{round_record['status']}`",
             f"- Required terms: {', '.join(round_record['must_contain'])}",
             f"- Forbidden terms: {', '.join(round_record['must_not_contain']) or '(none)'}",
+            "",
+            "## Scripted Tool Calls",
+            "",
+            *(f"- {result['tool']} {result['path']}: {result['status']}" for result in tool_results),
+            "",
+            "## Workspace Assertions",
+            "",
+            *(f"- {assertion['path']}: {assertion['status']}" for assertion in assertions),
         ]
         if round_record["errors"]:
             transcript.append("- Errors: " + "; ".join(round_record["errors"]))
@@ -1387,7 +1440,120 @@ class EvolutionEngine:
             "tool_policy": str(tool_policy_path),
             "transcript": str(transcript_path),
             "final_answer": str(final_answer_path),
+            "workspace": str(workspace_path),
+            "tool_results": tool_results,
+            "assertions": assertions,
         }
+
+    def _write_workspace_seed_files(
+        self,
+        workspace_path: Path,
+        files: dict,
+    ) -> list[str]:
+        errors: list[str] = []
+        if not isinstance(files, dict):
+            return ["workspace_files must be an object"]
+        for relative_path, content in files.items():
+            try:
+                target = self._workspace_child_path(workspace_path, str(relative_path))
+            except ValueError as exc:
+                errors.append(str(exc))
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(str(content), encoding="utf-8")
+        return errors
+
+    def _run_scripted_tool_calls(
+        self,
+        workspace_path: Path,
+        allowed_tools: list[str],
+        tool_calls: list,
+    ) -> list[dict]:
+        if not isinstance(tool_calls, list):
+            return [{
+                "tool": "(invalid)",
+                "path": "",
+                "status": "failed",
+                "error": "scripted_tool_calls must be a list",
+            }]
+        results: list[dict] = []
+        allowed = set(allowed_tools)
+        for index, call in enumerate(tool_calls, 1):
+            if not isinstance(call, dict):
+                results.append({
+                    "tool": "(invalid)",
+                    "path": "",
+                    "status": "failed",
+                    "error": f"scripted tool call {index} must be an object",
+                })
+                continue
+            tool = str(call.get("tool") or call.get("name") or "").strip()
+            path_text = str(call.get("path") or call.get("file_path") or "").strip()
+            result = {"tool": tool, "path": path_text, "status": "passed", "error": ""}
+            if tool not in {"ReadFile", "WriteFile"}:
+                result.update(status="failed", error=f"unsupported scripted tool: {tool}")
+                results.append(result)
+                continue
+            if tool not in allowed:
+                result.update(status="failed", error=f"tool not allowed by skill: {tool}")
+                results.append(result)
+                continue
+            try:
+                target = self._workspace_child_path(workspace_path, path_text)
+            except ValueError as exc:
+                result.update(status="failed", error=str(exc))
+                results.append(result)
+                continue
+            if tool == "ReadFile":
+                if not target.is_file():
+                    result.update(status="failed", error=f"file not found: {path_text}")
+                else:
+                    result["output"] = target.read_text(encoding="utf-8")
+            elif tool == "WriteFile":
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(str(call.get("content", "")), encoding="utf-8")
+                result["output"] = f"wrote {path_text}"
+            results.append(result)
+        return results
+
+    def _assert_expected_files(
+        self,
+        workspace_path: Path,
+        expected_files: dict,
+    ) -> list[dict]:
+        if not isinstance(expected_files, dict):
+            return [{"path": "", "status": "failed", "error": "expected_files must be an object"}]
+        assertions: list[dict] = []
+        for relative_path, expected in expected_files.items():
+            path_text = str(relative_path)
+            assertion = {"path": path_text, "status": "passed", "error": ""}
+            try:
+                target = self._workspace_child_path(workspace_path, path_text)
+            except ValueError as exc:
+                assertion.update(status="failed", error=str(exc))
+                assertions.append(assertion)
+                continue
+            if not target.is_file():
+                assertion.update(status="failed", error=f"expected file missing: {path_text}")
+            else:
+                actual = target.read_text(encoding="utf-8")
+                if actual != str(expected):
+                    assertion.update(status="failed", error=f"expected file mismatch: {path_text}")
+            assertions.append(assertion)
+        return assertions
+
+    @staticmethod
+    def _workspace_child_path(workspace_path: Path, relative_path: str) -> Path:
+        if not relative_path:
+            raise ValueError("workspace path cannot be empty")
+        candidate = Path(relative_path)
+        if candidate.is_absolute():
+            raise ValueError(f"workspace path must be relative: {relative_path}")
+        root = workspace_path.resolve()
+        resolved = (workspace_path / candidate).resolve()
+        if resolved == root or not resolved.is_relative_to(root):
+            raise ValueError(f"workspace path escapes sandbox: {relative_path}")
+        return resolved
 
     @staticmethod
     def _artifact_slug(value: str) -> str:

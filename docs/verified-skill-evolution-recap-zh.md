@@ -255,6 +255,7 @@ promote 会检查 `eval_status == "passed"`，否则拒绝启用。
 - 为每轮写入 `round`、`case_id`、`task`、`status`、`errors` 和 `execution_summary`；
 - 写入 `eval_report.json` 和 `eval_report.md`；
 - 在 `execution_sandbox/round_*` 下写入 `task.md`、候选 `SKILL.md` 快照、`rendered_prompt.md`、`result.json`，以及 `child_agent/input.json`、`tool_policy.json`、`transcript.md` 和 `final_answer.md`；
+- 如果 eval case 提供 `workspace_files`、`scripted_tool_calls` 和 `expected_files`，则在 `child_agent/workspace/` 中执行脚本化 `ReadFile` / `WriteFile`，并校验实际文件产物；
 - 更新 manifest 的 `execution_eval_status` 和 `execution_eval_rounds`。
 
 少于三轮时会拒绝：

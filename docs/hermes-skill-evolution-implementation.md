@@ -671,3 +671,11 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 设计理由：先固定“子 Agent 输入、工具策略、转写轨迹、最终输出”的文件接口，再接真实 LLM 子 Agent。这样可以保持当前测试稳定，同时为后续真实任务回放留出兼容落点。
 
 验证记录：先更新 `test_run_execution_eval_creates_sandbox_artifacts`，要求 runner 为 `fork_agent_sandbox_deterministic`，且每轮存在 `child_agent/`、工具策略和 transcript；实现前得到 1 个预期失败，实现后目标测试通过，`tests/test_evolution.py` 47 个测试通过。边界仍然明确：当前是 deterministic replay，不调用真实 LLM，不执行真实工具，不修改项目文件。
+
+### 2026-07-29 补充：Scripted Workspace Assertion Runner
+
+本次继续把 execution eval 从“写 child-agent 轨迹”推进到“验证 child-agent workspace 产物”。`add_eval_case()` 支持 `workspace_files`、`scripted_tool_calls` 和 `expected_files`；`run_execution_eval()` 会在 `child_agent/workspace/` 中执行脚本化 `ReadFile` / `WriteFile`，然后用 `expected_files` 做精确文件内容断言。
+
+设计理由：真实 LLM 子 Agent 接入前，需要先固定可复用的判定接口。以后 LLM 自主工具调用可以复用同一套 workspace 与 expected-files assertion，而不是重新设计评测报告格式。
+
+验证记录：新增 `test_run_execution_eval_executes_scripted_workspace_assertions`，实现前红灯为 `add_eval_case()` 不支持 workspace/scripted/expected 参数；实现后目标测试通过，`tests/test_evolution.py` 48 个测试通过。边界仍然明确：当前 tool calls 由 eval case 脚本提供，不是模型自主生成。

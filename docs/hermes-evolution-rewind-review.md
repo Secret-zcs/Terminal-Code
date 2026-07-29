@@ -1114,3 +1114,13 @@ skill verifier
 - 安全边界：当前 child-agent 是 deterministic replay，不调用真实 LLM，不执行真实工具，不写项目文件；所有产物都限制在 candidate `execution_sandbox/` 下。
 - TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_creates_sandbox_artifacts -q` 在实现前得到 1 个预期失败，失败原因为 runner 仍是 `sandbox_deterministic` 且缺少 `child_agent/` 产物。
 - 绿灯记录：同一目标测试实现后通过，`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，47 个测试成功。
+
+### 2026-07-29 补充：Scripted Workspace Assertion Runner
+
+- 修改 `mewcode/evolution/engine.py`：`add_eval_case()` 支持 `workspace_files`、`scripted_tool_calls` 和 `expected_files`。
+- 修改 `mewcode/evolution/engine.py`：child-agent runner 会创建 `child_agent/workspace/`，执行脚本化 `ReadFile` / `WriteFile`，并写入 `tool_results`。
+- 修改 `mewcode/evolution/engine.py`：`expected_files` 会对 workspace 中的实际文件做精确内容匹配，失败会让该轮 execution eval 失败。
+- 安全边界：脚本化路径必须是相对路径，解析后必须仍在 workspace 内；工具必须在 candidate skill 的 `allowed_tools` 中。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_executes_scripted_workspace_assertions -q` 在实现前得到 1 个预期失败，失败原因为 `add_eval_case()` 不支持 workspace/scripted/expected 参数。
+- 绿灯记录：同一目标测试实现后通过，`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，48 个测试成功。
+- 限制说明：当前仍不是 LLM 自主执行；它是从 transcript-only 迈向真实回放前的“可验证 workspace 产物”中间层。

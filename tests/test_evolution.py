@@ -409,6 +409,50 @@ class TestEvolutionEngine:
         assert "Child Agent" in markdown
         assert "Sandbox" in markdown
 
+    def test_run_execution_eval_executes_scripted_workspace_assertions(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="scripted-repair-loop",
+            description="脚本化修复任务的隔离评测流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小补丁。\n",
+            allowed_tools=["ReadFile", "WriteFile"],
+        )
+        case_id = engine.add_eval_case(
+            proposal.id,
+            task="在隔离工作区写出修复说明文件。",
+            must_contain=["复现失败", "最小补丁"],
+            workspace_files={"bug.txt": "broken\n"},
+            scripted_tool_calls=[
+                {"tool": "ReadFile", "path": "bug.txt"},
+                {
+                    "tool": "WriteFile",
+                    "path": "result.txt",
+                    "content": "fixed\n",
+                },
+            ],
+            expected_files={"result.txt": "fixed\n"},
+        )
+        engine.evaluate(proposal.id)
+
+        ok, message = engine.run_execution_eval(proposal.id, min_cases=1)
+
+        assert ok, message
+        report = json.loads(
+            engine.execution_eval_report_path(proposal.id).read_text(encoding="utf-8")
+        )
+        round_ = report["rounds"][0]
+        round_dir = Path(round_["sandbox_dir"])
+        result = json.loads((round_dir / "result.json").read_text(encoding="utf-8"))
+        assert round_["case_id"] == case_id
+        assert round_["status"] == "passed"
+        assert result["fork_agent"]["workspace"].endswith("workspace")
+        assert result["fork_agent"]["assertions"][0]["status"] == "passed"
+        assert (round_dir / "child_agent" / "workspace" / "result.txt").read_text(
+            encoding="utf-8"
+        ) == "fixed\n"
+
     def test_approved_skill_proposal_cannot_apply_directly(
         self, tmp_path: Path
     ) -> None:
