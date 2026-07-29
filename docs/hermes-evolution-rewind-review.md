@@ -1124,3 +1124,12 @@ skill verifier
 - TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_executes_scripted_workspace_assertions -q` 在实现前得到 1 个预期失败，失败原因为 `add_eval_case()` 不支持 workspace/scripted/expected 参数。
 - 绿灯记录：同一目标测试实现后通过，`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，48 个测试成功。
 - 限制说明：当前仍不是 LLM 自主执行；它是从 transcript-only 迈向真实回放前的“可验证 workspace 产物”中间层。
+
+### 2026-07-29 补充：Turn-Based Scripted Agent Replay
+
+- 修改 `mewcode/evolution/engine.py`：`add_eval_case()` 支持 `scripted_agent_turns`。
+- 修改 `mewcode/evolution/engine.py`：child-agent runner 优先按多轮 turn 执行工具调用，并将结果写入 `fork_agent.turns`。
+- 修改 `tests/test_evolution.py`：新增 turn replay 测试，验证 transcript 中存在 `## Agent Turns` 和 `ToolResult`。
+- TDD 红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_replays_scripted_agent_turns -q` 在实现前得到 1 个预期失败，失败原因为 `add_eval_case()` 不支持 `scripted_agent_turns`。
+- 绿灯记录：同一目标测试实现后通过，`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，49 个测试成功。
+- 限制说明：当前仍是 scripted replay；下一步才是把 turns 由真实受限 LLM 子 Agent 生成。

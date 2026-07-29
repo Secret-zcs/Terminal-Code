@@ -453,6 +453,58 @@ class TestEvolutionEngine:
             encoding="utf-8"
         ) == "fixed\n"
 
+    def test_run_execution_eval_replays_scripted_agent_turns(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="turn-repair-loop",
+            description="多轮子 Agent 回放评测流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小补丁。\n",
+            allowed_tools=["ReadFile", "WriteFile"],
+        )
+        engine.add_eval_case(
+            proposal.id,
+            task="多轮读取输入并写出修复文件。",
+            must_contain=["复现失败", "最小补丁"],
+            workspace_files={"bug.txt": "broken\n"},
+            scripted_agent_turns=[
+                {
+                    "assistant": "先读取失败输入。",
+                    "tool_calls": [{"tool": "ReadFile", "path": "bug.txt"}],
+                },
+                {
+                    "assistant": "写出修复结果。",
+                    "tool_calls": [
+                        {
+                            "tool": "WriteFile",
+                            "path": "result.txt",
+                            "content": "fixed\n",
+                        }
+                    ],
+                },
+            ],
+            expected_files={"result.txt": "fixed\n"},
+        )
+        engine.evaluate(proposal.id)
+
+        ok, message = engine.run_execution_eval(proposal.id, min_cases=1)
+
+        assert ok, message
+        report = json.loads(
+            engine.execution_eval_report_path(proposal.id).read_text(encoding="utf-8")
+        )
+        round_dir = Path(report["rounds"][0]["sandbox_dir"])
+        result = json.loads((round_dir / "result.json").read_text(encoding="utf-8"))
+        assert result["fork_agent"]["turns"][0]["assistant"] == "先读取失败输入。"
+        assert result["fork_agent"]["turns"][0]["tool_results"][0]["tool"] == "ReadFile"
+        assert result["fork_agent"]["turns"][1]["tool_results"][0]["tool"] == "WriteFile"
+        transcript = (round_dir / "child_agent" / "transcript.md").read_text(
+            encoding="utf-8"
+        )
+        assert "## Agent Turns" in transcript
+        assert "ToolResult" in transcript
+
     def test_approved_skill_proposal_cannot_apply_directly(
         self, tmp_path: Path
     ) -> None:

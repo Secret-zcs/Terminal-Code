@@ -389,3 +389,22 @@ PYTHONPATH=. pytest tests/test_evolution.py -q
 ```
 
 边界说明：这仍不是 LLM 自主执行任务。它是“可验证执行产物”的中间层：先把真实子 Agent 未来应该产生的工具轨迹和文件断言接口固定下来，再替换掉 scripted tool calls。
+
+### 2026-07-29 Turn-Based Scripted Agent Replay 追加记录
+
+本次把单条 `scripted_tool_calls` 推进为多轮 `scripted_agent_turns`。runner 会按 turn 顺序执行每轮工具调用，并在 `result.json` 中记录 `fork_agent.turns`，在 `transcript.md` 中记录 `## Agent Turns` 与每轮 `ToolResult`。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_replays_scripted_agent_turns -q
+1 failed  # 实现前红灯：add_eval_case 不支持 scripted_agent_turns
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_replays_scripted_agent_turns -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+49 passed
+```
+
+边界说明：这一步仍是 scripted replay，不是 LLM 自主规划工具调用；但它已经具备真实 Agent loop 需要的 turn -> tool_use -> tool_result 轨迹结构。

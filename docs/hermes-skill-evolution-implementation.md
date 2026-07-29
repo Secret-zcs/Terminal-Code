@@ -679,3 +679,9 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 设计理由：真实 LLM 子 Agent 接入前，需要先固定可复用的判定接口。以后 LLM 自主工具调用可以复用同一套 workspace 与 expected-files assertion，而不是重新设计评测报告格式。
 
 验证记录：新增 `test_run_execution_eval_executes_scripted_workspace_assertions`，实现前红灯为 `add_eval_case()` 不支持 workspace/scripted/expected 参数；实现后目标测试通过，`tests/test_evolution.py` 48 个测试通过。边界仍然明确：当前 tool calls 由 eval case 脚本提供，不是模型自主生成。
+
+### 2026-07-29 补充：Turn-Based Scripted Agent Replay
+
+本次新增 `scripted_agent_turns`，让 execution eval 能按多轮 assistant/tool-call 回放，而不是只执行一条扁平工具调用列表。`result.json` 会记录 `fork_agent.turns`，`transcript.md` 会记录 `## Agent Turns` 和每轮 `ToolResult`。
+
+验证记录：新增 `test_run_execution_eval_replays_scripted_agent_turns`，实现前红灯为 `add_eval_case()` 不支持 `scripted_agent_turns`；实现后目标测试通过，`tests/test_evolution.py` 49 个测试通过。边界仍然明确：turn 仍由 eval case 脚本给出，不是 LLM 自主生成。

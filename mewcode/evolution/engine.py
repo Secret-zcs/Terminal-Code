@@ -362,6 +362,7 @@ class EvolutionEngine:
         must_not_contain: list[str] | None = None,
         workspace_files: dict[str, str] | None = None,
         scripted_tool_calls: list[dict] | None = None,
+        scripted_agent_turns: list[dict] | None = None,
         expected_files: dict[str, str] | None = None,
         case_id: str | None = None,
     ) -> str:
@@ -400,6 +401,8 @@ class EvolutionEngine:
             eval_case["workspace_files"] = dict(workspace_files)
         if scripted_tool_calls:
             eval_case["scripted_tool_calls"] = list(scripted_tool_calls)
+        if scripted_agent_turns:
+            eval_case["scripted_agent_turns"] = list(scripted_agent_turns)
         if expected_files:
             eval_case["expected_files"] = dict(expected_files)
         path = self.eval_cases_path(skill_name)
@@ -1340,6 +1343,7 @@ class EvolutionEngine:
             "must_not_contain": eval_case.get("must_not_contain", []),
             "workspace_files": eval_case.get("workspace_files", {}),
             "scripted_tool_calls": eval_case.get("scripted_tool_calls", []),
+            "scripted_agent_turns": eval_case.get("scripted_agent_turns", []),
             "expected_files": eval_case.get("expected_files", {}),
         }
         tool_policy = {
@@ -1355,11 +1359,23 @@ class EvolutionEngine:
             workspace_path,
             eval_case.get("workspace_files", {}),
         )
-        tool_results = self._run_scripted_tool_calls(
+        turns = self._run_scripted_agent_turns(
             workspace_path,
             skill.allowed_tools,
-            eval_case.get("scripted_tool_calls", []),
+            eval_case.get("scripted_agent_turns", []),
         )
+        if turns:
+            tool_results = [
+                result
+                for turn in turns
+                for result in turn.get("tool_results", [])
+            ]
+        else:
+            tool_results = self._run_scripted_tool_calls(
+                workspace_path,
+                skill.allowed_tools,
+                eval_case.get("scripted_tool_calls", []),
+            )
         assertions = self._assert_expected_files(
             workspace_path,
             eval_case.get("expected_files", {}),
@@ -1409,6 +1425,10 @@ class EvolutionEngine:
             "",
             *(f"- {result['tool']} {result['path']}: {result['status']}" for result in tool_results),
             "",
+            "## Agent Turns",
+            "",
+            *self._render_agent_turn_transcript(turns),
+            "",
             "## Workspace Assertions",
             "",
             *(f"- {assertion['path']}: {assertion['status']}" for assertion in assertions),
@@ -1442,6 +1462,7 @@ class EvolutionEngine:
             "final_answer": str(final_answer_path),
             "workspace": str(workspace_path),
             "tool_results": tool_results,
+            "turns": turns,
             "assertions": assertions,
         }
 
@@ -1515,6 +1536,69 @@ class EvolutionEngine:
                 result["output"] = f"wrote {path_text}"
             results.append(result)
         return results
+
+    def _run_scripted_agent_turns(
+        self,
+        workspace_path: Path,
+        allowed_tools: list[str],
+        turns: list,
+    ) -> list[dict]:
+        if not turns:
+            return []
+        if not isinstance(turns, list):
+            return [{
+                "turn": 1,
+                "assistant": "",
+                "tool_results": [{
+                    "tool": "(invalid)",
+                    "path": "",
+                    "status": "failed",
+                    "error": "scripted_agent_turns must be a list",
+                }],
+            }]
+        records: list[dict] = []
+        for index, turn in enumerate(turns, 1):
+            if not isinstance(turn, dict):
+                records.append({
+                    "turn": index,
+                    "assistant": "",
+                    "tool_results": [{
+                        "tool": "(invalid)",
+                        "path": "",
+                        "status": "failed",
+                        "error": f"scripted agent turn {index} must be an object",
+                    }],
+                })
+                continue
+            tool_results = self._run_scripted_tool_calls(
+                workspace_path,
+                allowed_tools,
+                turn.get("tool_calls", []),
+            )
+            records.append({
+                "turn": index,
+                "assistant": str(turn.get("assistant", "")),
+                "tool_results": tool_results,
+            })
+        return records
+
+    @staticmethod
+    def _render_agent_turn_transcript(turns: list[dict]) -> list[str]:
+        lines: list[str] = []
+        for turn in turns:
+            lines.append(f"### Turn {turn.get('turn', '')}")
+            lines.append("")
+            lines.append(f"Assistant: {turn.get('assistant', '')}")
+            for result in turn.get("tool_results", []):
+                lines.append(
+                    "ToolResult: "
+                    f"{result.get('tool', '')} {result.get('path', '')} "
+                    f"{result.get('status', '')}"
+                )
+                if result.get("error"):
+                    lines.append(f"Error: {result['error']}")
+            lines.append("")
+        return lines
 
     def _assert_expected_files(
         self,

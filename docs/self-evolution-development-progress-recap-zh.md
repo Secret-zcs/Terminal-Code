@@ -749,3 +749,55 @@ PYTHONPATH=. pytest tests/test_evolution.py -q
 - 未实现：脚本化 tool calls 仍由 eval case 提供，不是 LLM 自主生成。
 - 未实现：还没有把真实 Agent loop 接进来，也没有真实模型根据任务自行选择工具。
 - 下一步：把 `scripted_tool_calls` 替换为受限 LLM 子 Agent 的真实工具调用轨迹，并用同一套 `expected_files` 断言做判定。
+
+## 16. 最新推进记录：Turn-Based Scripted Agent Replay
+
+日期：2026-07-29
+
+本次把上一阶段的一维 `scripted_tool_calls` 推进为多轮 `scripted_agent_turns`。每个 turn 可以包含 assistant 文本和该轮工具调用，runner 会按 turn 顺序执行工具、记录每轮 `tool_results`，并把这些内容写入 `transcript.md` 和 `result.json`。
+
+新增 eval case 字段：
+
+```json
+{
+  "scripted_agent_turns": [
+    {
+      "assistant": "先读取失败输入。",
+      "tool_calls": [{"tool": "ReadFile", "path": "bug.txt"}]
+    },
+    {
+      "assistant": "写出修复结果。",
+      "tool_calls": [{"tool": "WriteFile", "path": "result.txt", "content": "fixed\n"}]
+    }
+  ]
+}
+```
+
+修改内容：
+
+- 修改 `mewcode/evolution/engine.py`：`add_eval_case()` 支持 `scripted_agent_turns`。
+- 修改 `mewcode/evolution/engine.py`：child-agent runner 优先按 `scripted_agent_turns` 回放；没有 turns 时继续兼容 `scripted_tool_calls`。
+- 修改 `mewcode/evolution/engine.py`：`result.json` 的 `fork_agent.turns` 记录每轮 assistant 文本和工具结果。
+- 修改 `mewcode/evolution/engine.py`：`transcript.md` 新增 `## Agent Turns`，逐轮记录 `ToolResult`。
+- 修改 `tests/test_evolution.py`：新增多轮 turn 回放测试，验证 turn 结构、工具结果和 transcript。
+- 修改 `README.md` 和复盘文档：同步记录能力边界。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_replays_scripted_agent_turns -q
+1 failed  # 实现前红灯：add_eval_case 不支持 scripted_agent_turns
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_replays_scripted_agent_turns -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+49 passed
+```
+
+边界说明：
+
+- 已实现：可以按多轮 Agent turn 回放工具调用，并保留 assistant 文本、tool results 和 workspace 断言。
+- 已实现：该回放已经比单条 `scripted_tool_calls` 更接近真实 Agent loop 的 turn/tool-result 结构。
+- 未实现：assistant 文本和工具调用仍来自 eval case，不是 LLM 自主生成。
+- 下一步：把 turn 来源替换为受限 LLM 子 Agent 的真实输出，保留同一套 transcript、tool result 和 expected-files 判定接口。
