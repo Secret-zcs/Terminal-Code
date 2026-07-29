@@ -1090,3 +1090,7 @@ skill verifier
 - 编译检查记录：`python3 -m py_compile mewcode/evolution/engine.py mewcode/commands/handlers/evolve.py` 无输出。
 - 格式检查记录：`git diff --check` 无输出。
 - 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`；失败原因为旧测试仍要求 `WriteFile` 写前不需要 `ReadFile`，当前安全策略返回 `Error: file has not been read yet. Read it first before editing.`，和本次 count 参数修改无直接依赖。
+- 追加推荐语增强：当 `uncovered_usage_feedback` 非空时，`review_eval_case_suggestions()` 的 recommendation 会明确提示 `Increase count or add manual eval cases`，避免用户只看到 gap 但不知道下一步操作。
+- 追加红灯记录：`PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_review_eval_case_suggestions_reports_uncovered_usage_feedback -q` 在实现前得到 1 个预期失败，覆盖 recommendation 缺少具体补救动作。
+- 追加绿灯记录：同一命令实现后通过，1 个测试成功；相关回归 `test_review_eval_case_suggestions_summarizes_quality`、`test_suggest_eval_cases_command_shows_uncovered_feedback`、`test_suggest_eval_cases_command_accepts_count_to_cover_feedback` 通过，3 个测试成功。
+- 追加扩展验证：`PYTHONPATH=. pytest tests/test_evolution.py -q` 通过，47 个测试成功；扩展回归通过，222 个测试成功；`python3 -m py_compile ...` 和 `git diff --check` 无输出；全量测试仍停在既有 `test_multi_step_autonomous`。

@@ -557,3 +557,5 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`，失败原因为旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略要求写前先读；和本次 count 参数修改无直接依赖。
 
 边界说明：`count` 不改变自进化安全主线。系统仍只生成只读建议，不自动写入 eval case，不自动 approve，也不自动 promote；用户必须审阅测试意图后再执行 `add-eval-case -> eval -> run-eval -> show-eval -> approve -> promote`。
+
+追加推进：coverage gap 的 recommendation 已从泛化建议升级为明确动作：提高 `count` 或手写 eval case。新增断言先红后绿，确保用户看到未覆盖反馈时能直接知道下一步该如何补齐测试覆盖。验证结果保持 `tests/test_evolution.py` 47 个通过、核心回归 222 个通过，full suite 仍停在既有 `test_multi_step_autonomous`。

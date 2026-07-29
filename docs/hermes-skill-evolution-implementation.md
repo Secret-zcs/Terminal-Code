@@ -655,3 +655,5 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 全量测试记录：`PYTHONPATH=. pytest -q -x` 仍停在 `tests/test_agent.py::test_multi_step_autonomous`，失败原因为旧测试要求先 `WriteFile` 再 `ReadFile`，当前安全策略要求写前先读；和本次 count 参数修改无直接依赖。
 
 设计边界：`count` 只增加建议数量，不代表系统已经认可这些 eval case。建议仍需用户审阅后用 `/evolve add-eval-case` 显式写入，再经过 `eval -> run-eval -> show-eval -> approve -> promote`。
+
+追加实现记录：当默认建议仍存在 coverage gap 时，`review_eval_case_suggestions()` 的 recommendation 现在会明确提示提高 `count` 或手写 eval case。TDD 红灯为 `test_review_eval_case_suggestions_reports_uncovered_usage_feedback` 失败，原因是旧推荐语没有包含 `Increase count` 和 `manual eval cases`；实现后该用例通过，相关三项回归也通过。扩展验证保持 `tests/test_evolution.py` 47 个通过、核心回归 222 个通过，full suite 仍停在既有 `test_multi_step_autonomous`。

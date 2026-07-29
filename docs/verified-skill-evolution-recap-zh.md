@@ -628,6 +628,8 @@ PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_comm
 
 设计边界：`count` 不是自动生成并应用测试的开关，只是扩大只读建议列表。模型生成的 eval case 仍必须被用户审阅，并通过显式 `add-eval-case -> eval -> run-eval -> show-eval -> approve -> promote` 才能进入正式 skill 流程。
 
+追加验证：coverage gap recommendation 已补强为“提高 count 或手写 eval case”。该变更只改变评审建议文本，不改变候选 skill、不写入 eval case、不改变 promote gate；新增红绿测试覆盖了推荐语必须包含 `Increase count` 和 `manual eval cases`。扩展验证保持 `tests/test_evolution.py` 47 个通过、核心回归 222 个通过，full suite 仍停在既有 `test_multi_step_autonomous`。
+
 ## 10. 设计取舍
 
 该方案牺牲了 Hermes 原版的学习速度，但降低了代码智能体长期行为污染风险。核心原则是：

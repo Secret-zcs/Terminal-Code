@@ -893,6 +893,8 @@ class TestEvolutionEngine:
         ]
         assert any("1 usage feedback summaries are not covered" in warning
                    for warning in review["warnings"])
+        assert "Increase count" in review["recommendation"]
+        assert "manual eval cases" in review["recommendation"]
 
     def test_quarantine_project_skill_moves_it_out_of_loader_path(
         self, tmp_path: Path

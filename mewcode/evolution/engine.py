@@ -491,12 +491,20 @@ class EvolutionEngine:
 
         proposal_id_value = suggestions[0]["proposal_id"] if suggestions else proposal_id
         skill_name = suggestions[0]["skill_name"] if suggestions else ""
-        recommendation = (
-            "Add high-quality usage feedback cases first, then review medium/low "
-            "structural guards before adding them."
-            if quality_counts.get("high", 0)
-            else "Add real usage-feedback eval cases before relying on these suggestions."
-        )
+        if uncovered_usage_feedback:
+            recommendation = (
+                "Increase count or add manual eval cases for uncovered usage feedback "
+                "before adding these suggestions."
+            )
+        elif quality_counts.get("high", 0):
+            recommendation = (
+                "Add high-quality usage feedback cases first, then review medium/low "
+                "structural guards before adding them."
+            )
+        else:
+            recommendation = (
+                "Add real usage-feedback eval cases before relying on these suggestions."
+            )
         return {
             "proposal_id": proposal_id_value,
             "skill_name": skill_name,
