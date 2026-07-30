@@ -1168,3 +1168,54 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 已实现：没有新增 `/evolve` 或其他用户命令，符合“用户只配置开关与审批模式”的边界。
 - 未实现：审批列表和用户可见 approve/reject 入口。
 - 下一步：实现审批 inbox 查询能力，让 UI/API 可以按 pending/approved/rejected 列出 request，再进入详情与 resolve。
+
+## 23. 最新推进记录：审批 Inbox 查询 API
+
+日期：2026-07-30
+
+本次补齐审批详情之前的列表入口。系统内部现在可以按状态列出 approval request，默认只返回待处理的 pending request；审计视图可以传入 `status=None` 查看全部已批准、已拒绝和待处理记录。
+
+修改内容：
+
+- 修改 `mewcode/evolution/engine.py`：新增 `list_skill_approval_inbox(status="pending")`。
+- 默认行为只返回 `pending`，避免用户审批界面默认混入已处理申请。
+- `status=None` 返回全部 request，用于审计或历史视图。
+- 返回结果按 `created_at` 排序，保持审批队列展示稳定。
+- 修改 `tests/test_evolution.py`：新增 `test_list_skill_approval_inbox_defaults_to_pending_requests`，验证默认 pending、拒绝后从 pending 消失、`status=None` 仍可审计查看。
+- 修改 `docs/self-evolution-config-approval-recap-zh.md` 和本文档：记录本次 TDD 与验证结果。
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_skill_approval_inbox_defaults_to_pending_requests -q
+1 failed  # 实现前红灯：EvolutionEngine 尚无 list_skill_approval_inbox
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_skill_approval_inbox_defaults_to_pending_requests -q
+1 passed
+```
+
+验证记录：
+
+```text
+python3 -m py_compile mewcode/evolution/engine.py
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+59 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+240 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次审批 Inbox API 无直接关系。
+
+边界说明：
+
+- 已实现：内部审批 inbox 可以列出 pending 或全部 request。
+- 已实现：审批 inbox 只读，不会修改 request/proposal/candidate/formal skill。
+- 已实现：没有新增用户命令，不要求用户通过命令提交 skill 或评测。
+- 未实现：用户可见审批入口和审批模式差异化展示。
+- 下一步：把 inbox、详情和 resolve 串成真正的 UI/API 审批面。

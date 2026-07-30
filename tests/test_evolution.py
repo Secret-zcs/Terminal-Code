@@ -745,6 +745,30 @@ class TestEvolutionEngine:
         assert "## Execution Eval Report" in review
         assert "Execution Eval Report" in review
 
+    def test_list_skill_approval_inbox_defaults_to_pending_requests(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        request = engine.submit_skill_approval_request(proposal.id)
+
+        pending = engine.list_skill_approval_inbox()
+
+        assert [item.id for item in pending] == [request.id]
+
+        ok, message = engine.resolve_skill_approval_request(
+            request.id,
+            approved=False,
+            reviewer="user",
+            reason="暂不启用。",
+        )
+        assert ok, message
+
+        assert engine.list_skill_approval_inbox() == []
+        all_requests = engine.list_skill_approval_inbox(status=None)
+        assert [item.id for item in all_requests] == [request.id]
+        assert all_requests[0].status == "rejected"
+
     def test_resolve_skill_approval_request_approved_promotes_candidate(
         self, tmp_path: Path
     ) -> None:

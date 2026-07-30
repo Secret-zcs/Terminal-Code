@@ -31,6 +31,7 @@ from mewcode.evolution.models import (
     ProposalRisk,
     ProposalTarget,
     SkillApprovalRequest,
+    SkillApprovalStatus,
     new_evolution_id,
 )
 from mewcode.evolution.store import EvolutionStore
@@ -1089,6 +1090,15 @@ class EvolutionEngine:
         self.store.save_skill_approval_request(request)
         self._mark_candidate_approval_requested(proposal, request)
         return request
+
+    def list_skill_approval_inbox(
+        self,
+        status: SkillApprovalStatus | None = "pending",
+    ) -> list[SkillApprovalRequest]:
+        requests = self.store.load_skill_approval_requests()
+        if status is not None:
+            requests = [request for request in requests if request.status == status]
+        return sorted(requests, key=lambda request: request.created_at)
 
     def render_skill_approval_request(self, request_id: str) -> tuple[bool, str]:
         request = self.store.get_skill_approval_request(request_id)

@@ -227,6 +227,44 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 输出包含 request/proposal/skill/status、candidate diff 和 execution eval Markdown 报告。
 - 该 API 不 approve、不 reject、不 promote，也不新增 `/evolve` 等用户命令。
 
+审批 Inbox 红灯：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_skill_approval_inbox_defaults_to_pending_requests -q
+1 failed  # 实现前红灯：EvolutionEngine 尚无 list_skill_approval_inbox
+```
+
+审批 Inbox 实现后绿色：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_skill_approval_inbox_defaults_to_pending_requests -q
+1 passed
+```
+
+审批 Inbox 扩展验证：
+
+```text
+python3 -m py_compile mewcode/evolution/engine.py
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+59 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+240 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次审批 Inbox API 无直接关系。
+
+审批 Inbox 边界：
+
+- `list_skill_approval_inbox()` 默认只返回 pending request，避免 UI 默认混入已处理申请。
+- `status=None` 返回全部 request，用于审计视图。
+- 该 API 只读，不会触发 approve、reject 或 promote。
+
 扩展验证：
 
 ```text
@@ -248,6 +286,6 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 ## 剩余工作
 
 - 实现自动候选 skill 抽取：由系统读取对话轨迹、工具结果、用户纠正和失败记录生成 proposal。
-- 实现审批申请列表与用户可见入口：基于 `render_skill_approval_request()` 展示详情，并调用 `resolve_skill_approval_request()` 处理 approve/reject。
+- 实现用户可见审批入口：基于 `list_skill_approval_inbox()` 和 `render_skill_approval_request()` 展示详情，并调用 `resolve_skill_approval_request()` 处理 approve/reject。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。
