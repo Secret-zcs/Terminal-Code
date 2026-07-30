@@ -724,6 +724,27 @@ class TestEvolutionEngine:
 
         assert engine.store.load_skill_approval_requests() == []
 
+    def test_render_skill_approval_request_shows_review_materials(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        request = engine.submit_skill_approval_request(proposal.id)
+
+        ok, review = engine.render_skill_approval_request(request.id)
+
+        assert ok, review
+        assert "# Self-Evolution Skill Approval" in review
+        assert f"Request: {request.id}" in review
+        assert "Status: pending" in review
+        assert "Skill: debug-regression-loop" in review
+        assert "## Candidate Diff" in review
+        assert "+++ candidate" in review
+        assert "+name: debug-regression-loop" in review
+        assert "+# 任务" in review
+        assert "## Execution Eval Report" in review
+        assert "Execution Eval Report" in review
+
     def test_resolve_skill_approval_request_approved_promotes_candidate(
         self, tmp_path: Path
     ) -> None:

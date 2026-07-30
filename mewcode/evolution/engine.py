@@ -1090,6 +1090,50 @@ class EvolutionEngine:
         self._mark_candidate_approval_requested(proposal, request)
         return request
 
+    def render_skill_approval_request(self, request_id: str) -> tuple[bool, str]:
+        request = self.store.get_skill_approval_request(request_id)
+        if request is None:
+            return False, f"approval request {request_id} not found"
+
+        proposal = self.store.get_proposal(request.proposal_id)
+        if proposal is None:
+            return False, f"proposal {request.proposal_id} not found"
+        if proposal.target != "skill":
+            return False, f"proposal {proposal.id} is not a skill proposal"
+
+        try:
+            skill_preview = self._render_skill_preview(proposal)
+        except ValueError as exc:
+            return False, str(exc)
+
+        report_path = Path(request.eval_report_markdown)
+        if report_path.exists():
+            eval_report = report_path.read_text(encoding="utf-8").strip()
+        else:
+            eval_report = f"(execution eval report not found: {report_path})"
+
+        lines = [
+            "# Self-Evolution Skill Approval",
+            "",
+            f"Request: {request.id}",
+            f"Proposal: {request.proposal_id}",
+            f"Skill: {request.skill_name}",
+            f"Status: {request.status}",
+            f"Mode: {request.approval_mode}",
+            f"Candidate: {request.candidate_skill}",
+            f"Eval report: {request.eval_report_markdown}",
+            "",
+            "## Candidate Diff",
+            "",
+            skill_preview.strip(),
+            "",
+            "## Execution Eval Report",
+            "",
+            eval_report,
+            "",
+        ]
+        return True, "\n".join(lines)
+
     def resolve_skill_approval_request(
         self,
         request_id: str,

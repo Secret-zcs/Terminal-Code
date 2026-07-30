@@ -1115,3 +1115,56 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 已实现：candidate manifest 会记录审批结果，便于后续 UI 展示和审计。
 - 未实现：用户可见审批视图/API；当前能力仍是 Engine 内部状态机。
 - 下一步：实现审批列表与详情展示，展示 candidate diff、execution eval 报告、测试结果和批准/拒绝入口。
+
+## 22. 最新推进记录：只读审批详情 API
+
+日期：2026-07-30
+
+本次继续推进审批可见性，但仍不新增用户命令入口。系统内部现在可以把单个 approval request 渲染为 Markdown 审阅材料，后续 TUI/API 可以直接展示该材料，再调用上一阶段的 `resolve_skill_approval_request()` 处理批准或拒绝。
+
+修改内容：
+
+- 修改 `mewcode/evolution/engine.py`：新增 `render_skill_approval_request(request_id)`。
+- 该方法读取 `approval_requests.jsonl` 中的 request，定位 proposal，并复用现有 `_render_skill_preview()` 生成 candidate diff。
+- 该方法读取 request 绑定的 execution eval Markdown 报告，并与 request 元数据一起组成审阅文档。
+- 修改 `tests/test_evolution.py`：新增 `test_render_skill_approval_request_shows_review_materials`，验证审批详情包含 request id、状态、skill 名称、candidate diff 和 execution eval 报告。
+- 修改 `docs/self-evolution-config-approval-recap-zh.md` 和本文档：记录本次 TDD 与验证结果。
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_review_materials -q
+1 failed  # 实现前红灯：EvolutionEngine 尚无 render_skill_approval_request
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_review_materials -q
+1 passed
+```
+
+验证记录：
+
+```text
+python3 -m py_compile mewcode/evolution/engine.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+58 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+239 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次审批详情 API 无直接关系。
+
+边界说明：
+
+- 已实现：审批详情能展示候选 skill diff 和 execution eval 报告。
+- 已实现：审批详情只读，不会修改 request/proposal/candidate/formal skill。
+- 已实现：没有新增 `/evolve` 或其他用户命令，符合“用户只配置开关与审批模式”的边界。
+- 未实现：审批列表和用户可见 approve/reject 入口。
+- 下一步：实现审批 inbox 查询能力，让 UI/API 可以按 pending/approved/rejected 列出 request，再进入详情与 resolve。

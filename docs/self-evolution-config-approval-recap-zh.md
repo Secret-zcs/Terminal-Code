@@ -186,6 +186,47 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次审批申请 Resolve 无直接关系。
 
+审批详情红灯：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_review_materials -q
+1 failed  # 实现前红灯：EvolutionEngine 尚无 render_skill_approval_request
+```
+
+审批详情实现后绿色：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_review_materials -q
+1 passed
+```
+
+审批详情扩展验证：
+
+```text
+python3 -m py_compile mewcode/evolution/engine.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+58 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+239 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次审批详情 API 无直接关系。
+
+审批详情边界：
+
+- `render_skill_approval_request()` 是只读内部 API，用于后续 UI/API 展示审批材料。
+- 输出包含 request/proposal/skill/status、candidate diff 和 execution eval Markdown 报告。
+- 该 API 不 approve、不 reject、不 promote，也不新增 `/evolve` 等用户命令。
+
 扩展验证：
 
 ```text
@@ -207,6 +248,6 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 ## 剩余工作
 
 - 实现自动候选 skill 抽取：由系统读取对话轨迹、工具结果、用户纠正和失败记录生成 proposal。
-- 实现审批申请视图或 API：展示 skill diff、评测 case、execution eval 报告、推荐结论和 approve/reject 入口，并调用 `resolve_skill_approval_request()`。
+- 实现审批申请列表与用户可见入口：基于 `render_skill_approval_request()` 展示详情，并调用 `resolve_skill_approval_request()` 处理 approve/reject。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。
