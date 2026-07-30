@@ -461,3 +461,28 @@ PYTHONPATH=. pytest tests/test_evolution.py -q
 扩展验证：`python3 -m py_compile mewcode/evolution/engine.py` 无输出，`git diff --check` 无输出；核心回归 `PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q` 通过，230 个测试成功。全量 `PYTHONPATH=. pytest -q -x` 仍停在既有 `tests/test_agent.py::test_multi_step_autonomous`，原因是旧测试要求 `WriteFile` 写前不需要 `ReadFile`，和本次 runner 修改无直接依赖。
 
 边界说明：当前已经接入真实 Agent loop 和真实工具执行，但 LLM 仍是 deterministic scripted client，不是外部模型自主判断。这样做的目的，是先稳定 tool event、sandbox、transcript、workspace assertion 这组评测协议，再替换为真实受限 LLM 子 Agent。
+
+### 2026-07-30 JSON Eval Case Command 追加记录
+
+本次新增 `/evolve add-eval-case-json <proposal_id> :: <json_object>`，把 workspace、scripted turns、expected files 和 `agent_loop_scripted` runner 从 engine API 暴露到命令层。
+
+示例：
+
+```text
+/evolve add-eval-case-json prop_xxx :: {"task":"修复文件","must_contain":["复现失败"],"workspace_files":{"bug.txt":"broken\n"},"scripted_agent_turns":[{"assistant":"读取输入","tool_calls":[{"tool":"ReadFile","path":"bug.txt"}]}],"expected_files":{"result.txt":"fixed\n"},"execution_runner":"agent_loop_scripted"}
+```
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_case_json_command_records_agent_loop_runner -q
+1 failed  # 实现前红灯：命令层没有 add-eval-case-json
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_case_json_command_records_agent_loop_runner -q
+1 failed  # 第二个红灯：async 测试中嵌套 asyncio.run
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_case_json_command_records_agent_loop_runner -q
+1 passed
+```
+
+边界说明：JSON 命令只写 eval case，不自动运行 eval、不自动 approve、不自动 promote。它解决的是“用户如何录入高级评测 case”的入口问题，不改变候选 skill 的启用门禁。

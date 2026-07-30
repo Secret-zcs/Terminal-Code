@@ -12,6 +12,7 @@ Usage:
     /evolve reject <proposal_id>
     /evolve apply <proposal_id>
     /evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]
+    /evolve add-eval-case-json <proposal_id> :: <json_object>
     /evolve eval <proposal_id>
     /evolve run-eval <proposal_id>
     /evolve show-eval <proposal_id>
@@ -25,6 +26,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from mewcode.commands.registry import Command, CommandContext, CommandType
@@ -76,6 +78,8 @@ async def handle_evolve(ctx: CommandContext) -> None:
         _handle_apply(ctx, engine, rest)
     elif subcmd == "add-eval-case":
         _handle_add_eval_case(ctx, engine, rest)
+    elif subcmd == "add-eval-case-json":
+        _handle_add_eval_case_json(ctx, engine, rest)
     elif subcmd == "eval":
         _handle_eval(ctx, engine, rest)
     elif subcmd == "run-eval":
@@ -113,6 +117,7 @@ def _show_help(ctx: CommandContext) -> None:
             "  /evolve reject <proposal_id>",
             "  /evolve apply <proposal_id>",
             "  /evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv>",
+            "  /evolve add-eval-case-json <proposal_id> :: <json_object>",
             "  /evolve eval <proposal_id>",
             "  /evolve run-eval <proposal_id>",
             "  /evolve show-eval <proposal_id>",
@@ -444,6 +449,101 @@ def _handle_add_eval_case(
     ctx.ui.add_system_message(f"Evolution eval case recorded: {case_id}")
 
 
+def _handle_add_eval_case_json(
+    ctx: CommandContext, engine: EvolutionEngine, rest: str
+) -> None:
+    usage = "Usage: /evolve add-eval-case-json <proposal_id> :: <json_object>"
+    parts = [part.strip() for part in rest.split("::", 1)]
+    if len(parts) != 2 or not all(parts):
+        ctx.ui.add_system_message(usage)
+        return
+
+    proposal_id, raw_json = parts
+    try:
+        payload = json.loads(raw_json)
+    except json.JSONDecodeError as e:
+        ctx.ui.add_system_message(f"Evolution JSON eval case failed: invalid JSON: {e}")
+        return
+    if not isinstance(payload, dict):
+        ctx.ui.add_system_message("Evolution JSON eval case failed: payload must be an object")
+        return
+
+    allowed_keys = {
+        "id",
+        "task",
+        "must_contain",
+        "must_not_contain",
+        "workspace_files",
+        "scripted_tool_calls",
+        "scripted_agent_turns",
+        "expected_files",
+        "execution_runner",
+    }
+    unknown = sorted(set(payload) - allowed_keys)
+    if unknown:
+        ctx.ui.add_system_message(
+            "Evolution JSON eval case failed: unsupported fields: "
+            + ", ".join(unknown)
+        )
+        return
+
+    task = payload.get("task")
+    must_contain = payload.get("must_contain")
+    if not isinstance(task, str) or not task.strip():
+        ctx.ui.add_system_message("Evolution JSON eval case failed: task must be a string")
+        return
+    if not _is_string_list(must_contain):
+        ctx.ui.add_system_message(
+            "Evolution JSON eval case failed: must_contain must be a list of strings"
+        )
+        return
+    must_not_contain = payload.get("must_not_contain", [])
+    if not _is_string_list(must_not_contain):
+        ctx.ui.add_system_message(
+            "Evolution JSON eval case failed: must_not_contain must be a list of strings"
+        )
+        return
+    if "id" in payload and not isinstance(payload["id"], str):
+        ctx.ui.add_system_message("Evolution JSON eval case failed: id must be a string")
+        return
+    execution_runner = payload.get("execution_runner", "deterministic_replay")
+    if not isinstance(execution_runner, str):
+        ctx.ui.add_system_message(
+            "Evolution JSON eval case failed: execution_runner must be a string"
+        )
+        return
+    for field in ("workspace_files", "expected_files"):
+        if field in payload and not isinstance(payload[field], dict):
+            ctx.ui.add_system_message(
+                f"Evolution JSON eval case failed: {field} must be an object"
+            )
+            return
+    for field in ("scripted_tool_calls", "scripted_agent_turns"):
+        if field in payload and not isinstance(payload[field], list):
+            ctx.ui.add_system_message(
+                f"Evolution JSON eval case failed: {field} must be a list"
+            )
+            return
+
+    try:
+        case_id = engine.add_eval_case(
+            proposal_id,
+            task=task,
+            must_contain=must_contain,
+            must_not_contain=must_not_contain,
+            workspace_files=payload.get("workspace_files"),
+            scripted_tool_calls=payload.get("scripted_tool_calls"),
+            scripted_agent_turns=payload.get("scripted_agent_turns"),
+            expected_files=payload.get("expected_files"),
+            execution_runner=execution_runner,
+            case_id=payload.get("id"),
+        )
+    except ValueError as e:
+        ctx.ui.add_system_message(f"Evolution JSON eval case failed: {e}")
+        return
+    ctx.ui.add_system_message(f"Evolution JSON eval case recorded: {case_id}")
+
+
 def _handle_quarantine(
     ctx: CommandContext, engine: EvolutionEngine, rest: str
 ) -> None:
@@ -607,6 +707,12 @@ def _split_terms(text: str) -> list[str]:
     ]
 
 
+def _is_string_list(value: object) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(item, str) and item.strip() for item in value
+    )
+
+
 def _reload_skill_loader_if_needed(
     ctx: CommandContext, proposal
 ) -> None:
@@ -655,8 +761,9 @@ EVOLVE_COMMAND = Command(
     handler=handle_evolve,
     usage=(
         "/evolve [observe|propose|propose-skill|propose-skill-patch|"
-        "list|show|preview|approve|reject|apply|add-eval-case|eval|"
-        "run-eval|show-eval|promote|record-usage|suggest-quarantine|"
+        "list|show|preview|approve|reject|apply|add-eval-case|"
+        "add-eval-case-json|eval|run-eval|show-eval|promote|record-usage|"
+        "suggest-quarantine|"
         "suggest-eval-cases|propose-patch-from-usage|quarantine]"
     ),
     aliases=["evolution"],

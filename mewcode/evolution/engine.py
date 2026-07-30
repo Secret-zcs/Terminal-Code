@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import threading
 import time
 from difflib import unified_diff
 from pathlib import Path
@@ -1824,14 +1825,41 @@ class EvolutionEngine:
             }
 
         try:
-            return asyncio.run(collect())
-        except RuntimeError as exc:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                return asyncio.run(collect())
+            except RuntimeError as exc:
+                error = f"agent loop execution failed: {exc}"
+                return {
+                    "turns": [],
+                    "tool_results": [],
+                    "errors": [error],
+                }
+
+        result: dict[str, Any] = {}
+        failure: list[BaseException] = []
+
+        def run_in_thread() -> None:
+            try:
+                result.update(asyncio.run(collect()))
+            except BaseException as exc:
+                failure.append(exc)
+
+        thread = threading.Thread(target=run_in_thread, daemon=True)
+        thread.start()
+        thread.join()
+        if not failure:
+            return result
+        exc = failure[0]
+        if isinstance(exc, RuntimeError):
             error = f"agent loop execution failed: {exc}"
             return {
                 "turns": [],
                 "tool_results": [],
                 "errors": [error],
             }
+        raise exc
 
     def _run_scripted_agent_turns(
         self,

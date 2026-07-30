@@ -1218,6 +1218,66 @@ class TestEvolveCommand:
         assert any("Skill Execution Eval Report" in msg for msg in ui.messages)
         loader.reload.assert_called_once()
 
+    async def test_add_eval_case_json_command_records_agent_loop_runner(
+        self, tmp_path: Path
+    ) -> None:
+        ui = MockUI()
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="agent-loop-json",
+            description="JSON 命令添加真实 Agent loop 评测 case",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小补丁。\n",
+            allowed_tools=["ReadFile", "WriteFile"],
+        )
+        payload = {
+            "task": "用 JSON case 驱动 Agent loop 修复文件。",
+            "must_contain": ["复现失败", "最小补丁"],
+            "workspace_files": {"bug.txt": "broken\n"},
+            "scripted_agent_turns": [
+                {
+                    "assistant": "先读取失败输入。",
+                    "tool_calls": [{"tool": "ReadFile", "path": "bug.txt"}],
+                },
+                {
+                    "assistant": "写出修复结果。",
+                    "tool_calls": [
+                        {
+                            "tool": "WriteFile",
+                            "path": "result.txt",
+                            "content": "fixed\n",
+                        }
+                    ],
+                },
+                {"assistant": "修复已完成。"},
+            ],
+            "expected_files": {"result.txt": "fixed\n"},
+            "execution_runner": "agent_loop_scripted",
+        }
+
+        await handle_evolve(_ctx(
+            tmp_path,
+            f"add-eval-case-json {proposal.id} :: "
+            f"{json.dumps(payload, ensure_ascii=False)}",
+            ui,
+        ))
+
+        assert any("Evolution JSON eval case recorded" in msg for msg in ui.messages)
+        case_path = EvolutionEngine(tmp_path).eval_cases_path("agent-loop-json")
+        case = json.loads(case_path.read_text(encoding="utf-8").splitlines()[0])
+        assert case["execution_runner"] == "agent_loop_scripted"
+        assert case["workspace_files"]["bug.txt"] == "broken\n"
+        assert case["expected_files"]["result.txt"] == "fixed\n"
+
+        engine = EvolutionEngine(tmp_path)
+        ok, message = engine.evaluate(proposal.id)
+        assert ok, message
+        ok, message = engine.run_execution_eval(proposal.id, min_cases=1)
+        assert ok, message
+        report = json.loads(
+            engine.execution_eval_report_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert report["runner"] == "fork_agent_sandbox_scripted_agent_loop"
+
     async def test_apply_valid_skill_proposal_tells_user_to_promote(
         self, tmp_path: Path
     ) -> None:

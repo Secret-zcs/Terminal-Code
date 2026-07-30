@@ -181,6 +181,7 @@ mewcode --mode default
 | `/evolve approve <id>` | 批准 proposal |
 | `/evolve apply <id>` | 应用已批准的 memory proposal |
 | `/evolve add-eval-case <id> :: <task> :: <must_contain_csv>` | 为 candidate skill 追加任务评估用例 |
+| `/evolve add-eval-case-json <id> :: <json_object>` | 为 candidate skill 追加包含 workspace、scripted turns、expected files 或 `agent_loop_scripted` 的高级评估用例 |
 | `/evolve eval <id>` | 评估 candidate skill 是否可启用 |
 | `/evolve run-eval <id>` | 对 candidate skill 执行至少三轮任务评估并生成报告 |
 | `/evolve show-eval <id>` | 展示 candidate skill 的执行评估报告 |
@@ -246,6 +247,7 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 - eval case 写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`，用于检查候选 SOP 是否覆盖任务所需关键步骤、且不包含明确禁止的错误策略。
 - execution eval 报告写入 `.mewcode/evolution/candidates/<proposal_id>/eval_report.json` 和 `eval_report.md`，并同步记录到 candidate manifest。
 - execution eval 每轮都会在 `.mewcode/evolution/candidates/<proposal_id>/execution_sandbox/` 下生成隔离产物，包括 `task.md`、候选 `SKILL.md` 快照、`rendered_prompt.md`、`result.json` 和 `child_agent/` 下的输入、工具策略、workspace、transcript 与 final answer；eval case 可选携带多轮 `scripted_agent_turns`、脚本化 `ReadFile` / `WriteFile` 调用和 `expected_files` 断言，用于回放子 Agent 工具轨迹并验证隔离工作区产物；设置 `execution_runner="agent_loop_scripted"` 时，会用 scripted LLM 走真实 `Agent.run()` 主循环并记录 `ToolUseEvent` / `ToolResultEvent`。
+- 基础文本 case 可用 `/evolve add-eval-case` 添加；需要 workspace 初始文件、脚本化多轮工具调用、`expected_files` 产物断言或 `agent_loop_scripted` runner 时，使用 `/evolve add-eval-case-json` 添加 JSON object。
 - `/learn` 是 Hermes 风格显式学习入口：同名项目 skill 存在时创建 `patch` 提案，否则创建 `create` 提案，避免重复 skill 膨胀。
 - `/learn` 会先记录 learn evidence，再把 evidence id 关联到生成的 proposal。
 
@@ -261,6 +263,7 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 /learn <name> :: <description> :: <skill body>
 /evolve preview <proposal_id>    # memory append or skill diff preview
 /evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]
+/evolve add-eval-case-json <proposal_id> :: <json_object>
 /evolve eval <proposal_id>       # parse + eval case gate
 /evolve run-eval <proposal_id>   # at least 3 execution eval rounds + report; eval cases may opt into agent_loop_scripted
 /evolve show-eval <proposal_id>  # user-visible eval report

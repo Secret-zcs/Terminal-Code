@@ -2,7 +2,7 @@
 
 > 日期：2026-07-29
 > 基线提交：`f01966c 为候选 skill 增加 eval case 门禁`
-> 最新阶段：候选 skill 执行评估报告门禁、scripted LLM 驱动的真实 Agent loop 评测、确定性 child-agent fork 轨迹、只读 preview、usage log、隔离建议、usage-driven patch candidate、只读 eval case 建议与质量摘要
+> 最新阶段：候选 skill 执行评估报告门禁、JSON 高级 eval case 命令、scripted LLM 驱动的真实 Agent loop 评测、确定性 child-agent fork 轨迹、只读 preview、usage log、隔离建议、usage-driven patch candidate、只读 eval case 建议与质量摘要
 > 范围：`mewcode/evolution/`、`/evolve`、`/learn`、candidate skill、eval gate、checkpoint/rewind 保护和测试留档
 
 ## 1. 当前结论
@@ -877,3 +877,42 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 已实现：报告层会区分 `fork_agent_sandbox_deterministic`、`fork_agent_sandbox_scripted_agent_loop` 和 mixed runner。
 - 未实现：LLM 决策仍是 scripted，不是外部模型自主规划；当前只允许 `ReadFile` / `WriteFile`，不开放 Bash。
 - 下一步：把 `_ScriptedAgentLoopClient` 替换为受限真实 LLM child-agent client，在相同 sandbox、tool policy、transcript 和 expected-files 断言框架下跑多轮任务。
+
+## 18. 最新推进记录：JSON Eval Case Command
+
+日期：2026-07-30
+
+本次把上一阶段 engine 已支持的高级 eval case 能力暴露到 `/evolve` 命令层。此前用户只能通过 Python API 或直接写 JSONL 添加 `workspace_files`、`scripted_agent_turns`、`expected_files` 和 `execution_runner="agent_loop_scripted"`；现在可以用 `/evolve add-eval-case-json <proposal_id> :: <json_object>` 显式录入。
+
+设计理由：
+
+- 基础 `/evolve add-eval-case` 适合纯文本 SOP 覆盖检查。
+- `agent_loop_scripted` 需要 workspace、turns、expected files 等结构化字段，继续塞进 `::` 和 CSV 会不可读且容易出错。
+- JSON 命令只负责写 eval case，不自动 `eval`、不自动 `run-eval`、不自动 `approve/promote`，因此不改变安全门禁。
+
+修改内容：
+
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 `add-eval-case-json` 子命令、help 文案和 usage。
+- 修改 `mewcode/commands/handlers/evolve.py`：新增 JSON payload 解析、字段白名单、必填字段校验和基础类型校验。
+- 修改 `tests/test_evolution.py`：新增命令层测试，验证 JSON case 能写入 `agent_loop_scripted` runner，并能跑通 execution eval。
+- 修改 `README.md` 和复盘文档：记录 JSON 命令、适用场景和边界。
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_case_json_command_records_agent_loop_runner -q
+1 failed  # 实现前红灯：命令层没有 add-eval-case-json
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_case_json_command_records_agent_loop_runner -q
+1 failed  # 第二个红灯：async 测试中嵌套 asyncio.run，暴露 Agent-loop runner 不能在已有 event loop 中同步调用
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_case_json_command_records_agent_loop_runner -q
+1 passed
+```
+
+边界说明：
+
+- 已实现：命令层可以添加带 workspace、turns、expected files 和 `agent_loop_scripted` 的高级 eval case。
+- 已实现：`run_execution_eval()` 现在可从已有 asyncio event loop 场景调用，内部会在线程中运行子 Agent event loop。
+- 未实现：这仍是 scripted LLM，不是外部真实 LLM 自主生成工具调用。
+- 下一步：给 JSON case 增加模板/示例输出，降低用户手写复杂 JSON 的成本。
