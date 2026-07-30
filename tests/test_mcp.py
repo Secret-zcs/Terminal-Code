@@ -171,6 +171,60 @@ class TestLoadConfigMCP:
         with pytest.raises(ConfigError, match="must have either"):
             load_config(path)
 
+
+class TestLoadConfigSelfEvolution:
+    def _write_config(self, tmp_path: Path, content: str) -> Path:
+        p = tmp_path / "config.yaml"
+        p.write_text(textwrap.dedent(content))
+        return p
+
+    def test_self_evolution_defaults_to_disabled_manual_approval(
+        self, tmp_path: Path
+    ) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+        """)
+        config = load_config(path)
+        assert config.self_evolution.enabled is False
+        assert config.self_evolution.skill_approval_mode == "manual"
+
+    def test_self_evolution_can_be_enabled_with_deferred_approval(
+        self, tmp_path: Path
+    ) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            self_evolution:
+              enabled: true
+              skill_approval_mode: deferred
+        """)
+        config = load_config(path)
+        assert config.self_evolution.enabled is True
+        assert config.self_evolution.skill_approval_mode == "deferred"
+
+    def test_self_evolution_rejects_invalid_approval_mode(
+        self, tmp_path: Path
+    ) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            self_evolution:
+              enabled: true
+              skill_approval_mode: auto
+        """)
+        with pytest.raises(ConfigError, match="skill_approval_mode"):
+            load_config(path)
+
 # ===========================================================================
 # MCPToolWrapper
 # ===========================================================================

@@ -19,6 +19,8 @@ VALID_PERMISSION_MODES = {
 
 VALID_TEAMMATE_MODES = {"", "in-process"}
 
+VALID_SELF_EVOLUTION_APPROVAL_MODES = {"manual", "deferred"}
+
 DEFAULT_CONTEXT_WINDOW = 200_000
 
 # 内置的"模型名子串 -> context window（最大输入 token 数）"映射表，
@@ -217,13 +219,53 @@ def validate_teammate_mode(mode: object) -> str:
     return mode
 
 
+def validate_self_evolution(raw_self_evolution: object) -> dict:
+    """校验 self_evolution 配置段。
+
+    自进化只由配置开关控制；candidate skill 仍必须经过用户审批，不能
+    通过配置进入自动提升路径。
+    """
+    defaults = {
+        "enabled": False,
+        "skill_approval_mode": "manual",
+    }
+
+    if raw_self_evolution is None:
+        return defaults
+    if not isinstance(raw_self_evolution, dict):
+        raise ConfigError("'self_evolution' must be a mapping")
+
+    enabled = validate_bool_field(
+        raw_self_evolution.get("enabled", defaults["enabled"]),
+        "self_evolution.enabled",
+    )
+    approval_mode = raw_self_evolution.get(
+        "skill_approval_mode",
+        defaults["skill_approval_mode"],
+    )
+    if (
+        not isinstance(approval_mode, str)
+        or approval_mode not in VALID_SELF_EVOLUTION_APPROVAL_MODES
+    ):
+        raise ConfigError(
+            "Invalid self_evolution.skill_approval_mode "
+            f"'{approval_mode}', must be one of: "
+            f"{', '.join(sorted(VALID_SELF_EVOLUTION_APPROVAL_MODES))}"
+        )
+
+    return {
+        "enabled": enabled,
+        "skill_approval_mode": approval_mode,
+    }
+
+
 def validate_config_structure(raw: object) -> dict:
     """校验的主入口。校验解析后的原始配置，返回清洗后的字典。
 
     返回的字典包含以下键：
         providers、permission_mode、mcp_servers、hooks、
         enable_fork、enable_verification_agent、worktree、
-        teammate_mode、enable_coordinator_mode
+        teammate_mode、enable_coordinator_mode、self_evolution
     """
     if not isinstance(raw, dict) or "providers" not in raw:
         raise ConfigError("Config must contain a 'providers' list")
@@ -242,4 +284,6 @@ def validate_config_structure(raw: object) -> dict:
         "enable_coordinator_mode": validate_bool_field(
             raw.get("enable_coordinator_mode", False), "enable_coordinator_mode"
         ),
+        "self_evolution": validate_self_evolution(raw.get("self_evolution")),
+        "self_evolution_explicit": "self_evolution" in raw,
     }

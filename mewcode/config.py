@@ -16,6 +16,7 @@ from .validator import (
     DEFAULT_CONTEXT_WINDOW,
     VALID_PERMISSION_MODES,
     VALID_PROTOCOLS,
+    VALID_SELF_EVOLUTION_APPROVAL_MODES,
     VALID_TEAMMATE_MODES,
     lookup_model_context_window,
     validate_config_structure,
@@ -129,6 +130,20 @@ class WorktreeConfig:
 
 
 @dataclass
+class SelfEvolutionConfig:
+    enabled: bool = False
+    skill_approval_mode: str = "manual"
+
+    @property
+    def requires_user_approval(self) -> bool:
+        return True
+
+    @property
+    def valid_approval_modes(self) -> set[str]:
+        return set(VALID_SELF_EVOLUTION_APPROVAL_MODES)
+
+
+@dataclass
 class AppConfig:
     providers: list[ProviderConfig]
     permission_mode: str = "default"
@@ -139,6 +154,8 @@ class AppConfig:
     worktree: WorktreeConfig = field(default_factory=WorktreeConfig)
     teammate_mode: str = ""
     enable_coordinator_mode: bool = False
+    self_evolution: SelfEvolutionConfig = field(default_factory=SelfEvolutionConfig)
+    _self_evolution_explicit: bool = field(default=False, repr=False)
 
 
 def _load_single_file(path: Path) -> AppConfig:
@@ -181,6 +198,11 @@ def _load_single_file(path: Path) -> AppConfig:
         stale_cleanup_interval=wt["stale_cleanup_interval"],
         stale_cutoff_hours=wt["stale_cutoff_hours"],
     )
+    se = validated["self_evolution"]
+    self_evolution_cfg = SelfEvolutionConfig(
+        enabled=se["enabled"],
+        skill_approval_mode=se["skill_approval_mode"],
+    )
 
     return AppConfig(
         providers=providers,
@@ -192,6 +214,8 @@ def _load_single_file(path: Path) -> AppConfig:
         worktree=worktree_cfg,
         teammate_mode=validated["teammate_mode"],
         enable_coordinator_mode=validated["enable_coordinator_mode"],
+        self_evolution=self_evolution_cfg,
+        _self_evolution_explicit=validated["self_evolution_explicit"],
     )
 
 
@@ -219,6 +243,9 @@ def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
         base.teammate_mode = override.teammate_mode
     if override.enable_coordinator_mode:
         base.enable_coordinator_mode = True
+    if override._self_evolution_explicit:
+        base.self_evolution = override.self_evolution
+        base._self_evolution_explicit = True
     return base
 
 

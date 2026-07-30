@@ -916,3 +916,78 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_ca
 - 已实现：`run_execution_eval()` 现在可从已有 asyncio event loop 场景调用，内部会在线程中运行子 Agent event loop。
 - 未实现：这仍是 scripted LLM，不是外部真实 LLM 自主生成工具调用。
 - 下一步：给 JSON case 增加模板/示例输出，降低用户手写复杂 JSON 的成本。
+
+## 19. 最新推进记录：配置驱动自进化与审批模式
+
+日期：2026-07-30
+
+本次根据产品边界修正上一阶段方向：自进化不再通过用户手动命令扩展。用户只负责配置开关和审批模式；候选 skill 的提取、评测用例生成、execution eval 和审批申请应由系统自动完成。
+
+修改内容：
+
+- 修改 `mewcode/validator.py`：新增 `self_evolution` 配置校验，支持 `enabled` 和 `skill_approval_mode`。
+- 修改 `mewcode/config.py`：新增 `SelfEvolutionConfig` 并挂到 `AppConfig.self_evolution`。
+- 修改 `mewcode/commands/handlers/__init__.py`：普通命令注册表不再注册 `/evolve` 和 `/learn`。
+- 修改 `mewcode/commands/handlers/evolve.py`：删除 `add-eval-case-json` 命令层入口。
+- 修改 `README.md`：把自进化说明改为配置驱动和用户审批驱动。
+- 新增 `docs/self-evolution-config-approval-recap-zh.md`：记录本次设计修正、实现和测试。
+
+配置示例：
+
+```yaml
+self_evolution:
+  enabled: true
+  skill_approval_mode: manual
+```
+
+审批模式：
+
+- `manual`：每个通过评测的 candidate skill 单独提交审批。
+- `deferred`：系统可先排队审批申请，但仍不能自动 promote。
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution -q
+3 failed  # 实现前红灯：配置对象不存在，非法 approval mode 未被拒绝
+
+PYTHONPATH=. pytest tests/test_commands.py::TestRegisterAllCommands -q
+2 failed  # 实现前红灯：/evolve 和 /learn 仍注册为普通用户命令
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_case_json_command_is_not_user_entrypoint -q
+1 failed  # 实现前红灯：add-eval-case-json 仍可作为命令入口
+
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution -q
+3 passed
+
+PYTHONPATH=. pytest tests/test_commands.py::TestRegisterAllCommands -q
+4 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_case_json_command_is_not_user_entrypoint -q
+1 passed
+```
+
+扩展验证记录：
+
+```text
+python3 -m py_compile mewcode/config.py mewcode/validator.py mewcode/commands/handlers/evolve.py mewcode/commands/handlers/__init__.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+232 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次配置驱动审批修改无直接关系。
+
+边界说明：
+
+- `EvolutionEngine.add_eval_case()` 的高级字段仍保留，供系统自动生成和执行评测使用。
+- 用户不再需要手写 skill、eval case 或 JSON case。
+- 不存在 `auto` 审批模式；自进化 skill 必须先通过评测并获得用户审批。
+- 下一步是把 `self_evolution.enabled` 接入会话/任务结束后的自动 review 触发点，并实现审批申请队列。

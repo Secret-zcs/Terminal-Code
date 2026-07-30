@@ -486,3 +486,34 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_ca
 ```
 
 边界说明：JSON 命令只写 eval case，不自动运行 eval、不自动 approve、不自动 promote。它解决的是“用户如何录入高级评测 case”的入口问题，不改变候选 skill 的启用门禁。
+
+### 2026-07-30 配置驱动审批修正记录
+
+本次回滚上一节的用户入口设计：高级 eval case 仍然是必要的评测能力，但不应该由普通用户通过 `/evolve add-eval-case-json` 手写。自进化的正确入口改为配置驱动：
+
+```yaml
+self_evolution:
+  enabled: true
+  skill_approval_mode: manual
+```
+
+最新边界：
+
+- 普通命令注册表不再注册 `/evolve` 和 `/learn`。
+- `add-eval-case-json` 命令层入口已删除。
+- `EvolutionEngine.add_eval_case()` 仍保留 workspace、scripted turns、expected files 和 `agent_loop_scripted`，供系统自动生成评测 case 使用。
+- candidate skill 仍必须经过静态 eval、至少三轮 execution eval、报告展示和用户审批，才能 promote。
+- 审批模式只支持 `manual` 和 `deferred`；两者都不能绕过用户审批。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution -q
+3 passed
+
+PYTHONPATH=. pytest tests/test_commands.py::TestRegisterAllCommands -q
+4 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_case_json_command_is_not_user_entrypoint -q
+1 passed
+```

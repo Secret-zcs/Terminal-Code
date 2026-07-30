@@ -1218,7 +1218,7 @@ class TestEvolveCommand:
         assert any("Skill Execution Eval Report" in msg for msg in ui.messages)
         loader.reload.assert_called_once()
 
-    async def test_add_eval_case_json_command_records_agent_loop_runner(
+    async def test_add_eval_case_json_command_is_not_user_entrypoint(
         self, tmp_path: Path
     ) -> None:
         ui = MockUI()
@@ -1254,29 +1254,17 @@ class TestEvolveCommand:
             "execution_runner": "agent_loop_scripted",
         }
 
-        await handle_evolve(_ctx(
-            tmp_path,
-            f"add-eval-case-json {proposal.id} :: "
-            f"{json.dumps(payload, ensure_ascii=False)}",
-            ui,
-        ))
-
-        assert any("Evolution JSON eval case recorded" in msg for msg in ui.messages)
-        case_path = EvolutionEngine(tmp_path).eval_cases_path("agent-loop-json")
-        case = json.loads(case_path.read_text(encoding="utf-8").splitlines()[0])
-        assert case["execution_runner"] == "agent_loop_scripted"
-        assert case["workspace_files"]["bug.txt"] == "broken\n"
-        assert case["expected_files"]["result.txt"] == "fixed\n"
-
-        engine = EvolutionEngine(tmp_path)
-        ok, message = engine.evaluate(proposal.id)
-        assert ok, message
-        ok, message = engine.run_execution_eval(proposal.id, min_cases=1)
-        assert ok, message
-        report = json.loads(
-            engine.execution_eval_report_path(proposal.id).read_text(encoding="utf-8")
+        await handle_evolve(
+            _ctx(
+                tmp_path,
+                f"add-eval-case-json {proposal.id} :: "
+                f"{json.dumps(payload, ensure_ascii=False)}",
+                ui,
+            )
         )
-        assert report["runner"] == "fork_agent_sandbox_scripted_agent_loop"
+
+        assert any("Unknown evolve subcommand" in msg for msg in ui.messages)
+        assert not EvolutionEngine(tmp_path).eval_cases_path("agent-loop-json").exists()
 
     async def test_apply_valid_skill_proposal_tells_user_to_promote(
         self, tmp_path: Path

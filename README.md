@@ -18,7 +18,7 @@ mewcode.__main__:main
 - **权限控制**：按 read/write/command 分类工具，结合 sandbox、规则引擎和危险命令检测。
 - **上下文压缩**：包含大工具结果预算控制、自动 compact、恢复附件和语义压缩计划。
 - **Checkpoint / Rewind**：支持 `/checkpoint`、`/rewind --preview`、`/rewind --undo`，可回退代码和对话状态。
-- **Hermes 自进化**：通过 `/evolve` / `/learn` 记录经验、生成 memory 或 candidate skill 提案，并经 eval/run-eval/approve/promote 受控启用。
+- **Hermes 自进化**：通过配置开启/关闭，系统自动沉淀候选 skill；候选 skill 必须经过评测报告和用户审批后才可启用。
 - **Skills**：支持项目级、用户级和内置技能，技能可 inline 或 fork 执行。
 - **MCP**：支持 stdio / HTTP MCP server，并包装为可调用工具。
 - **子智能体与团队协作**：支持 task、team、mailbox、trace、worktree 等多智能体能力。
@@ -118,6 +118,10 @@ providers:
     thinking: false
 
 permission_mode: default
+
+self_evolution:
+  enabled: false
+  skill_approval_mode: manual
 ```
 
 OpenAI 示例：
@@ -132,6 +136,8 @@ providers:
 ```
 
 本地项目配置、会话、checkpoint、evolution 记录等默认写入 `.mewcode/`。该目录已在 `.gitignore` 中忽略。
+
+`self_evolution.enabled` 是用户侧唯一的自进化开关；`skill_approval_mode` 支持 `manual` 和 `deferred`。两种模式都要求用户审批 candidate skill，不存在自动 promote。
 
 ---
 
@@ -173,25 +179,6 @@ mewcode --mode default
 | `/rewind N --code` | 仅回退代码 |
 | `/rewind N --conv` | 仅回退对话 |
 | `/rewind --undo` | 撤销最近一次 rewind |
-| `/evolve observe <summary>` | 记录自进化 evidence |
-| `/evolve propose <title> :: <change>` | 创建自进化 proposal |
-| `/evolve propose-skill <name> :: <description> :: <body>` | 创建新 skill 提案 |
-| `/evolve propose-skill-patch <name> :: <description> :: <body>` | 创建既有 skill patch 提案 |
-| `/evolve preview <id>` | 预览 memory 追加内容或 skill candidate diff |
-| `/evolve approve <id>` | 批准 proposal |
-| `/evolve apply <id>` | 应用已批准的 memory proposal |
-| `/evolve add-eval-case <id> :: <task> :: <must_contain_csv>` | 为 candidate skill 追加任务评估用例 |
-| `/evolve add-eval-case-json <id> :: <json_object>` | 为 candidate skill 追加包含 workspace、scripted turns、expected files 或 `agent_loop_scripted` 的高级评估用例 |
-| `/evolve eval <id>` | 评估 candidate skill 是否可启用 |
-| `/evolve run-eval <id>` | 对 candidate skill 执行至少三轮任务评估并生成报告 |
-| `/evolve show-eval <id>` | 展示 candidate skill 的执行评估报告 |
-| `/evolve promote <id>` | 将已批准的 candidate skill 提升为正式 skill |
-| `/evolve record-usage <name> :: <event> [:: summary]` | 手动记录正式 skill 的失败或用户反馈事件 |
-| `/evolve suggest-quarantine [name]` | 根据负面 usage 事件建议隔离不可靠 skill |
-| `/evolve suggest-eval-cases <id> [count]` | 为候选 skill 输出带 coverage gap 的只读 eval case 建议；默认 3 条，可提高 count 补齐 coverage |
-| `/evolve propose-patch-from-usage <name>` | 根据负面 usage 生成 skill patch candidate |
-| `/evolve quarantine <name> [:: reason]` | 将不可靠的项目级正式 skill 移入隔离区 |
-| `/learn <name> :: <description> :: <body>` | 将可复用流程蒸馏为 skill 提案；同名项目 skill 存在时优先 patch |
 | `/skill list` | 查看 skills |
 | `/memory list` | 查看自动记忆 |
 | `/status` | 查看当前状态 |
@@ -232,52 +219,25 @@ mewcode --mode default
 
 ## Hermes 自进化
 
-自进化机制位于 `mewcode/evolution/`，采用安全闭环：
+自进化机制位于 `mewcode/evolution/`，用户侧只通过配置开启/关闭和选择审批模式。普通命令表不再暴露 `/evolve` / `/learn` 作为用户操作入口，避免用户手动编写 skill、eval case 或 JSON 评测用例。
 
 ```text
-memory: observe -> propose -> validate -> approve -> apply
-skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval -> show-eval -> approve -> promote
+config -> automatic observation -> candidate skill -> eval cases -> eval -> execution eval -> report -> user approval -> promote
 ```
 
-当前支持两类受控落地：
+当前边界：
 
-- approved `memory` proposal 自动追加到 `.mewcode/memories.md`。
-- skill proposal 先写入 `.mewcode/evolution/candidates/<proposal_id>/SKILL.md`，不会立即进入正式 skill loader。
-- candidate skill 必须先记录 eval case，通过 `/evolve eval <proposal_id>`，再通过 `/evolve run-eval <proposal_id>` 至少三轮任务评估，并用 `/evolve show-eval <proposal_id>` 向用户展示报告后，才能经 approve/promote 写入 `.mewcode/skills/<name>/SKILL.md`。
+- candidate skill 先写入 `.mewcode/evolution/candidates/<proposal_id>/SKILL.md`，不会立即进入正式 skill loader。
+- candidate skill 必须先记录 eval case，通过静态 eval，再通过 execution eval 至少三轮任务评估，并向用户展示报告后，才能在用户审批后写入 `.mewcode/skills/<name>/SKILL.md`。
 - eval case 写入 `.mewcode/evolution/evals/<skill-name>/cases.jsonl`，用于检查候选 SOP 是否覆盖任务所需关键步骤、且不包含明确禁止的错误策略。
 - execution eval 报告写入 `.mewcode/evolution/candidates/<proposal_id>/eval_report.json` 和 `eval_report.md`，并同步记录到 candidate manifest。
 - execution eval 每轮都会在 `.mewcode/evolution/candidates/<proposal_id>/execution_sandbox/` 下生成隔离产物，包括 `task.md`、候选 `SKILL.md` 快照、`rendered_prompt.md`、`result.json` 和 `child_agent/` 下的输入、工具策略、workspace、transcript 与 final answer；eval case 可选携带多轮 `scripted_agent_turns`、脚本化 `ReadFile` / `WriteFile` 调用和 `expected_files` 断言，用于回放子 Agent 工具轨迹并验证隔离工作区产物；设置 `execution_runner="agent_loop_scripted"` 时，会用 scripted LLM 走真实 `Agent.run()` 主循环并记录 `ToolUseEvent` / `ToolResultEvent`。
-- 基础文本 case 可用 `/evolve add-eval-case` 添加；需要 workspace 初始文件、脚本化多轮工具调用、`expected_files` 产物断言或 `agent_loop_scripted` runner 时，使用 `/evolve add-eval-case-json` 添加 JSON object。
-- `/learn` 是 Hermes 风格显式学习入口：同名项目 skill 存在时创建 `patch` 提案，否则创建 `create` 提案，避免重复 skill 膨胀。
-- `/learn` 会先记录 learn evidence，再把 evidence id 关联到生成的 proposal。
+- 高级 eval case 由系统内部写入 engine API；普通用户不需要也不应该手写 `add-eval-case-json`。
+- `manual` 审批模式表示每个通过评测的 candidate skill 都需要单独审批；`deferred` 表示系统可先排队审批申请，但仍不能自动启用。
 
-运行时自进化只接受 `memory` 和 `skill`。`code`、`tool`、`prompt` 不进入 `/evolve apply` 路径；相关想法只能作为人工开发建议处理。
+运行时自进化只接受 `memory` 和 `skill`。`code`、`tool`、`prompt` 不进入自进化落地路径；相关想法只能作为人工开发建议处理。
 
-常用命令：
-
-```text
-/evolve observe <summary>
-/evolve propose <title> :: <memory change>
-/evolve propose-skill <name> :: <description> :: <skill body>
-/evolve propose-skill-patch <name> :: <description> :: <skill body>
-/learn <name> :: <description> :: <skill body>
-/evolve preview <proposal_id>    # memory append or skill diff preview
-/evolve add-eval-case <proposal_id> :: <task> :: <must_contain_csv> [:: <must_not_contain_csv>]
-/evolve add-eval-case-json <proposal_id> :: <json_object>
-/evolve eval <proposal_id>       # parse + eval case gate
-/evolve run-eval <proposal_id>   # at least 3 execution eval rounds + report; eval cases may opt into agent_loop_scripted
-/evolve show-eval <proposal_id>  # user-visible eval report
-/evolve approve <proposal_id>
-/evolve apply <proposal_id>      # memory only
-/evolve promote <proposal_id>    # skill candidate only
-/evolve record-usage <skill-name> :: <event> [:: summary]
-/evolve suggest-quarantine [skill-name]
-/evolve suggest-eval-cases <proposal_id> [count]
-/evolve propose-patch-from-usage <skill-name>
-/evolve quarantine <skill-name> [:: reason]
-```
-
-`/evolve apply` 在写入 memory 前会尝试创建 checkpoint；`/evolve promote` 在启用 skill candidate 前会尝试创建 checkpoint，并在成功后 reload skill loader。`LoadSkill` 成功激活 skill 会记录到 `.mewcode/evolution/skill_usage.jsonl`，未知 skill 加载失败会自动记录 `failure` usage；`/evolve record-usage` 可手动补充 `failure` / `user_feedback` 等事件，`/evolve suggest-quarantine` 会基于负面事件给出隔离建议；`/evolve propose-patch-from-usage` 只生成 patch candidate，不自动启用；`/evolve suggest-eval-cases` 只输出建议命令、质量摘要、coverage gap、warnings 和 recommendation，不写入 eval case；默认输出 3 条建议，若仍有 `Uncovered usage feedback`，可传入 `[count]` 增加建议数量或手写 eval case 来覆盖更多真实反馈；`high` 表示直接覆盖真实 usage feedback，`medium` 表示结构性 patch guard，`low` 表示描述兜底；`/evolve quarantine` 会把项目级正式 skill 移入 `.mewcode/evolution/quarantine/<skill-name>/`，并 reload skill loader。
+正式 skill 启用前会尝试创建 checkpoint，并在成功后 reload skill loader。`LoadSkill` 成功激活 skill 会记录到 `.mewcode/evolution/skill_usage.jsonl`，未知 skill 加载失败会自动记录 `failure` usage，后续自进化可基于负面 usage 生成 patch candidate 或隔离建议。
 
 详细说明：
 
@@ -285,6 +245,7 @@ skill:  learn/propose -> candidate -> validate -> eval-case -> eval -> run-eval 
 - `docs/hermes-skill-evolution-implementation.md`
 - `docs/verified-skill-evolution-recap-zh.md`
 - `docs/skill-execution-eval-gate-recap-zh.md`
+- `docs/self-evolution-config-approval-recap-zh.md`
 
 ---
 

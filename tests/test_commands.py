@@ -464,11 +464,19 @@ class TestRegisterAllCommands:
         cmds = registry.list_commands()
         names = {c.name for c in cmds}
         expected = {
-            "help", "checkpoint", "compact", "evolve", "learn", "clear", "plan", "do",
+            "help", "checkpoint", "compact", "clear", "plan", "do",
             "session", "mcp", "memory", "permission",
             "rewind", "status", "skill",
         }
         assert names == expected
+
+    def test_self_evolution_commands_are_not_user_registered(self) -> None:
+        from mewcode.commands.handlers import register_all_commands
+
+        registry = CommandRegistry()
+        register_all_commands(registry)
+        assert registry.find("evolve") is None
+        assert registry.find("learn") is None
 
     def test_no_alias_conflicts(self) -> None:
         from mewcode.commands.handlers import register_all_commands
