@@ -49,7 +49,11 @@ from mewcode.commands import (
 )
 from mewcode.commands.completion import CompletionPopup
 from mewcode.commands.handlers import register_all_commands
-from mewcode.config import MCPServerConfig, ProviderConfig
+from mewcode.config import MCPServerConfig, ProviderConfig, SelfEvolutionConfig
+from mewcode.evolution.auto_review import (
+    format_review_notification,
+    review_ready_skill_candidates,
+)
 from mewcode.hooks import HookContext, HookEngine, load_hooks
 from mewcode.conversation import ConversationManager, Message
 from mewcode.mcp import MCPManager
@@ -579,6 +583,7 @@ class MewCodeApp(App):
         worktree_config: Any = None,
         teammate_mode: str = "",
         enable_coordinator_mode: bool = False,
+        self_evolution_config: SelfEvolutionConfig | None = None,
         driver_class: type | None = None,
     ) -> None:
         super().__init__(driver_class=driver_class)
@@ -591,6 +596,7 @@ class MewCodeApp(App):
         self._worktree_config = worktree_config
         self._teammate_mode = teammate_mode
         self._enable_coordinator_mode = enable_coordinator_mode
+        self._self_evolution_config = self_evolution_config or SelfEvolutionConfig()
         self.file_cache = FileCache()
         self.client: LLMClient | None = None
         self.conversation = ConversationManager()
@@ -1439,6 +1445,7 @@ class MewCodeApp(App):
                         asyncio.ensure_future(
                             self._show_plan_approval()
                         )
+                    self._run_self_evolution_review()
 
             # 收尾：渲染剩余的累积文本
             if accumulated_text and streaming_label is not None:
@@ -1901,6 +1908,21 @@ class MewCodeApp(App):
         msg = Static(f"  {text}", classes="message system-message")
         chat.mount(msg)
         self.call_after_refresh(chat.scroll_end, animate=False)
+
+    def _run_self_evolution_review(self) -> None:
+        if self.agent is None:
+            return
+        try:
+            result = review_ready_skill_candidates(
+                self.agent.work_dir,
+                self._self_evolution_config,
+            )
+        except Exception as exc:
+            log.debug("Self-evolution review failed: %s", exc)
+            return
+        message = format_review_notification(result)
+        if message:
+            self._show_system_message(message)
 
     _MODE_DISPLAY = {
         PermissionMode.DEFAULT: "default",

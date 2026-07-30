@@ -94,6 +94,22 @@ def _add_debug_eval_cases(engine: EvolutionEngine, proposal_id: str) -> list[str
     ]
 
 
+def _make_ready_skill_candidate(engine: EvolutionEngine):
+    proposal = engine.propose_skill(
+        name="debug-regression-loop",
+        description="复杂调试任务的回归测试优先流程",
+        body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
+        allowed_tools=["Bash", "ReadFile"],
+        context="recent",
+    )
+    _add_debug_eval_cases(engine, proposal.id)
+    ok, message = engine.evaluate(proposal.id)
+    assert ok, message
+    ok, message = engine.run_execution_eval(proposal.id)
+    assert ok, message
+    return proposal
+
+
 def _usage_patch_proposal(tmp_path: Path, summaries: list[str] | None = None):
     skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
     skill_path.parent.mkdir(parents=True)
@@ -658,6 +674,109 @@ class TestEvolutionEngine:
         applied = engine.store.get_proposal(proposal.id)
         assert applied is not None
         assert applied.status == "applied"
+
+    def test_submit_skill_approval_request_records_pending_request(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+
+        request = engine.submit_skill_approval_request(
+            proposal.id,
+            approval_mode="deferred",
+            source="self-evolution-review",
+        )
+
+        assert request.proposal_id == proposal.id
+        assert request.skill_name == "debug-regression-loop"
+        assert request.approval_mode == "deferred"
+        assert request.status == "pending"
+        assert "eval_report.md" in request.eval_report_markdown
+        stored = engine.store.load_skill_approval_requests()
+        assert [item.id for item in stored] == [request.id]
+        manifest = json.loads(
+            engine.candidate_manifest_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert manifest["approval_request_id"] == request.id
+        assert manifest["approval_status"] == "pending"
+        assert engine.store.get_proposal(proposal.id).status == "proposed"
+        assert not (
+            tmp_path / ".mewcode" / "skills" / "debug-regression-loop" / "SKILL.md"
+        ).exists()
+
+    def test_submit_skill_approval_request_requires_execution_eval(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="debug-regression-loop",
+            description="复杂调试任务的回归测试优先流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
+            allowed_tools=["Bash", "ReadFile"],
+            context="recent",
+        )
+        _add_debug_eval_cases(engine, proposal.id)
+        ok, message = engine.evaluate(proposal.id)
+        assert ok, message
+
+        with pytest.raises(ValueError, match="execution eval"):
+            engine.submit_skill_approval_request(proposal.id)
+
+        assert engine.store.load_skill_approval_requests() == []
+
+    def test_self_evolution_review_disabled_skips_ready_candidates(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        engine = EvolutionEngine(tmp_path)
+        _make_ready_skill_candidate(engine)
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=False, skill_approval_mode="manual"),
+        )
+
+        assert result["status"] == "disabled"
+        assert result["requests"] == []
+        assert engine.store.load_skill_approval_requests() == []
+
+    def test_self_evolution_review_submits_ready_candidates_once(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import (
+            format_review_notification,
+            review_ready_skill_candidates,
+        )
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="deferred"),
+        )
+
+        assert result["status"] == "submitted"
+        assert len(result["requests"]) == 1
+        assert result["requests"][0].proposal_id == proposal.id
+        assert result["requests"][0].approval_mode == "deferred"
+        message = format_review_notification(result)
+        assert "Self-evolution approval request" in message
+        assert proposal.id in message
+        assert "deferred" in message
+
+        second = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="deferred"),
+        )
+
+        assert second["status"] == "idle"
+        assert second["requests"] == []
+        assert format_review_notification(second) == ""
+        assert len(engine.store.load_skill_approval_requests()) == 1
 
     def test_add_eval_case_invalidates_existing_execution_eval(
         self, tmp_path: Path

@@ -7,7 +7,11 @@ import threading
 from pathlib import Path
 from typing import Callable, TypeVar
 
-from mewcode.evolution.models import EvolutionEvidence, EvolutionProposal
+from mewcode.evolution.models import (
+    EvolutionEvidence,
+    EvolutionProposal,
+    SkillApprovalRequest,
+)
 
 T = TypeVar("T")
 
@@ -18,6 +22,7 @@ class EvolutionStore:
         self.dir = self.root / ".mewcode" / "evolution"
         self.evidence_path = self.dir / "evidence.jsonl"
         self.proposals_path = self.dir / "proposals.jsonl"
+        self.skill_approval_requests_path = self.dir / "approval_requests.jsonl"
         self._lock = threading.Lock()
 
     def save_evidence(self, evidence: EvolutionEvidence) -> None:
@@ -31,6 +36,23 @@ class EvolutionStore:
 
     def load_proposals(self) -> list[EvolutionProposal]:
         return self._load_jsonl(self.proposals_path, EvolutionProposal.from_jsonl)
+
+    def save_skill_approval_request(self, request: SkillApprovalRequest) -> None:
+        self._append(self.skill_approval_requests_path, request.to_jsonl())
+
+    def load_skill_approval_requests(self) -> list[SkillApprovalRequest]:
+        return self._load_jsonl(
+            self.skill_approval_requests_path,
+            SkillApprovalRequest.from_jsonl,
+        )
+
+    def get_pending_skill_approval_request(
+        self, proposal_id: str
+    ) -> SkillApprovalRequest | None:
+        for request in self.load_skill_approval_requests():
+            if request.proposal_id == proposal_id and request.status == "pending":
+                return request
+        return None
 
     def get_evidence(self, evidence_id: str) -> EvolutionEvidence | None:
         for evidence in self.load_evidence():

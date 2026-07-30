@@ -30,6 +30,7 @@ from mewcode.evolution.models import (
     EvidenceKind,
     ProposalRisk,
     ProposalTarget,
+    SkillApprovalRequest,
     new_evolution_id,
 )
 from mewcode.evolution.store import EvolutionStore
@@ -42,6 +43,7 @@ from mewcode.skills.parser import (
     substitute_arguments,
 )
 from mewcode.tools.base import StreamEnd, StreamEvent, TextDelta, ToolCallComplete
+from mewcode.validator import VALID_SELF_EVOLUTION_APPROVAL_MODES
 
 PROJECT_MEMORY_HEADER = "### 项目知识"
 SUPPORTED_EVOLUTION_TARGETS = {"memory", "skill"}
@@ -1040,6 +1042,54 @@ class EvolutionEngine:
             return False, f"execution eval report not found for {proposal_id}"
         return True, path.read_text(encoding="utf-8")
 
+    def submit_skill_approval_request(
+        self,
+        proposal_id: str,
+        *,
+        approval_mode: str = "manual",
+        source: str = "self-evolution-review",
+    ) -> SkillApprovalRequest:
+        mode = approval_mode.strip() or "manual"
+        if mode not in VALID_SELF_EVOLUTION_APPROVAL_MODES:
+            raise ValueError(
+                "approval_mode must be one of "
+                f"{sorted(VALID_SELF_EVOLUTION_APPROVAL_MODES)}"
+            )
+        proposal = self.store.get_proposal(proposal_id)
+        if proposal is None:
+            raise ValueError(f"proposal {proposal_id} not found")
+        if proposal.target != "skill":
+            raise ValueError(f"proposal {proposal_id} is not a skill proposal")
+        if proposal.status != "proposed":
+            raise ValueError(
+                f"proposal {proposal_id} must be proposed before approval request"
+            )
+        if not self._candidate_eval_passed(proposal.id):
+            raise ValueError(f"proposal {proposal_id} must pass eval before approval request")
+        if not self._candidate_execution_eval_passed(proposal.id):
+            raise ValueError(
+                f"proposal {proposal_id} must pass execution eval before approval request"
+            )
+
+        existing = self.store.get_pending_skill_approval_request(proposal.id)
+        if existing is not None:
+            return existing
+
+        payload = self._decode_skill_change(proposal.change)
+        request = SkillApprovalRequest(
+            id=new_evolution_id("approval"),
+            proposal_id=proposal.id,
+            skill_name=str(payload["name"]),
+            approval_mode=mode,
+            candidate_skill=str(self.candidate_skill_path(proposal.id)),
+            eval_report=str(self.execution_eval_report_path(proposal.id)),
+            eval_report_markdown=str(self.execution_eval_markdown_path(proposal.id)),
+            source=source.strip() or "self-evolution-review",
+        )
+        self.store.save_skill_approval_request(request)
+        self._mark_candidate_approval_requested(proposal, request)
+        return request
+
     def _validate_memory_proposal(
         self,
         proposal: EvolutionProposal,
@@ -1281,6 +1331,10 @@ class EvolutionEngine:
             "execution_eval_markdown": existing.get("execution_eval_markdown", ""),
             "execution_eval_rounds": existing.get("execution_eval_rounds", []),
             "execution_evaluated_at": existing.get("execution_evaluated_at", 0.0),
+            "approval_request_id": existing.get("approval_request_id", ""),
+            "approval_status": existing.get("approval_status", ""),
+            "approval_mode": existing.get("approval_mode", ""),
+            "approval_requested_at": existing.get("approval_requested_at", 0.0),
         }
         self.candidate_manifest_path(proposal.id).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
@@ -1295,6 +1349,25 @@ class EvolutionEngine:
     ) -> None:
         payload = self._decode_skill_change(proposal.change)
         self._write_candidate_manifest(proposal, payload, status=status)
+
+    def _mark_candidate_approval_requested(
+        self,
+        proposal: EvolutionProposal,
+        request: SkillApprovalRequest,
+    ) -> None:
+        manifest = self._load_candidate_manifest(proposal.id)
+        if not manifest:
+            payload = self._decode_skill_change(proposal.change)
+            self._write_candidate_manifest(proposal, payload, status="candidate")
+            manifest = self._load_candidate_manifest(proposal.id)
+        manifest["approval_request_id"] = request.id
+        manifest["approval_status"] = request.status
+        manifest["approval_mode"] = request.approval_mode
+        manifest["approval_requested_at"] = request.created_at
+        self.candidate_manifest_path(proposal.id).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     def _load_candidate_manifest(self, proposal_id: str) -> dict:
         path = self.candidate_manifest_path(proposal_id)
@@ -1329,6 +1402,10 @@ class EvolutionEngine:
         manifest["execution_eval_markdown"] = ""
         manifest["execution_eval_rounds"] = []
         manifest["execution_evaluated_at"] = 0.0
+        manifest["approval_request_id"] = ""
+        manifest["approval_status"] = ""
+        manifest["approval_mode"] = ""
+        manifest["approval_requested_at"] = 0.0
         self.candidate_manifest_path(proposal.id).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

@@ -25,6 +25,7 @@ EvidenceKind = Literal[
 ProposalTarget = Literal["memory", "skill"]
 ProposalStatus = Literal["proposed", "approved", "rejected", "applied"]
 ProposalRisk = Literal["low", "medium", "high"]
+SkillApprovalStatus = Literal["pending", "approved", "rejected"]
 
 
 def new_evolution_id(prefix: str) -> str:
@@ -124,3 +125,53 @@ class EvolutionValidation:
     ok: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SkillApprovalRequest:
+    id: str
+    proposal_id: str
+    skill_name: str
+    approval_mode: str
+    candidate_skill: str
+    eval_report: str
+    eval_report_markdown: str
+    source: str = "self-evolution-review"
+    status: SkillApprovalStatus = "pending"
+    created_at: float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "proposal_id": self.proposal_id,
+            "skill_name": self.skill_name,
+            "approval_mode": self.approval_mode,
+            "candidate_skill": self.candidate_skill,
+            "eval_report": self.eval_report,
+            "eval_report_markdown": self.eval_report_markdown,
+            "source": self.source,
+            "status": self.status,
+            "created_at": self.created_at,
+        }
+
+    def to_jsonl(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SkillApprovalRequest":
+        return cls(
+            id=data["id"],
+            proposal_id=data["proposal_id"],
+            skill_name=data["skill_name"],
+            approval_mode=data["approval_mode"],
+            candidate_skill=data["candidate_skill"],
+            eval_report=data["eval_report"],
+            eval_report_markdown=data["eval_report_markdown"],
+            source=data.get("source", "self-evolution-review"),
+            status=data.get("status", "pending"),
+            created_at=data.get("created_at", 0.0),
+        )
+
+    @classmethod
+    def from_jsonl(cls, line: str) -> "SkillApprovalRequest":
+        return cls.from_dict(json.loads(line))

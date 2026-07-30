@@ -76,6 +76,7 @@ def main() -> None:
         worktree_config=config.worktree,
         teammate_mode=config.teammate_mode,
         enable_coordinator_mode=config.enable_coordinator_mode,
+        self_evolution_config=config.self_evolution,
         driver_class=NoAltScreenDriver,
     )
     app.run()
@@ -189,6 +190,7 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
     conv = ConversationManager()
     last_result = await agent.run_to_completion(prompt, conv)
     print(last_result, flush=True)
+    _run_self_evolution_review(work_dir, config.self_evolution)
 
     if not team_manager._teams:
         return
@@ -212,8 +214,24 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
             "Teammate notifications received. Process them and continue.", conv
         )
         print(last_result, flush=True)
+        _run_self_evolution_review(work_dir, config.self_evolution)
+
+
+def _run_self_evolution_review(work_dir: str, self_evolution_config) -> None:
+    from mewcode.evolution.auto_review import (
+        format_review_notification,
+        review_ready_skill_candidates,
+    )
+
+    try:
+        result = review_ready_skill_candidates(work_dir, self_evolution_config)
+    except Exception as exc:
+        logging.getLogger(__name__).debug("Self-evolution review failed: %s", exc)
+        return
+    message = format_review_notification(result)
+    if message:
+        print(message, file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":
     main()
-

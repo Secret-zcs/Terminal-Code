@@ -37,6 +37,11 @@ self_evolution:
 - `mewcode/commands/handlers/__init__.py`：普通命令注册表不再注册 `/evolve` 和 `/learn`。
 - `mewcode/commands/handlers/evolve.py`：删除 `add-eval-case-json` 命令层入口。
 - `README.md`：把自进化说明从命令驱动改成配置驱动。
+- `mewcode/evolution/models.py`：新增 `SkillApprovalRequest`，记录待用户审批的 candidate skill。
+- `mewcode/evolution/store.py`：新增 `approval_requests.jsonl` 的读写与 pending request 查询。
+- `mewcode/evolution/engine.py`：新增 `submit_skill_approval_request()`，只为已通过 eval 和 execution eval 的 proposed skill candidate 创建审批申请。
+- `mewcode/evolution/auto_review.py`：新增自动扫描器，开启自进化时把 ready candidate 提交为 pending approval request。
+- `mewcode/app.py`、`mewcode/__main__.py`：在 TUI 轮次结束和 `mewcode -p` 执行结束后触发自动 review，并只展示申请提示，不审批、不 promote。
 
 ## 为什么保留 Engine 内部能力
 
@@ -76,6 +81,47 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolveCommand::test_add_eval_ca
 1 passed
 ```
 
+审批队列追加红灯：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_records_pending_request -q
+1 failed  # 实现前红灯：EvolutionEngine 尚无 submit_skill_approval_request
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_requires_execution_eval -q
+1 failed  # 实现前红灯：缺少审批申请 API
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_disabled_skips_ready_candidates tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once -q
+2 failed  # 实现前红灯：缺少 mewcode.evolution.auto_review
+```
+
+审批队列实现后绿色：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_records_pending_request tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_requires_execution_eval tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_disabled_skips_ready_candidates tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once -q
+4 passed
+```
+
+审批队列扩展验证：
+
+```text
+python3 -m py_compile mewcode/evolution/models.py mewcode/evolution/store.py mewcode/evolution/engine.py mewcode/evolution/auto_review.py mewcode/evolution/__init__.py mewcode/app.py mewcode/__main__.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+55 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+236 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次审批申请队列无直接关系。
+
 扩展验证：
 
 ```text
@@ -96,8 +142,7 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 ## 剩余工作
 
-- 把 `self_evolution.enabled` 接入会话结束或任务完成后的自动 review 触发点。
 - 实现自动候选 skill 抽取：由系统读取对话轨迹、工具结果、用户纠正和失败记录生成 proposal。
-- 实现审批申请视图：展示 skill diff、评测 case、execution eval 报告和推荐结论。
+- 实现审批申请视图：展示 skill diff、评测 case、execution eval 报告和推荐结论，并让用户审批或拒绝。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。

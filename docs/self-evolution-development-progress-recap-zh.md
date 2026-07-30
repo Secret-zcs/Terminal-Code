@@ -991,3 +991,66 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 用户不再需要手写 skill、eval case 或 JSON case。
 - 不存在 `auto` 审批模式；自进化 skill 必须先通过评测并获得用户审批。
 - 下一步是把 `self_evolution.enabled` 接入会话/任务结束后的自动 review 触发点，并实现审批申请队列。
+
+## 20. 最新推进记录：自动 Review 触发点与审批申请队列
+
+日期：2026-07-30
+
+本次补齐配置驱动自进化后的第一段自动化闭环：当 `self_evolution.enabled=true` 时，系统会扫描已经通过静态 eval 和 execution eval 的 skill candidate，并把它们提交为 pending approval request。该流程只创建审批申请，不 approve、不 promote、不写正式 skill。
+
+修改内容：
+
+- 修改 `mewcode/evolution/models.py`：新增 `SkillApprovalRequest`。
+- 修改 `mewcode/evolution/store.py`：新增 `.mewcode/evolution/approval_requests.jsonl` 持久化。
+- 修改 `mewcode/evolution/engine.py`：新增 `submit_skill_approval_request()`，要求 proposal 为 `proposed`、target 为 `skill`、静态 eval 通过、execution eval 通过。
+- 新增 `mewcode/evolution/auto_review.py`：新增 `review_ready_skill_candidates()` 和 `format_review_notification()`。
+- 修改 `mewcode/app.py`：TUI 每轮 `LoopComplete` 后触发自动 review，有申请时展示提示。
+- 修改 `mewcode/__main__.py`：非交互 `mewcode -p` 执行结束和 teammate notification 续跑结束后触发自动 review，有申请时输出到 stderr。
+- 修改 `tests/test_evolution.py`：新增审批申请、execution eval 门禁、配置关闭跳过和幂等扫描测试。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：记录本次变更。
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_records_pending_request -q
+1 failed  # 实现前红灯：EvolutionEngine 尚无 submit_skill_approval_request
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_requires_execution_eval -q
+1 failed  # 实现前红灯：缺少审批申请 API
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_disabled_skips_ready_candidates tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once -q
+2 failed  # 实现前红灯：缺少 mewcode.evolution.auto_review
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_records_pending_request tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_requires_execution_eval tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_disabled_skips_ready_candidates tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once -q
+4 passed
+```
+
+扩展验证记录：
+
+```text
+python3 -m py_compile mewcode/evolution/models.py mewcode/evolution/store.py mewcode/evolution/engine.py mewcode/evolution/auto_review.py mewcode/evolution/__init__.py mewcode/app.py mewcode/__main__.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+55 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+236 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次审批申请队列无直接关系。
+
+边界说明：
+
+- 已实现：ready candidate 会生成 pending approval request，并把 request id 写回 candidate manifest。
+- 已实现：重复扫描不会重复创建 pending request。
+- 已实现：配置关闭时自动 review 不写任何文件。
+- 未实现：还没有真正的审批 UI，当前只是持久化申请并提示用户。
+- 未实现：还没有自动从对话轨迹蒸馏 candidate skill；当前扫描的是已有 candidate。
+- 下一步：实现自动候选 skill 抽取和审批视图。
