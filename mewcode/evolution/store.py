@@ -54,6 +54,30 @@ class EvolutionStore:
                 return request
         return None
 
+    def get_skill_approval_request(
+        self, request_id: str
+    ) -> SkillApprovalRequest | None:
+        for request in self.load_skill_approval_requests():
+            if request.id == request_id:
+                return request
+        return None
+
+    def update_skill_approval_request(self, updated: SkillApprovalRequest) -> None:
+        with self._lock:
+            requests = self.load_skill_approval_requests()
+            replaced = False
+            for i, request in enumerate(requests):
+                if request.id == updated.id:
+                    requests[i] = updated
+                    replaced = True
+                    break
+            if not replaced:
+                requests.append(updated)
+            self._rewrite(
+                self.skill_approval_requests_path,
+                [request.to_jsonl() for request in requests],
+            )
+
     def get_evidence(self, evidence_id: str) -> EvolutionEvidence | None:
         for evidence in self.load_evidence():
             if evidence.id == evidence_id:

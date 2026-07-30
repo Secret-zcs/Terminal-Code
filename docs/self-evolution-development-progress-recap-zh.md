@@ -1054,3 +1054,64 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 未实现：还没有真正的审批 UI，当前只是持久化申请并提示用户。
 - 未实现：还没有自动从对话轨迹蒸馏 candidate skill；当前扫描的是已有 candidate。
 - 下一步：实现自动候选 skill 抽取和审批视图。
+
+## 21. 最新推进记录：审批申请 Resolve 状态机
+
+日期：2026-07-30
+
+本次补齐 pending approval request 的后半段状态机。上一阶段只能把 ready candidate skill 排入审批队列；现在系统内部已经能处理用户批准或拒绝，并把结果同步写回审批记录和 candidate manifest。
+
+修改内容：
+
+- 修改 `mewcode/evolution/models.py`：`SkillApprovalRequest` 新增 `resolved_at`、`reviewer`、`resolution_reason` 和 `result_path`。
+- 修改 `mewcode/evolution/store.py`：新增 `get_skill_approval_request()` 和 `update_skill_approval_request()`，支持按 request id 查询和覆盖更新。
+- 修改 `mewcode/evolution/engine.py`：新增 `resolve_skill_approval_request()`。批准时执行 `approve -> promote`，拒绝时执行 `reject`，两条路径都会更新审批状态。
+- 修改 `mewcode/evolution/engine.py`：新增 `_mark_candidate_approval_resolved()`，把 `approval_status`、处理人、理由、结果路径写回 candidate manifest。
+- 修改 `tests/test_evolution.py`：新增批准后正式 skill 落地、拒绝后正式 skill 不落地的行为测试。
+- 修改 `docs/self-evolution-config-approval-recap-zh.md` 和本文档：记录本次 TDD、实现边界和验证结果。
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_resolve_skill_approval_request_approved_promotes_candidate -q
+1 failed  # 实现前红灯：EvolutionEngine 尚无 resolve_skill_approval_request
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_resolve_skill_approval_request_rejected_rejects_without_promote -q
+1 failed  # 实现前红灯：无法拒绝审批并阻止正式 skill 落地
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_resolve_skill_approval_request_approved_promotes_candidate -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_resolve_skill_approval_request_rejected_rejects_without_promote -q
+1 passed
+```
+
+验证记录：
+
+```text
+python3 -m py_compile mewcode/evolution/models.py mewcode/evolution/store.py mewcode/evolution/engine.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+57 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+238 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次审批申请 Resolve 无直接关系。
+
+边界说明：
+
+- 已实现：审批记录可以从 `pending` 转为 `approved` 或 `rejected`。
+- 已实现：批准后才 promote 到 `.mewcode/skills/<name>/SKILL.md`。
+- 已实现：拒绝不会写正式 skill，并会把 proposal 标记为 `rejected`。
+- 已实现：candidate manifest 会记录审批结果，便于后续 UI 展示和审计。
+- 未实现：用户可见审批视图/API；当前能力仍是 Engine 内部状态机。
+- 下一步：实现审批列表与详情展示，展示 candidate diff、execution eval 报告、测试结果和批准/拒绝入口。

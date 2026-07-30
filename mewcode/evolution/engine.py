@@ -1090,6 +1090,52 @@ class EvolutionEngine:
         self._mark_candidate_approval_requested(proposal, request)
         return request
 
+    def resolve_skill_approval_request(
+        self,
+        request_id: str,
+        *,
+        approved: bool,
+        reviewer: str = "user",
+        reason: str = "",
+    ) -> tuple[bool, str]:
+        request = self.store.get_skill_approval_request(request_id)
+        if request is None:
+            return False, f"approval request {request_id} not found"
+        if request.status != "pending":
+            return False, f"approval request {request_id} is already {request.status}"
+
+        proposal = self.store.get_proposal(request.proposal_id)
+        if proposal is None:
+            return False, f"proposal {request.proposal_id} not found"
+
+        request.reviewer = reviewer.strip() or "user"
+        request.resolution_reason = reason.strip()
+        request.resolved_at = time.time()
+
+        if not approved:
+            request.status = "rejected"
+            self.store.update_skill_approval_request(request)
+            self.reject(proposal.id)
+            self._mark_candidate_approval_resolved(proposal.id, request)
+            return True, f"approval request {request.id} rejected"
+
+        request.status = "approved"
+        approved_proposal = self.approve(proposal.id)
+        if approved_proposal is None:
+            return False, f"proposal {proposal.id} not found"
+        ok, message = self.promote(proposal.id)
+        if not ok:
+            request.status = "pending"
+            request.resolved_at = 0.0
+            self.store.update_skill_approval_request(request)
+            self._mark_candidate_approval_requested(proposal, request)
+            return False, message
+
+        request.result_path = message
+        self.store.update_skill_approval_request(request)
+        self._mark_candidate_approval_resolved(proposal.id, request)
+        return True, f"approval request {request.id} approved and promoted to {message}"
+
     def _validate_memory_proposal(
         self,
         proposal: EvolutionProposal,
@@ -1365,6 +1411,26 @@ class EvolutionEngine:
         manifest["approval_mode"] = request.approval_mode
         manifest["approval_requested_at"] = request.created_at
         self.candidate_manifest_path(proposal.id).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _mark_candidate_approval_resolved(
+        self,
+        proposal_id: str,
+        request: SkillApprovalRequest,
+    ) -> None:
+        manifest = self._load_candidate_manifest(proposal_id)
+        if not manifest:
+            return
+        manifest["approval_request_id"] = request.id
+        manifest["approval_status"] = request.status
+        manifest["approval_mode"] = request.approval_mode
+        manifest["approval_resolved_at"] = request.resolved_at
+        manifest["approval_reviewer"] = request.reviewer
+        manifest["approval_reason"] = request.resolution_reason
+        manifest["approval_result_path"] = request.result_path
+        self.candidate_manifest_path(proposal_id).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )

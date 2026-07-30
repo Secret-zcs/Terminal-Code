@@ -43,6 +43,29 @@ self_evolution:
 - `mewcode/evolution/auto_review.py`：新增自动扫描器，开启自进化时把 ready candidate 提交为 pending approval request。
 - `mewcode/app.py`、`mewcode/__main__.py`：在 TUI 轮次结束和 `mewcode -p` 执行结束后触发自动 review，并只展示申请提示，不审批、不 promote。
 
+## 审批申请 Resolve
+
+本次继续补齐审批申请的处理状态机：系统已有 pending approval request 后，用户审批结果会被写回 `approval_requests.jsonl` 和 candidate manifest。批准时才会执行 `approve -> promote`，拒绝时只会 reject proposal，不会写入正式 skill。
+
+新增字段：
+
+- `resolved_at`：审批处理时间戳。
+- `reviewer`：处理人，默认 `user`。
+- `resolution_reason`：批准或拒绝理由。
+- `result_path`：批准并 promote 后的正式 skill 路径。
+
+新增实现：
+
+- `mewcode/evolution/store.py`：新增 `get_skill_approval_request()` 和 `update_skill_approval_request()`，支持按 request id 查询和覆盖更新。
+- `mewcode/evolution/engine.py`：新增 `resolve_skill_approval_request()`，统一处理批准/拒绝。
+- `mewcode/evolution/engine.py`：新增 `_mark_candidate_approval_resolved()`，把审批结果同步写回 candidate manifest。
+- `tests/test_evolution.py`：新增批准后 promote、拒绝后不 promote 的行为测试。
+
+边界：
+
+- 该接口是系统内部审批处理能力，不重新暴露 `/evolve` 手动命令。
+- 当前仍缺用户可见审批视图；后续 UI/API 只应调用该状态机，不应绕过评测门禁或直接 promote。
+
 ## 为什么保留 Engine 内部能力
 
 删除用户命令不等于删除评测能力。`EvolutionEngine.add_eval_case()` 仍保留 `workspace_files`、`scripted_agent_turns`、`expected_files` 和 `execution_runner="agent_loop_scripted"` 等内部字段，因为自动自进化仍需要它们构造可回放任务评测。
@@ -122,6 +145,47 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次审批申请队列无直接关系。
 
+审批 Resolve 红灯：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_resolve_skill_approval_request_approved_promotes_candidate -q
+1 failed  # 实现前红灯：EvolutionEngine 尚无 resolve_skill_approval_request
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_resolve_skill_approval_request_rejected_rejects_without_promote -q
+1 failed  # 实现前红灯：无法处理审批拒绝并保持正式 skill 不落地
+```
+
+审批 Resolve 实现后绿色：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_resolve_skill_approval_request_approved_promotes_candidate -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_resolve_skill_approval_request_rejected_rejects_without_promote -q
+1 passed
+```
+
+审批 Resolve 扩展验证：
+
+```text
+python3 -m py_compile mewcode/evolution/models.py mewcode/evolution/store.py mewcode/evolution/engine.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+57 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+238 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次审批申请 Resolve 无直接关系。
+
 扩展验证：
 
 ```text
@@ -143,6 +207,6 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 ## 剩余工作
 
 - 实现自动候选 skill 抽取：由系统读取对话轨迹、工具结果、用户纠正和失败记录生成 proposal。
-- 实现审批申请视图：展示 skill diff、评测 case、execution eval 报告和推荐结论，并让用户审批或拒绝。
+- 实现审批申请视图或 API：展示 skill diff、评测 case、execution eval 报告、推荐结论和 approve/reject 入口，并调用 `resolve_skill_approval_request()`。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。

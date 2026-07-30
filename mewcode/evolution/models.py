@@ -139,6 +139,10 @@ class SkillApprovalRequest:
     source: str = "self-evolution-review"
     status: SkillApprovalStatus = "pending"
     created_at: float = field(default_factory=time.time)
+    resolved_at: float = 0.0
+    reviewer: str = ""
+    resolution_reason: str = ""
+    result_path: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -152,6 +156,10 @@ class SkillApprovalRequest:
             "source": self.source,
             "status": self.status,
             "created_at": self.created_at,
+            "resolved_at": self.resolved_at,
+            "reviewer": self.reviewer,
+            "resolution_reason": self.resolution_reason,
+            "result_path": self.result_path,
         }
 
     def to_jsonl(self) -> str:
@@ -170,6 +178,10 @@ class SkillApprovalRequest:
             source=data.get("source", "self-evolution-review"),
             status=data.get("status", "pending"),
             created_at=data.get("created_at", 0.0),
+            resolved_at=data.get("resolved_at", 0.0),
+            reviewer=data.get("reviewer", ""),
+            resolution_reason=data.get("resolution_reason", ""),
+            result_path=data.get("result_path", ""),
         )
 
     @classmethod

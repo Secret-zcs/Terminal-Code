@@ -724,6 +724,67 @@ class TestEvolutionEngine:
 
         assert engine.store.load_skill_approval_requests() == []
 
+    def test_resolve_skill_approval_request_approved_promotes_candidate(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        request = engine.submit_skill_approval_request(proposal.id)
+
+        ok, message = engine.resolve_skill_approval_request(
+            request.id,
+            approved=True,
+            reviewer="user",
+            reason="评测通过，允许启用。",
+        )
+
+        assert ok, message
+        assert "promoted" in message
+        stored = engine.store.get_skill_approval_request(request.id)
+        assert stored is not None
+        assert stored.status == "approved"
+        assert stored.reviewer == "user"
+        assert stored.resolution_reason == "评测通过，允许启用。"
+        assert stored.resolved_at > 0
+        skill_path = tmp_path / ".mewcode" / "skills" / "debug-regression-loop" / "SKILL.md"
+        assert skill_path.exists()
+        assert parse_skill_file(skill_path).name == "debug-regression-loop"
+        assert engine.store.get_proposal(proposal.id).status == "applied"
+        manifest = json.loads(
+            engine.candidate_manifest_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert manifest["status"] == "enabled"
+        assert manifest["approval_status"] == "approved"
+
+    def test_resolve_skill_approval_request_rejected_rejects_without_promote(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        request = engine.submit_skill_approval_request(proposal.id)
+
+        ok, message = engine.resolve_skill_approval_request(
+            request.id,
+            approved=False,
+            reviewer="user",
+            reason="范围太宽，不启用。",
+        )
+
+        assert ok, message
+        assert "rejected" in message
+        stored = engine.store.get_skill_approval_request(request.id)
+        assert stored is not None
+        assert stored.status == "rejected"
+        assert stored.resolution_reason == "范围太宽，不启用。"
+        assert engine.store.get_proposal(proposal.id).status == "rejected"
+        assert not (
+            tmp_path / ".mewcode" / "skills" / "debug-regression-loop" / "SKILL.md"
+        ).exists()
+        manifest = json.loads(
+            engine.candidate_manifest_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert manifest["approval_status"] == "rejected"
+
     def test_self_evolution_review_disabled_skips_ready_candidates(
         self, tmp_path: Path
     ) -> None:
