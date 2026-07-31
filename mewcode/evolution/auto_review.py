@@ -42,12 +42,14 @@ def review_ready_skill_candidates(
             "generated_eval_cases": [],
             "generated_evaluations": [],
             "generated_execution_evals": [],
+            "ingested_usage": [],
         }
 
     approval_mode = getattr(self_evolution_config, "skill_approval_mode", "manual")
     engine = EvolutionEngine(project_root)
     requests = []
     skipped: list[dict] = []
+    ingested_usage = _ingest_evidence_as_skill_usage(engine)
 
     for proposal in engine.store.load_proposals():
         if proposal.target != "skill":
@@ -111,7 +113,62 @@ def review_ready_skill_candidates(
         "generated_eval_cases": generated_eval_cases,
         "generated_evaluations": generated_evaluations,
         "generated_execution_evals": generated_execution_evals,
+        "ingested_usage": ingested_usage,
     }
+
+
+def _ingest_evidence_as_skill_usage(engine: EvolutionEngine) -> list[str]:
+    ingested: list[str] = []
+    seen_evidence_ids = _skill_usage_evidence_ids(engine)
+    for evidence in engine.store.load_evidence():
+        if evidence.kind not in {"failure", "user_feedback"}:
+            continue
+        if evidence.source == "skill-usage":
+            continue
+        if evidence.id in seen_evidence_ids:
+            continue
+        skill_name = _evidence_skill_name(evidence.metadata)
+        if not skill_name or not engine.has_project_skill(skill_name):
+            continue
+        summary = _evidence_summary(evidence.summary, evidence.metadata)
+        record = engine.record_skill_usage(
+            skill_name,
+            event=evidence.kind,
+            source=f"evidence:{evidence.source}",
+            metadata={
+                "summary": summary,
+                "evidence_id": evidence.id,
+                "evidence_source": evidence.source,
+            },
+        )
+        seen_evidence_ids.add(evidence.id)
+        ingested.append(str(record["id"]))
+    return ingested
+
+
+def _skill_usage_evidence_ids(engine: EvolutionEngine) -> set[str]:
+    evidence_ids: set[str] = set()
+    for record in engine.load_skill_usage():
+        metadata = record.get("metadata", {})
+        if isinstance(metadata, dict):
+            evidence_id = str(metadata.get("evidence_id", "")).strip()
+            if evidence_id:
+                evidence_ids.add(evidence_id)
+    return evidence_ids
+
+
+def _evidence_skill_name(metadata: dict) -> str:
+    if not isinstance(metadata, dict):
+        return ""
+    return str(metadata.get("skill_name") or metadata.get("skill") or "").strip()
+
+
+def _evidence_summary(summary: str, metadata: dict) -> str:
+    if isinstance(metadata, dict):
+        metadata_summary = str(metadata.get("summary", "")).strip()
+        if metadata_summary:
+            return metadata_summary
+    return summary.strip()
 
 
 def _generate_usage_patch_candidates(

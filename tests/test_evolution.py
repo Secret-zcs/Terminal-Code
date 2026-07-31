@@ -953,6 +953,97 @@ class TestEvolutionEngine:
         assert "错误地跳过复盘文档" in payload["body"]
         assert "用户纠正：遗漏验证" in payload["body"]
 
+    def test_self_evolution_review_ingests_evidence_as_skill_usage(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        first = engine.record_evidence(
+            "工具失败：review-loop 错误地跳过复盘文档。",
+            kind="failure",
+            source="tool-trace",
+            metadata={"skill_name": "review-loop"},
+        )
+        second = engine.record_evidence(
+            "用户纠正：review-loop 遗漏验证。",
+            kind="user_feedback",
+            source="conversation",
+            metadata={"skill_name": "review-loop"},
+        )
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+
+        usage = EvolutionEngine(tmp_path).load_skill_usage()
+        assert [record["metadata"]["evidence_id"] for record in usage] == [
+            first.id,
+            second.id,
+        ]
+        assert result["ingested_usage"] == [record["id"] for record in usage]
+        assert result["generated_candidates"]
+        assert len(result["requests"]) == 1
+
+    def test_self_evolution_review_does_not_reingest_same_evidence_usage(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_evidence(
+            "工具失败：review-loop 错误地跳过复盘文档。",
+            kind="failure",
+            source="tool-trace",
+            metadata={"skill_name": "review-loop"},
+        )
+        engine.record_evidence(
+            "用户纠正：review-loop 遗漏验证。",
+            kind="user_feedback",
+            source="conversation",
+            metadata={"skill_name": "review-loop"},
+        )
+
+        first = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+        second = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+
+        assert len(EvolutionEngine(tmp_path).load_skill_usage()) == 2
+        assert len(first["ingested_usage"]) == 2
+        assert second["ingested_usage"] == []
+
     def test_self_evolution_review_does_not_duplicate_usage_patch_candidate(
         self, tmp_path: Path
     ) -> None:

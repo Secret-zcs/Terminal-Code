@@ -1693,3 +1693,75 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 扩展自动候选来源，从显式 skill usage log 扩展到对话轨迹、工具错误、用户纠正和复盘遗漏。
 - 增强 TUI 审批展示，让用户能同时看到 usage feedback、eval cases、deterministic eval 和 execution eval 报告。
 - 补齐审批拒绝路径和 `manual/deferred` 文案差异测试，但继续禁止自动 promote。
+
+## 31. 最新推进记录：Evidence 自动归因到 Skill Usage
+
+日期：2026-07-31
+
+本次开始扩展候选 skill 的来源，不再只依赖显式 `skill_usage.jsonl`。自动 review 现在会扫描 evolution evidence；当 evidence 是 `failure` 或 `user_feedback`，并且 metadata 明确标注 `skill_name` 或 `skill`，且该 skill 是项目级正式 skill 时，会自动转成负向 skill usage。后续沿用已经完成的 patch candidate、eval、execution eval 和 approval request 闭环。
+
+修改内容：
+
+- 修改 `mewcode/evolution/auto_review.py`：新增 `ingested_usage` 返回字段。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_ingest_evidence_as_skill_usage()`，把结构化 evidence 转成 usage。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_skill_usage_evidence_ids()`，通过 `metadata.evidence_id` 做幂等去重。
+- 修改 `mewcode/evolution/auto_review.py`：跳过 `source=skill-usage` 的内部 evidence，避免系统把自己生成 patch 的证据再次摄入，形成自反馈循环。
+- 修改 `tests/test_evolution.py`：新增 evidence 自动摄入测试和重复 review 不重复摄入测试。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：记录本次来源扩展和验证结果。
+
+当前链路：
+
+```text
+structured evidence failure/user_feedback + metadata.skill_name
+-> auto_review ingests as skill usage
+-> usage threshold
+-> patch proposal
+-> eval cases
+-> deterministic eval
+-> execution eval
+-> pending approval request
+```
+
+关键边界：
+
+- 已实现：对话/工具/用户纠正只要以 evidence 形式记录且明确标注 skill，就能进入自进化闭环。
+- 已实现：不从自由文本猜 skill，避免错误归因。
+- 已实现：同一个 evidence 只摄入一次。
+- 已实现：跳过系统内部 `skill-usage` evidence，避免自反馈放大。
+- 未实现：从原始 conversation/tool trace 中自动抽取结构化 evidence。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_ingests_evidence_as_skill_usage tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_reingest_same_evidence_usage -q
+2 failed  # 实现前红灯：没有 evidence -> usage 摄入逻辑
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_ingests_evidence_as_skill_usage tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_reingest_same_evidence_usage -q
+1 failed, 1 passed  # 暴露 source=skill-usage 内部 evidence 被二次摄入
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_ingests_evidence_as_skill_usage tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_reingest_same_evidence_usage -q
+2 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+72 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+255 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 evidence 自动归因无直接关系。
+
+下一步计划：
+
+- 实现从 agent/tool 运行结果自动记录结构化 evidence，优先覆盖工具失败和用户纠正。
+- 为 evidence ingestion 增加来源统计，让审批页能展示 candidate 来自哪些任务证据。
+- 保持自动 promote 禁止不变，所有生成 skill 仍必须经用户审批。

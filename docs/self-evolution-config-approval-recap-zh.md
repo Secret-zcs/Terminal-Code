@@ -618,9 +618,59 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 approval request 自动创建无直接关系。
 
+## Evidence 自动归因到 Skill Usage
+
+本次开始扩展自动候选来源。系统不再只依赖显式 `skill_usage.jsonl`；当 evolution evidence 是 `failure` 或 `user_feedback`，并且 metadata 明确标注 `skill_name` 或 `skill`，且目标是项目级正式 skill 时，auto review 会把 evidence 转成负向 skill usage，再进入已有的 candidate/eval/execution eval/approval request 闭环。
+
+新增实现：
+
+- `mewcode/evolution/auto_review.py`：新增 `ingested_usage` 返回字段。
+- `mewcode/evolution/auto_review.py`：新增 `_ingest_evidence_as_skill_usage()`，负责结构化 evidence 到 skill usage 的归因。
+- `mewcode/evolution/auto_review.py`：新增 `_skill_usage_evidence_ids()`，通过 `metadata.evidence_id` 做幂等去重。
+- `mewcode/evolution/auto_review.py`：跳过 `source=skill-usage` 的内部 evidence，避免系统自反馈循环。
+- `tests/test_evolution.py`：覆盖 evidence 自动摄入和重复 review 不重复摄入。
+
+审批边界：
+
+- 系统只接受 metadata 明确标注的 skill，不从自由文本猜测 skill 名称。
+- evidence 必须指向已有项目级正式 skill，否则不会摄入。
+- 同一 evidence 只摄入一次。
+- 内部 `skill-usage` evidence 不会再次变成 usage，避免自我放大。
+- 摄入后仍必须经过 eval case、deterministic eval、execution eval 和用户审批，不能自动 promote。
+
+TDD 与验证：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_ingests_evidence_as_skill_usage tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_reingest_same_evidence_usage -q
+2 failed  # 实现前红灯：没有 evidence -> usage 摄入逻辑
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_ingests_evidence_as_skill_usage tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_reingest_same_evidence_usage -q
+1 failed, 1 passed  # 暴露 source=skill-usage 内部 evidence 被二次摄入
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_ingests_evidence_as_skill_usage tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_reingest_same_evidence_usage -q
+2 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+72 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+255 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 evidence 自动归因无直接关系。
+
 ## 剩余工作
 
-- 扩展自动候选 skill 抽取：从当前显式 usage log 扩展到对话轨迹、工具结果、用户纠正和失败记录。
+- 从 agent/tool 运行结果自动记录结构化 evidence，优先覆盖工具失败和用户纠正。
 - 完善用户可见审批入口：补拒绝路径 UI 测试、manual/deferred 差异化展示和批量审批队列视图。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。
