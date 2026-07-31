@@ -1418,3 +1418,72 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 增加一个受控门禁：只有 high-quality 且覆盖全部 usage feedback 的建议，才允许自动写入 eval case。
 - 自动写入 eval case 后触发 deterministic eval，继续保持 execution eval 和用户审批强制门禁。
 - 在 TUI 审批或 review 提示中展示 `generated_candidate_reviews`，让用户看到“系统为什么认为这个 skill 应该进化”。
+
+## 27. 最新推进记录：受控物化 Eval Case
+
+日期：2026-07-31
+
+本次把阶段 26 的只读 eval 建议摘要推进为受控写入。自动 review 在生成 usage-driven patch proposal 后，会先评估建议质量；只有建议没有 warnings、没有 uncovered usage feedback、数量达到 `MIN_EXECUTION_EVAL_CASES=3`、且不存在 low-quality suggestion 时，才会把 suggestions 写入正式 eval case 文件。
+
+修改内容：
+
+- 修改 `mewcode/evolution/auto_review.py`：新增 `generated_eval_cases` 返回字段。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_materialize_safe_eval_suggestions()`，负责把安全建议写入 eval cases。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_review_is_safe_to_materialize()`，集中执行 warnings、coverage、数量和质量门禁。
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_materializes_safe_eval_suggestions`，验证安全建议会写入 3 条 eval case。
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions`，验证覆盖不足时不写入 eval case。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：记录本次边界和验证结果。
+
+当前链路：
+
+```text
+skill usage failure/user_feedback
+-> auto_review 生成 patch proposal
+-> review_eval_case_suggestions 生成建议摘要
+-> gate: no warnings + no uncovered feedback + >=3 cases + no low quality
+-> add_eval_case 写入 eval case
+-> 仍不跑 execution eval，不提交审批，不 promote
+```
+
+关键边界：
+
+- 已实现：自动生成 candidate 后可自动写入合格 eval case。
+- 已实现：覆盖不足或 warning 存在时不会写入 eval case。
+- 已实现：该阶段仍不会提交 approval request，避免未通过 execution eval 的 skill 出现在审批面。
+- 未实现：自动触发 deterministic eval、execution eval 和审批申请。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_materializes_safe_eval_suggestions -q
+1 failed  # 实现前红灯：结果缺少 generated_eval_cases，未写入 eval case
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_materializes_safe_eval_suggestions -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_returns_eval_suggestions_for_generated_patch tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_materializes_safe_eval_suggestions tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_creates_usage_patch_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_duplicate_usage_patch_candidate -q
+5 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+67 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+250 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 eval case 受控物化无直接关系。
+
+下一步计划：
+
+- 在 eval case 自动写入后触发 deterministic eval，并把 eval 结果写入 auto review 返回值。
+- deterministic eval 通过后再触发 execution eval，满足“候选 skill 正确执行多轮任务后才提交审批”。
+- 扩展 TUI 展示，让用户看到 candidate、eval case、eval report 和 execution eval report 的完整证据链。

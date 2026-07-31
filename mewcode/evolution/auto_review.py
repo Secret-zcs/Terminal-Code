@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mewcode.evolution.engine import EvolutionEngine
+from mewcode.evolution.engine import EvolutionEngine, MIN_EXECUTION_EVAL_CASES
 
 
 def format_review_notification(result: dict) -> str:
@@ -39,6 +39,7 @@ def review_ready_skill_candidates(
             "skipped": [],
             "generated_candidates": [],
             "generated_candidate_reviews": [],
+            "generated_eval_cases": [],
         }
 
     approval_mode = getattr(self_evolution_config, "skill_approval_mode", "manual")
@@ -71,6 +72,10 @@ def review_ready_skill_candidates(
     generated_candidates, generated_candidate_reviews = (
         _generate_usage_patch_candidates(engine)
     )
+    generated_eval_cases = _materialize_safe_eval_suggestions(
+        engine,
+        generated_candidate_reviews,
+    )
 
     return {
         "status": (
@@ -84,6 +89,7 @@ def review_ready_skill_candidates(
         "skipped": skipped,
         "generated_candidates": generated_candidates,
         "generated_candidate_reviews": generated_candidate_reviews,
+        "generated_eval_cases": generated_eval_cases,
     }
 
 
@@ -119,3 +125,50 @@ def _has_open_patch_candidate(engine: EvolutionEngine, skill_name: str) -> bool:
         if payload.get("action") == "patch" and payload.get("name") == skill_name:
             return True
     return False
+
+
+def _materialize_safe_eval_suggestions(
+    engine: EvolutionEngine,
+    reviews: list[dict],
+) -> list[dict]:
+    generated: list[dict] = []
+    for review in reviews:
+        suggestions = list(review.get("suggestions", []))
+        if not _review_is_safe_to_materialize(review, suggestions):
+            continue
+        case_ids = []
+        for suggestion in suggestions:
+            case_ids.append(
+                engine.add_eval_case(
+                    str(review["proposal_id"]),
+                    task=str(suggestion["task"]),
+                    must_contain=list(suggestion["must_contain"]),
+                    must_not_contain=list(suggestion.get("must_not_contain", [])),
+                )
+            )
+        generated.append({
+            "proposal_id": review["proposal_id"],
+            "skill_name": review["skill_name"],
+            "case_ids": case_ids,
+        })
+    return generated
+
+
+def _review_is_safe_to_materialize(
+    review: dict,
+    suggestions: list[dict],
+) -> bool:
+    if review.get("warnings"):
+        return False
+    if review.get("uncovered_usage_feedback"):
+        return False
+    if len(suggestions) < MIN_EXECUTION_EVAL_CASES:
+        return False
+    for suggestion in suggestions:
+        if suggestion.get("quality") == "low":
+            return False
+        if not suggestion.get("must_contain"):
+            return False
+        if not str(suggestion.get("task", "")).strip():
+            return False
+    return True

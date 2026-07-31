@@ -426,10 +426,58 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 eval 建议摘要返回无直接关系。
 
+## 受控物化 Eval Case
+
+本次把上一阶段的只读 eval 建议升级为受控写入。自动 review 只有在建议质量和覆盖都满足门禁时，才会把 suggestions 写入 eval case 文件，为后续 deterministic eval 和 execution eval 做准备。
+
+新增实现：
+
+- `mewcode/evolution/auto_review.py`：`review_ready_skill_candidates()` 新增 `generated_eval_cases` 字段。
+- `mewcode/evolution/auto_review.py`：新增 `_materialize_safe_eval_suggestions()`，将通过门禁的 suggestions 写入 eval case。
+- `mewcode/evolution/auto_review.py`：新增 `_review_is_safe_to_materialize()`，要求无 warnings、无 uncovered usage feedback、至少 3 条 suggestions、且没有 low quality suggestion。
+- `tests/test_evolution.py`：覆盖安全建议写入 eval case。
+- `tests/test_evolution.py`：覆盖 coverage 不足时拒绝写入 eval case。
+
+审批边界：
+
+- 该步骤只推进测试材料，不提交 approval request。
+- 该步骤不会运行 execution eval，也不会 promote 正式 skill。
+- 覆盖不足、存在 warning、数量不足或 low quality 时，系统保留 review，但不写 eval case。
+- 这比 Hermes 原始“模型生成 skill 后直接复用”的风险更低，因为 candidate 进入审批前必须先形成可回放测试证据。
+
+TDD 与验证：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_materializes_safe_eval_suggestions -q
+1 failed  # 实现前红灯：结果缺少 generated_eval_cases，未写入 eval case
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_materializes_safe_eval_suggestions -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_returns_eval_suggestions_for_generated_patch tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_materializes_safe_eval_suggestions tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_creates_usage_patch_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_duplicate_usage_patch_candidate -q
+5 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+67 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+250 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 eval case 受控物化无直接关系。
+
 ## 剩余工作
 
 - 扩展自动候选 skill 抽取：从当前显式 usage log 扩展到对话轨迹、工具结果、用户纠正和失败记录。
-- 增加受控门禁：只有 high-quality 且 coverage 足够的建议，才允许自动写入 eval case。
 - eval case 自动写入后，继续跑 deterministic eval 和 execution eval，再进入 approval request。
 - 完善用户可见审批入口：补拒绝路径 UI 测试、manual/deferred 差异化展示和批量审批队列视图。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
