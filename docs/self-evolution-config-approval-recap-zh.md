@@ -571,10 +571,56 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 execution eval 自动触发无直接关系。
 
+## 自动 Approval Request
+
+本次把 execution eval 通过后的 candidate 接入审批申请。自动 review 会调用 `submit_skill_approval_request()` 创建 pending request，并把该 request 放入 `requests` 返回字段；TUI 现有审批入口可以直接展示 candidate diff 和 execution eval 报告。
+
+新增实现：
+
+- `mewcode/evolution/auto_review.py`：新增 `_submit_generated_approval_requests()`，只对 execution eval 成功的 candidate 创建 request。
+- `mewcode/evolution/auto_review.py`：自动生成路径复用 `requests` 字段，避免 TUI 另接一套入口。
+- `tests/test_evolution.py`：新增审批申请测试，确认 `skill_approval_mode` 使用配置值。
+- `tests/test_evolution.py`：更新阶段性测试断言，让完整链路反映 pending approval request。
+
+审批边界：
+
+- 自动 review 只创建 pending request，不 approve、不 promote。
+- 用户仍必须在 TUI/审批入口中 approve 或 reject。
+- coverage 不足、eval case 未写入、deterministic eval 失败或 execution eval 失败时，不会生成 approval request。
+
+TDD 与验证：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_generated_candidate_after_execution_eval -q
+1 failed  # 实现前红灯：execution eval 通过后 requests 仍为空
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_generated_candidate_after_execution_eval -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_creates_usage_patch_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_returns_eval_suggestions_for_generated_patch tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_materializes_safe_eval_suggestions tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_eval_after_materializing_cases tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_execution_eval_after_eval_passes tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_generated_candidate_after_execution_eval tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_duplicate_usage_patch_candidate -q
+8 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+70 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+253 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 approval request 自动创建无直接关系。
+
 ## 剩余工作
 
 - 扩展自动候选 skill 抽取：从当前显式 usage log 扩展到对话轨迹、工具结果、用户纠正和失败记录。
-- execution eval 通过后，自动创建 approval request。
 - 完善用户可见审批入口：补拒绝路径 UI 测试、manual/deferred 差异化展示和批量审批队列视图。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。

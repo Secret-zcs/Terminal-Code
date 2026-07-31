@@ -944,7 +944,8 @@ class TestEvolutionEngine:
 
         proposals = EvolutionEngine(tmp_path).store.load_proposals()
         assert result["generated_candidates"] == [proposals[0].id]
-        assert result["requests"] == []
+        assert len(result["requests"]) == 1
+        assert result["requests"][0].proposal_id == proposals[0].id
         assert len(proposals) == 1
         payload = json.loads(proposals[0].change)
         assert payload["action"] == "patch"
@@ -1062,7 +1063,7 @@ class TestEvolutionEngine:
         assert generated_eval_cases[0]["proposal_id"] == proposals[0].id
         assert generated_eval_cases[0]["skill_name"] == "review-loop"
         assert len(generated_eval_cases[0]["case_ids"]) == 3
-        assert result["requests"] == []
+        assert result["requests"][0].proposal_id == proposals[0].id
         eval_case_lines = (
             EvolutionEngine(tmp_path)
             .eval_cases_path("review-loop")
@@ -1121,7 +1122,7 @@ class TestEvolutionEngine:
         )
         assert manifest["eval_status"] == "passed"
         assert result["generated_execution_evals"][0]["proposal_id"] == proposal.id
-        assert result["requests"] == []
+        assert result["requests"][0].proposal_id == proposal.id
 
     def test_self_evolution_review_runs_execution_eval_after_eval_passes(
         self, tmp_path: Path
@@ -1179,7 +1180,53 @@ class TestEvolutionEngine:
             .read_text(encoding="utf-8")
         )
         assert manifest["execution_eval_status"] == "passed"
-        assert result["requests"] == []
+        assert result["requests"][0].proposal_id == proposal.id
+
+    def test_self_evolution_review_submits_generated_candidate_after_execution_eval(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="deferred"),
+        )
+
+        proposal = EvolutionEngine(tmp_path).store.load_proposals()[0]
+        requests = result["requests"]
+        assert len(requests) == 1
+        assert requests[0].proposal_id == proposal.id
+        assert requests[0].skill_name == "review-loop"
+        assert requests[0].approval_mode == "deferred"
+        stored_requests = EvolutionEngine(tmp_path).store.load_skill_approval_requests()
+        assert [request.id for request in stored_requests] == [requests[0].id]
 
     def test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions(
         self, tmp_path: Path

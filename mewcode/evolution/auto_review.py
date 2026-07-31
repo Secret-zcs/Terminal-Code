@@ -86,6 +86,15 @@ def review_ready_skill_candidates(
         engine,
         generated_evaluations,
     )
+    generated_requests, generated_request_skips = (
+        _submit_generated_approval_requests(
+            engine,
+            generated_execution_evals,
+            approval_mode=approval_mode,
+        )
+    )
+    requests.extend(generated_requests)
+    skipped.extend(generated_request_skips)
 
     return {
         "status": (
@@ -220,3 +229,28 @@ def _run_execution_evals_for_generated_candidates(
             "message": message,
         })
     return execution_evals
+
+
+def _submit_generated_approval_requests(
+    engine: EvolutionEngine,
+    generated_execution_evals: list[dict],
+    *,
+    approval_mode: str,
+) -> tuple[list[Any], list[dict]]:
+    requests: list[Any] = []
+    skipped: list[dict] = []
+    for execution_eval in generated_execution_evals:
+        if not execution_eval.get("ok"):
+            continue
+        proposal_id = str(execution_eval["proposal_id"])
+        try:
+            request = engine.submit_skill_approval_request(
+                proposal_id,
+                approval_mode=approval_mode,
+                source="self-evolution-generated-candidate",
+            )
+        except ValueError as exc:
+            skipped.append({"proposal_id": proposal_id, "reason": str(exc)})
+            continue
+        requests.append(request)
+    return requests, skipped
