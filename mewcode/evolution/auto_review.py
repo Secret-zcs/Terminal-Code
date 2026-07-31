@@ -40,6 +40,7 @@ def review_ready_skill_candidates(
             "generated_candidates": [],
             "generated_candidate_reviews": [],
             "generated_eval_cases": [],
+            "generated_evaluations": [],
         }
 
     approval_mode = getattr(self_evolution_config, "skill_approval_mode", "manual")
@@ -76,6 +77,10 @@ def review_ready_skill_candidates(
         engine,
         generated_candidate_reviews,
     )
+    generated_evaluations = _evaluate_generated_candidates(
+        engine,
+        generated_eval_cases,
+    )
 
     return {
         "status": (
@@ -90,6 +95,7 @@ def review_ready_skill_candidates(
         "generated_candidates": generated_candidates,
         "generated_candidate_reviews": generated_candidate_reviews,
         "generated_eval_cases": generated_eval_cases,
+        "generated_evaluations": generated_evaluations,
     }
 
 
@@ -172,3 +178,20 @@ def _review_is_safe_to_materialize(
         if not str(suggestion.get("task", "")).strip():
             return False
     return True
+
+
+def _evaluate_generated_candidates(
+    engine: EvolutionEngine,
+    generated_eval_cases: list[dict],
+) -> list[dict]:
+    evaluations: list[dict] = []
+    for generated in generated_eval_cases:
+        proposal_id = str(generated["proposal_id"])
+        ok, message = engine.evaluate(proposal_id)
+        evaluations.append({
+            "proposal_id": proposal_id,
+            "skill_name": generated["skill_name"],
+            "ok": ok,
+            "message": message,
+        })
+    return evaluations

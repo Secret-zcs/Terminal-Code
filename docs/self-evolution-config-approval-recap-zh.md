@@ -475,10 +475,58 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 eval case 受控物化无直接关系。
 
+## 自动 Deterministic Eval
+
+本次把受控写入的 eval cases 接入 deterministic eval。自动 review 只会对刚刚成功物化 eval case 的 candidate 执行 `evaluate()`，并通过 `generated_evaluations` 返回结果；这一步仍不触发 execution eval、approval request 或 promote。
+
+新增实现：
+
+- `mewcode/evolution/auto_review.py`：`review_ready_skill_candidates()` 新增 `generated_evaluations` 字段。
+- `mewcode/evolution/auto_review.py`：关闭自进化时也返回空 evaluations，保持结构稳定。
+- `mewcode/evolution/auto_review.py`：新增 `_evaluate_generated_candidates()`，执行 deterministic eval 并返回 `proposal_id`、`skill_name`、`ok`、`message`。
+- `tests/test_evolution.py`：覆盖自动 eval 后 manifest 写入 `eval_status=passed`。
+- `tests/test_evolution.py`：确认该阶段不会生成 execution eval report，也不会创建 approval request。
+
+审批边界：
+
+- deterministic eval 通过只是进入下一门禁，不等于可审批或可启用。
+- 未生成 eval case 的 candidate 不会被自动 evaluate。
+- deterministic eval 后仍必须通过 execution eval，用户审批时才能看到完整测试证据。
+
+TDD 与验证：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_eval_after_materializing_cases -q
+1 failed  # 实现前红灯：结果缺少 generated_evaluations
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_eval_after_materializing_cases -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_materializes_safe_eval_suggestions tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions -q
+2 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+68 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+251 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 deterministic eval 自动触发无直接关系。
+
 ## 剩余工作
 
 - 扩展自动候选 skill 抽取：从当前显式 usage log 扩展到对话轨迹、工具结果、用户纠正和失败记录。
-- eval case 自动写入后，继续跑 deterministic eval 和 execution eval，再进入 approval request。
+- deterministic eval 通过后，继续跑 execution eval，再进入 approval request。
 - 完善用户可见审批入口：补拒绝路径 UI 测试、manual/deferred 差异化展示和批量审批队列视图。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。

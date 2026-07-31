@@ -1487,3 +1487,70 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 在 eval case 自动写入后触发 deterministic eval，并把 eval 结果写入 auto review 返回值。
 - deterministic eval 通过后再触发 execution eval，满足“候选 skill 正确执行多轮任务后才提交审批”。
 - 扩展 TUI 展示，让用户看到 candidate、eval case、eval report 和 execution eval report 的完整证据链。
+
+## 28. 最新推进记录：自动 Deterministic Eval
+
+日期：2026-07-31
+
+本次把阶段 27 写入的 eval cases 接到 deterministic eval。自动 review 在成功物化 eval case 后，会立即调用 `EvolutionEngine.evaluate()`，并将结果通过 `generated_evaluations` 返回给调用方。该阶段仍不运行 execution eval，也不提交 approval request。
+
+修改内容：
+
+- 修改 `mewcode/evolution/auto_review.py`：关闭自进化时返回 `generated_evaluations: []`。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_evaluate_generated_candidates()`，对刚刚写入 eval cases 的 proposal 执行 deterministic eval。
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_runs_eval_after_materializing_cases`，验证 eval 自动通过、manifest 写入 `eval_status=passed`，且没有 execution eval report。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：记录本次边界和验证结果。
+
+当前链路：
+
+```text
+skill usage failure/user_feedback
+-> auto_review 生成 patch proposal
+-> gate 后写入 eval case
+-> evaluate() 跑 deterministic eval
+-> 写 candidate manifest eval_status
+-> 仍不跑 execution eval，不提交审批，不 promote
+```
+
+关键边界：
+
+- 已实现：自动生成 candidate 后可自动完成 deterministic eval。
+- 已实现：eval 结果会写回 candidate manifest，并通过 `generated_evaluations` 返回。
+- 已实现：该阶段不会产生 execution eval report，也不会进入审批队列。
+- 未实现：自动运行 execution eval、根据通过结果提交 approval request。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_eval_after_materializing_cases -q
+1 failed  # 实现前红灯：结果缺少 generated_evaluations
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_eval_after_materializing_cases -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_materializes_safe_eval_suggestions tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions -q
+2 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+68 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+251 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 deterministic eval 自动触发无直接关系。
+
+下一步计划：
+
+- 在 deterministic eval 通过后触发 execution eval，生成用户可见 JSON/Markdown 报告。
+- execution eval 通过后再提交 approval request，让用户审批时看到完整测试证据。
+- 若 execution eval 失败，保留 candidate 和报告，但不进入审批队列。
