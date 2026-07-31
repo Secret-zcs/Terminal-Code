@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -59,6 +60,26 @@ def _ctx(tmp_path: Path, args: str, ui: MockUI | None = None) -> CommandContext:
         memory_manager=None,
         ui=ui or MockUI(),
         config={},
+    )
+
+
+def _install_fake_mcp(monkeypatch: pytest.MonkeyPatch) -> None:
+    mcp_module = ModuleType("mcp")
+    mcp_module.ClientSession = object  # type: ignore[attr-defined]
+    mcp_module.types = SimpleNamespace()  # type: ignore[attr-defined]
+    mcp_client_module = ModuleType("mcp.client")
+    mcp_stdio_module = ModuleType("mcp.client.stdio")
+    mcp_stdio_module.StdioServerParameters = object  # type: ignore[attr-defined]
+    mcp_stdio_module.stdio_client = lambda *args, **kwargs: None  # type: ignore[attr-defined]
+    mcp_http_module = ModuleType("mcp.client.streamable_http")
+    mcp_http_module.streamable_http_client = lambda *args, **kwargs: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mcp", mcp_module)
+    monkeypatch.setitem(sys.modules, "mcp.client", mcp_client_module)
+    monkeypatch.setitem(sys.modules, "mcp.client.stdio", mcp_stdio_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "mcp.client.streamable_http",
+        mcp_http_module,
     )
 
 
@@ -883,6 +904,122 @@ class TestEvolutionEngine:
         assert second["requests"] == []
         assert format_review_notification(second) == ""
         assert len(engine.store.load_skill_approval_requests()) == 1
+
+    def test_tui_self_evolution_review_opens_approval_widget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.app import MewCodeApp
+        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+
+        engine = EvolutionEngine(tmp_path)
+        _make_ready_skill_candidate(engine)
+        app = MewCodeApp(
+            providers=[
+                ProviderConfig(
+                    name="test",
+                    protocol="openai",
+                    base_url="https://example.invalid",
+                    model="test-model",
+                )
+            ],
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        opened: list[str] = []
+        app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
+        app._show_system_message = lambda _text: None  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+
+        requests = engine.store.load_skill_approval_requests()
+        assert len(requests) == 1
+        assert opened == [requests[0].id]
+
+    def test_tui_self_evolution_review_opens_existing_pending_request(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.app import MewCodeApp
+        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        request = engine.submit_skill_approval_request(proposal.id)
+        app = MewCodeApp(
+            providers=[
+                ProviderConfig(
+                    name="test",
+                    protocol="openai",
+                    base_url="https://example.invalid",
+                    model="test-model",
+                )
+            ],
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        opened: list[str] = []
+        app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
+        app._show_system_message = lambda _text: None  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+
+        assert opened == [request.id]
+
+    def test_tui_skill_approval_response_approves_and_reloads_skills(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.app import MewCodeApp
+        from mewcode.config import ProviderConfig
+        from mewcode.self_evolution_dialog import (
+            InlineSkillApprovalWidget,
+            SkillApprovalChoice,
+        )
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        request = engine.submit_skill_approval_request(proposal.id)
+        app = MewCodeApp(
+            providers=[
+                ProviderConfig(
+                    name="test",
+                    protocol="openai",
+                    base_url="https://example.invalid",
+                    model="test-model",
+                )
+            ],
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path), set_skill_catalog=MagicMock())
+        app.skill_loader = SimpleNamespace(
+            reload=MagicMock(),
+            get_catalog=lambda: [("debug-regression-loop", "Debug flow")],
+        )
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        app.on_inline_skill_approval_widget_responded(
+            InlineSkillApprovalWidget.Responded(
+                request.id,
+                SkillApprovalChoice.APPROVE,
+            )
+        )
+
+        stored = EvolutionEngine(tmp_path).store.get_skill_approval_request(request.id)
+        assert stored is not None
+        assert stored.status == "approved"
+        assert (
+            tmp_path / ".mewcode" / "skills" / "debug-regression-loop" / "SKILL.md"
+        ).exists()
+        app.skill_loader.reload.assert_called_once()
+        app.agent.set_skill_catalog.assert_called_once()
+        assert any("approved" in message for message in messages)
 
     def test_add_eval_case_invalidates_existing_execution_eval(
         self, tmp_path: Path

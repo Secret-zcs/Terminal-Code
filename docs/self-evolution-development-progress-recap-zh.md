@@ -1219,3 +1219,64 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 已实现：没有新增用户命令，不要求用户通过命令提交 skill 或评测。
 - 未实现：用户可见审批入口和审批模式差异化展示。
 - 下一步：把 inbox、详情和 resolve 串成真正的 UI/API 审批面。
+
+## 24. 最新推进记录：TUI 自进化审批入口
+
+日期：2026-07-31
+
+本次把前几阶段的 inbox、详情和 resolve 串进 TUI。自进化 review 发现 ready candidate 后，不再只是打印提示，而是打开内联审批组件；如果已有 pending request，下次 review 也会重新打开待审批入口，避免审批申请沉默地停留在 JSONL 中。
+
+修改内容：
+
+- 新增 `mewcode/self_evolution_dialog.py`：实现 `InlineSkillApprovalWidget` 和 `SkillApprovalChoice`。
+- 修改 `mewcode/app.py`：`_run_self_evolution_review()` 在发现新 request 或已有 pending request 时打开审批组件。
+- 修改 `mewcode/app.py`：新增 `_show_self_evolution_approval()` 和 `_mount_self_evolution_approval()`，展示 `render_skill_approval_request()` 生成的审阅材料。
+- 修改 `mewcode/app.py`：新增 `on_inline_skill_approval_widget_responded()`，批准时调用 `resolve_skill_approval_request(... approved=True)` 并 reload skill catalog。
+- 新增 `tests/test_self_evolution_dialog.py`：覆盖审批组件展示和 approve/reject 事件。
+- 修改 `tests/test_evolution.py`：覆盖新申请打开、已有 pending request 打开、批准后 promote 并 reload skill catalog。
+- 修改 `docs/self-evolution-config-approval-recap-zh.md` 和本文档：记录本次 TDD 与验证结果。
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py -q
+1 error  # 实现前红灯：缺少 mewcode.self_evolution_dialog
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_approval_widget -q
+1 failed  # 实现前红灯：TUI review 只提示，不打开审批 widget
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+1 failed  # 实现前红灯：MewCodeApp 尚无审批响应处理
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_existing_pending_request -q
+1 failed  # 实现前红灯：已有 pending request 被静默跳过
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_approval_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_existing_pending_request tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+5 passed
+```
+
+验证记录：
+
+```text
+python3 -m py_compile mewcode/app.py mewcode/self_evolution_dialog.py
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py -q
+64 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+245 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 TUI 自进化审批入口无直接关系。
+
+边界说明：
+
+- 已实现：TUI 内联审批入口基础版。
+- 已实现：用户批准后才 promote candidate skill，并 reload skill catalog。
+- 已实现：没有新增 `/evolve` 或其他用户命令，仍符合“用户只配置开关与审批模式”的边界。
+- 未实现：审批拒绝路径的 TUI 集成测试、manual/deferred 的差异化展示、批量审批队列视图。
+- 下一步：补拒绝路径 UI 测试，并把审批模式差异展示到组件文案中。

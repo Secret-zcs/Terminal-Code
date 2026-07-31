@@ -265,6 +265,52 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - `status=None` 返回全部 request，用于审计视图。
 - 该 API 只读，不会触发 approve、reject 或 promote。
 
+## TUI 审批入口
+
+本次把审批能力接入 Textual TUI，但没有新增用户命令。系统自动 review 发现 ready candidate 后，会打开内联审批组件展示 candidate diff 和 execution eval 报告；用户在组件中批准后，系统才会调用 `resolve_skill_approval_request()` 并 promote 到正式 skill。
+
+新增实现：
+
+- `mewcode/self_evolution_dialog.py`：新增 `InlineSkillApprovalWidget`，提供 approve/reject 选择和拒绝理由输入。
+- `mewcode/app.py`：review 产生新 request 时自动打开审批组件。
+- `mewcode/app.py`：已有 pending request 时也会打开审批组件，避免申请沉默滞留。
+- `mewcode/app.py`：批准后 reload skill loader，并刷新 agent 的 skill catalog。
+- `tests/test_self_evolution_dialog.py`：覆盖组件展示与事件。
+- `tests/test_evolution.py`：覆盖 TUI 打开审批、已有 pending 打开、批准后 promote/reload。
+
+TDD 与验证：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py -q
+1 error  # 实现前红灯：缺少 mewcode.self_evolution_dialog
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_approval_widget -q
+1 failed  # 实现前红灯：TUI review 未打开审批组件
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+1 failed  # 实现前红灯：缺少审批响应处理
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_existing_pending_request -q
+1 failed  # 实现前红灯：已有 pending request 被忽略
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_approval_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_existing_pending_request tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+5 passed
+
+python3 -m py_compile mewcode/app.py mewcode/self_evolution_dialog.py
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py -q
+64 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+245 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 TUI 自进化审批入口无直接关系。
+
 扩展验证：
 
 ```text
@@ -286,6 +332,6 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 ## 剩余工作
 
 - 实现自动候选 skill 抽取：由系统读取对话轨迹、工具结果、用户纠正和失败记录生成 proposal。
-- 实现用户可见审批入口：基于 `list_skill_approval_inbox()` 和 `render_skill_approval_request()` 展示详情，并调用 `resolve_skill_approval_request()` 处理 approve/reject。
+- 完善用户可见审批入口：补拒绝路径 UI 测试、manual/deferred 差异化展示和批量审批队列视图。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。

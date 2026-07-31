@@ -54,6 +54,7 @@ from mewcode.evolution.auto_review import (
     format_review_notification,
     review_ready_skill_candidates,
 )
+from mewcode.evolution.engine import EvolutionEngine
 from mewcode.hooks import HookContext, HookEngine, load_hooks
 from mewcode.conversation import ConversationManager, Message
 from mewcode.mcp import MCPManager
@@ -1605,6 +1606,70 @@ class MewCodeApp(App):
         except Exception:
             pass
 
+    def on_inline_skill_approval_widget_responded(
+        self, event: "InlineSkillApprovalWidget.Responded"
+    ) -> None:
+        from mewcode.self_evolution_dialog import (
+            InlineSkillApprovalWidget,
+            SkillApprovalChoice,
+        )
+
+        try:
+            self.query_one(
+                "#skill-approval-inline",
+                InlineSkillApprovalWidget,
+            ).remove()
+        except Exception:
+            pass
+        try:
+            self.query_one("#chat-input").disabled = False
+            self.query_one("#chat-input").focus()
+        except Exception:
+            pass
+
+        if self.agent is None:
+            return
+
+        approved = event.choice == SkillApprovalChoice.APPROVE
+        engine = EvolutionEngine(self.agent.work_dir)
+        ok, message = engine.resolve_skill_approval_request(
+            event.request_id,
+            approved=approved,
+            reviewer="user",
+            reason=event.reason,
+        )
+        self._pending_skill_approval_request_id = ""
+        if not ok:
+            self._show_system_message(f"Self-evolution approval failed: {message}")
+            return
+        if approved:
+            self._reload_skill_catalog_after_self_evolution()
+        self._show_system_message(f"Self-evolution approval {message}")
+
+    def _reload_skill_catalog_after_self_evolution(self) -> None:
+        if self.skill_loader is None:
+            return
+        try:
+            self.skill_loader.reload()
+        except Exception:
+            return
+        if self.agent is None:
+            return
+        catalog = self.skill_loader.get_catalog()
+        if not catalog:
+            return
+        lines = [
+            "You can use the following Skills:",
+            "",
+        ]
+        for name, desc in catalog:
+            lines.append(f"- {name}: {desc}")
+        lines.append("")
+        lines.append(
+            "If the user's request matches a Skill, call LoadSkill to activate it."
+        )
+        self.agent.set_skill_catalog("\n".join(lines))
+
     def _start_spinner(self) -> None:
         """启动 braille spinner 动画（每帧 80ms）。"""
         if self._spinner_timer is not None:
@@ -1920,9 +1985,53 @@ class MewCodeApp(App):
         except Exception as exc:
             log.debug("Self-evolution review failed: %s", exc)
             return
+        requests = list(result.get("requests", []))
+        if requests:
+            self._show_self_evolution_approval(requests[0].id)
+            if len(requests) > 1:
+                self._show_system_message(
+                    f"{len(requests)} self-evolution approval requests are pending."
+                )
+            return
+        if result.get("status") != "disabled":
+            pending = EvolutionEngine(self.agent.work_dir).list_skill_approval_inbox()
+            if pending:
+                self._show_self_evolution_approval(pending[0].id)
+                return
         message = format_review_notification(result)
         if message:
             self._show_system_message(message)
+
+    def _show_self_evolution_approval(self, request_id: str) -> None:
+        if self.agent is None:
+            return
+        if getattr(self, "_pending_skill_approval_request_id", "") == request_id:
+            return
+        engine = EvolutionEngine(self.agent.work_dir)
+        ok, review = engine.render_skill_approval_request(request_id)
+        if not ok:
+            self._show_system_message(f"Self-evolution approval failed: {review}")
+            return
+        self._pending_skill_approval_request_id = request_id
+        asyncio.ensure_future(
+            self._mount_self_evolution_approval(request_id, review)
+        )
+
+    async def _mount_self_evolution_approval(
+        self,
+        request_id: str,
+        review_markdown: str,
+    ) -> None:
+        from mewcode.self_evolution_dialog import InlineSkillApprovalWidget
+
+        chat = self.query_one("#chat-area", VerticalScroll)
+        widget = InlineSkillApprovalWidget(request_id, review_markdown)
+        await chat.mount(widget)
+        self.call_after_refresh(chat.scroll_end, animate=False)
+        try:
+            self.query_one("#chat-input").disabled = True
+        except Exception:
+            pass
 
     _MODE_DISPLAY = {
         PermissionMode.DEFAULT: "default",
