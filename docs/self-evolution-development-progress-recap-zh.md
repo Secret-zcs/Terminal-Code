@@ -1280,3 +1280,75 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 已实现：没有新增 `/evolve` 或其他用户命令，仍符合“用户只配置开关与审批模式”的边界。
 - 未实现：审批拒绝路径的 TUI 集成测试、manual/deferred 的差异化展示、批量审批队列视图。
 - 下一步：补拒绝路径 UI 测试，并把审批模式差异展示到组件文案中。
+
+## 25. 最新推进记录：自动 Usage Patch Candidate 生成
+
+日期：2026-07-31
+
+本次开始把自进化从“已有 ready candidate 自动提交审批”推进到“系统能从真实使用记录中自动生成候选 skill patch”。当自进化开启后，`auto_review` 会扫描 skill usage log；如果某个项目级正式 skill 累计达到负向 usage 阈值，就基于这些失败或用户纠正记录生成一个隔离的 patch proposal。
+
+修改内容：
+
+- 修改 `mewcode/evolution/auto_review.py`：`review_ready_skill_candidates()` 返回值新增 `generated_candidates`，关闭自进化时也保持稳定结构。
+- 修改 `mewcode/evolution/auto_review.py`：新增 usage-driven patch candidate 生成逻辑，复用 `suggest_quarantine()` 和 `propose_skill_patch_from_usage()`。
+- 修改 `mewcode/evolution/auto_review.py`：新增开放 patch candidate 去重检查，避免同一个 skill 因同一批 usage 反复生成 proposal。
+- 修改 `tests/test_evolution.py`：新增自动生成 usage patch candidate 的行为测试。
+- 修改 `tests/test_evolution.py`：新增幂等性测试，确认已有 open patch candidate 时不会重复生成。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：记录本次边界、验证结果和下一步计划。
+
+当前链路：
+
+```text
+skill usage failure/user_feedback
+-> auto_review 扫描负向 usage
+-> suggest_quarantine 达到阈值
+-> propose_skill_patch_from_usage 生成 patch proposal
+-> 等待后续自动 eval case / execution eval / approval request
+```
+
+关键边界：
+
+- 已实现：自动从负向 usage 生成候选 skill patch proposal。
+- 已实现：生成的是 candidate/proposal，不会直接写正式 `.mewcode/skills/<name>/SKILL.md`。
+- 已实现：已有同名 open patch proposal 时不会重复生成。
+- 已实现：不会跳过 eval、execution eval 或用户审批。
+- 未实现：自动为该 patch proposal 生成 eval case、运行 execution eval、提交 approval request。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_creates_usage_patch_candidate -q
+1 failed  # 实现前红灯：auto_review 返回值缺少 generated_candidates
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_creates_usage_patch_candidate -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_duplicate_usage_patch_candidate -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_creates_usage_patch_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once -q
+2 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+64 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+247 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 usage-driven patch candidate 自动生成无直接关系。
+
+下一步计划：
+
+- 为自动生成的 patch proposal 自动生成候选 eval case，但仍保持只读建议或门禁写入策略。
+- 将 patch proposal 进入 execution eval 前的材料展示给用户，避免“候选已生成但不可见”。
+- 扩展 usage 来源，从显式 skill usage log 扩展到对话轨迹、工具失败、用户纠正和复盘文档缺失等更完整任务经验。

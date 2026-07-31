@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,12 @@ def review_ready_skill_candidates(
     approval requests when self-evolution is enabled.
     """
     if not getattr(self_evolution_config, "enabled", False):
-        return {"status": "disabled", "requests": [], "skipped": []}
+        return {
+            "status": "disabled",
+            "requests": [],
+            "skipped": [],
+            "generated_candidates": [],
+        }
 
     approval_mode = getattr(self_evolution_config, "skill_approval_mode", "manual")
     engine = EvolutionEngine(project_root)
@@ -61,8 +67,47 @@ def review_ready_skill_candidates(
             continue
         requests.append(request)
 
+    generated_candidates = _generate_usage_patch_candidates(engine)
+
     return {
-        "status": "submitted" if requests else "idle",
+        "status": (
+            "submitted"
+            if requests
+            else "generated"
+            if generated_candidates
+            else "idle"
+        ),
         "requests": requests,
         "skipped": skipped,
+        "generated_candidates": generated_candidates,
     }
+
+
+def _generate_usage_patch_candidates(engine: EvolutionEngine) -> list[str]:
+    generated: list[str] = []
+    for suggestion in engine.suggest_quarantine(failure_threshold=2):
+        skill_name = str(suggestion.get("skill_name", "")).strip()
+        if not skill_name or _has_open_patch_candidate(engine, skill_name):
+            continue
+        try:
+            proposal = engine.propose_skill_patch_from_usage(
+                skill_name,
+                failure_threshold=2,
+            )
+        except ValueError:
+            continue
+        generated.append(proposal.id)
+    return generated
+
+
+def _has_open_patch_candidate(engine: EvolutionEngine, skill_name: str) -> bool:
+    for proposal in engine.store.load_proposals():
+        if proposal.target != "skill" or proposal.status != "proposed":
+            continue
+        try:
+            payload = json.loads(proposal.change)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("action") == "patch" and payload.get("name") == skill_name:
+            return True
+    return False

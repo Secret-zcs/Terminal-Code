@@ -905,6 +905,72 @@ class TestEvolutionEngine:
         assert format_review_notification(second) == ""
         assert len(engine.store.load_skill_approval_requests()) == 1
 
+    def test_self_evolution_review_creates_usage_patch_candidate(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+
+        proposals = EvolutionEngine(tmp_path).store.load_proposals()
+        assert result["generated_candidates"] == [proposals[0].id]
+        assert result["requests"] == []
+        assert len(proposals) == 1
+        payload = json.loads(proposals[0].change)
+        assert payload["action"] == "patch"
+        assert payload["name"] == "review-loop"
+        assert "错误地跳过复盘文档" in payload["body"]
+        assert "用户纠正：遗漏验证" in payload["body"]
+
+    def test_self_evolution_review_does_not_duplicate_usage_patch_candidate(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        _usage_patch_proposal(tmp_path)
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+
+        proposals = EvolutionEngine(tmp_path).store.load_proposals()
+        assert result["status"] == "idle"
+        assert result["generated_candidates"] == []
+        assert result["requests"] == []
+        assert len(proposals) == 1
+
     def test_tui_self_evolution_review_opens_approval_widget(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

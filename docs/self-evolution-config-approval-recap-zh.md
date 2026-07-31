@@ -329,9 +329,59 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次自进化配置/命令入口收敛无直接关系。
 
+## 自动 Usage Patch Candidate 生成
+
+本次开始补齐“开启自进化后系统自动抽取候选 skill”的第一段能力。系统现在不需要用户通过命令提交 patch；`auto_review` 会扫描 `.mewcode/evolution/skill_usage.jsonl`，当某个项目级正式 skill 达到负向 usage 阈值后，自动生成隔离的 skill patch proposal。
+
+新增实现：
+
+- `mewcode/evolution/auto_review.py`：`review_ready_skill_candidates()` 返回 `generated_candidates`，让调用方能区分“提交了审批申请”和“刚生成了候选 proposal”。
+- `mewcode/evolution/auto_review.py`：自进化开启时，复用 `suggest_quarantine(failure_threshold=2)` 找到失败或用户纠正次数足够的 skill。
+- `mewcode/evolution/auto_review.py`：调用 `propose_skill_patch_from_usage()` 生成 patch proposal，patch body 会保留 usage feedback 摘要，方便后续审查。
+- `mewcode/evolution/auto_review.py`：检测已有同名 open patch candidate，避免同一个 skill 反复生成重复 proposal。
+- `tests/test_evolution.py`：覆盖自动生成候选和幂等去重。
+
+审批边界：
+
+- 该步骤只生成 proposal/candidate，不提交 approval request。
+- 该步骤不会 promote，也不会修改正式 `.mewcode/skills/<name>/SKILL.md`。
+- 后续仍必须补 eval case、通过 deterministic/execution eval，并由用户审批后才能启用。
+- 用户仍只需要配置开启/关闭自进化和审批模式，不需要手动执行 `/evolve` 类命令。
+
+TDD 与验证：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_creates_usage_patch_candidate -q
+1 failed  # 实现前红灯：auto_review 返回值缺少 generated_candidates
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_creates_usage_patch_candidate -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_duplicate_usage_patch_candidate -q
+1 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+64 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+247 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 usage-driven patch candidate 自动生成无直接关系。
+
 ## 剩余工作
 
-- 实现自动候选 skill 抽取：由系统读取对话轨迹、工具结果、用户纠正和失败记录生成 proposal。
+- 扩展自动候选 skill 抽取：从当前显式 usage log 扩展到对话轨迹、工具结果、用户纠正和失败记录。
+- 为自动生成的 patch proposal 自动生成 eval case，并在进入 approval request 前跑 deterministic/execution eval。
 - 完善用户可见审批入口：补拒绝路径 UI 测试、manual/deferred 差异化展示和批量审批队列视图。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。
