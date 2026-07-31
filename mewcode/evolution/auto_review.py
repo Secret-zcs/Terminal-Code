@@ -38,6 +38,7 @@ def review_ready_skill_candidates(
             "requests": [],
             "skipped": [],
             "generated_candidates": [],
+            "generated_candidate_reviews": [],
         }
 
     approval_mode = getattr(self_evolution_config, "skill_approval_mode", "manual")
@@ -67,7 +68,9 @@ def review_ready_skill_candidates(
             continue
         requests.append(request)
 
-    generated_candidates = _generate_usage_patch_candidates(engine)
+    generated_candidates, generated_candidate_reviews = (
+        _generate_usage_patch_candidates(engine)
+    )
 
     return {
         "status": (
@@ -80,11 +83,15 @@ def review_ready_skill_candidates(
         "requests": requests,
         "skipped": skipped,
         "generated_candidates": generated_candidates,
+        "generated_candidate_reviews": generated_candidate_reviews,
     }
 
 
-def _generate_usage_patch_candidates(engine: EvolutionEngine) -> list[str]:
+def _generate_usage_patch_candidates(
+    engine: EvolutionEngine,
+) -> tuple[list[str], list[dict]]:
     generated: list[str] = []
+    reviews: list[dict] = []
     for suggestion in engine.suggest_quarantine(failure_threshold=2):
         skill_name = str(suggestion.get("skill_name", "")).strip()
         if not skill_name or _has_open_patch_candidate(engine, skill_name):
@@ -97,7 +104,8 @@ def _generate_usage_patch_candidates(engine: EvolutionEngine) -> list[str]:
         except ValueError:
             continue
         generated.append(proposal.id)
-    return generated
+        reviews.append(engine.review_eval_case_suggestions(proposal.id))
+    return generated, reviews
 
 
 def _has_open_patch_candidate(engine: EvolutionEngine, skill_name: str) -> bool:

@@ -971,6 +971,54 @@ class TestEvolutionEngine:
         assert result["requests"] == []
         assert len(proposals) == 1
 
+    def test_self_evolution_review_returns_eval_suggestions_for_generated_patch(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+
+        proposals = EvolutionEngine(tmp_path).store.load_proposals()
+        reviews = result["generated_candidate_reviews"]
+        assert len(reviews) == 1
+        assert reviews[0]["proposal_id"] == proposals[0].id
+        assert reviews[0]["skill_name"] == "review-loop"
+        assert reviews[0]["quality_counts"]["high"] == 2
+        assert reviews[0]["coverage_counts"]["usage_feedback"] == 2
+        assert reviews[0]["warnings"] == []
+        assert len(reviews[0]["suggestions"]) == 3
+        assert not EvolutionEngine(tmp_path).eval_cases_path("review-loop").exists()
+
     def test_tui_self_evolution_review_opens_approval_widget(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -1352,3 +1352,69 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 为自动生成的 patch proposal 自动生成候选 eval case，但仍保持只读建议或门禁写入策略。
 - 将 patch proposal 进入 execution eval 前的材料展示给用户，避免“候选已生成但不可见”。
 - 扩展 usage 来源，从显式 skill usage log 扩展到对话轨迹、工具失败、用户纠正和复盘文档缺失等更完整任务经验。
+
+## 26. 最新推进记录：自动返回候选 Eval 建议摘要
+
+日期：2026-07-31
+
+本次把阶段 25 生成的 usage-driven patch proposal 往评测门禁推进了一步。自动 review 现在不仅返回新生成的 proposal id，还会立刻生成只读 eval case suggestion review，并把质量统计、coverage 统计、warnings、recommendation 和具体 suggestions 返回给调用方。
+
+修改内容：
+
+- 修改 `mewcode/evolution/auto_review.py`：关闭自进化时返回 `generated_candidate_reviews: []`，保持结果结构稳定。
+- 修改 `mewcode/evolution/auto_review.py`：`_generate_usage_patch_candidates()` 返回 `(generated_ids, reviews)`，每个新生成的 patch proposal 会调用 `review_eval_case_suggestions()`。
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_returns_eval_suggestions_for_generated_patch`，验证自动返回 eval 建议摘要。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：记录本次切片和验证结果。
+
+当前链路：
+
+```text
+skill usage failure/user_feedback
+-> auto_review 生成 patch proposal
+-> review_eval_case_suggestions 生成只读 eval 建议摘要
+-> 返回 generated_candidate_reviews 给 UI/后续自动门禁
+-> 仍不写 eval case，不跑 execution eval，不提交审批
+```
+
+关键边界：
+
+- 已实现：调用方能看到自动生成 candidate 对应的 eval 建议效果。
+- 已实现：eval 建议摘要覆盖 usage feedback 的 quality、coverage 和 warnings。
+- 已实现：该阶段不落盘写 eval case，避免未审核建议直接进入门禁。
+- 未实现：把高质量建议自动转成正式 eval case、运行 execution eval、提交 approval request。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_returns_eval_suggestions_for_generated_patch -q
+1 failed  # 实现前红灯：结果缺少 generated_candidate_reviews
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_returns_eval_suggestions_for_generated_patch -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_creates_usage_patch_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_duplicate_usage_patch_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once -q
+3 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+65 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+248 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 eval 建议摘要返回无直接关系。
+
+下一步计划：
+
+- 增加一个受控门禁：只有 high-quality 且覆盖全部 usage feedback 的建议，才允许自动写入 eval case。
+- 自动写入 eval case 后触发 deterministic eval，继续保持 execution eval 和用户审批强制门禁。
+- 在 TUI 审批或 review 提示中展示 `generated_candidate_reviews`，让用户看到“系统为什么认为这个 skill 应该进化”。
