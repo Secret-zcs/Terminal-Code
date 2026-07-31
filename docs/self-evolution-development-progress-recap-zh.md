@@ -1765,3 +1765,71 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 实现从 agent/tool 运行结果自动记录结构化 evidence，优先覆盖工具失败和用户纠正。
 - 为 evidence ingestion 增加来源统计，让审批页能展示 candidate 来自哪些任务证据。
 - 保持自动 promote 禁止不变，所有生成 skill 仍必须经用户审批。
+
+## 32. 最新推进记录：工具失败自动记录 Evidence
+
+日期：2026-07-31
+
+本次把结构化 evidence 的来源继续前移到 Agent 工具执行层。Agent 在工具执行失败时，如果当前只有一个 active skill，会自动记录 `failure` evidence，并在 metadata 中写入 `skill_name`、`tool_name`、`tool_args` 和摘要。下一轮 auto review 会把该 evidence 摄入为 skill usage，再进入阶段 31 已完成的自进化闭环。
+
+修改内容：
+
+- 修改 `mewcode/agent.py`：新增 `_record_tool_failure_evidence()`。
+- 修改 `mewcode/agent.py`：在普通工具执行和并发工具执行结果处调用 evidence 记录逻辑。
+- 修改 `tests/test_agent.py`：新增唯一 active skill 时工具失败会记录 evidence 的测试。
+- 修改 `tests/test_agent.py`：新增多个 active skill 时不记录 evidence 的测试，避免误归因。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：记录本次来源扩展和验证结果。
+
+当前链路：
+
+```text
+single active skill + tool failure
+-> Agent records structured failure evidence
+-> auto_review ingests evidence as skill usage
+-> usage threshold
+-> patch candidate / eval / execution eval
+-> pending approval request
+```
+
+关键边界：
+
+- 已实现：真实工具失败可以自动形成结构化 evolution evidence。
+- 已实现：只有一个 active skill 时才归因，多个 active skill 时跳过。
+- 已实现：记录 evidence 不会自动生成 skill；仍要等 auto review、评测和用户审批。
+- 未实现：用户自然语言纠正自动抽取为 evidence。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_agent.py::test_tool_failure_records_evidence_for_single_active_skill tests/test_agent.py::test_tool_failure_does_not_record_evidence_for_ambiguous_skills -q
+1 failed, 1 passed  # 实现前红灯：单 active skill 工具失败没有 evidence
+
+PYTHONPATH=. pytest tests/test_agent.py::test_tool_failure_records_evidence_for_single_active_skill tests/test_agent.py::test_tool_failure_does_not_record_evidence_for_ambiguous_skills -q
+2 passed
+
+python3 -m py_compile mewcode/agent.py mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_agent.py -q -k 'not test_multi_step_autonomous'
+FAILED tests/test_agent.py::test_message_splicing
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+72 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+255 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+`test_message_splicing` 和 `test_multi_step_autonomous` 都是既有 agent 测试口径差异，前者期望消息数量为 5 但当前序列化结果为 4，后者期望未读先写成功但当前安全策略要求先 `ReadFile`，均和本次工具失败 evidence 记录无直接关系。
+
+下一步计划：
+
+- 自动捕获用户纠正文案，生成 `user_feedback` evidence。
+- 为审批页展示 evidence 来源：tool-result、conversation、manual、skill-usage。
+- 继续保持用户审批为最终启用门禁。

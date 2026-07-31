@@ -872,6 +872,7 @@ class Agent:
             result = ToolResult(output=f"Tool execution error: {e}", is_error=True)
 
         self._snapshot_for_recovery(tc, result)
+        self._record_tool_failure_evidence(tc, result)
 
         return _ToolExecResult(
             tool_id=tc.tool_id,
@@ -967,9 +968,37 @@ class Agent:
             )
 
         self._snapshot_for_recovery(tc, result)
+        self._record_tool_failure_evidence(tc, result)
 
         elapsed = time.monotonic() - start
         yield result, elapsed, is_unknown
+
+    def _record_tool_failure_evidence(
+        self, tc: ToolCallComplete, result: ToolResult
+    ) -> None:
+        if not result.is_error or len(self.active_skills) != 1:
+            return
+        skill_name = next(iter(self.active_skills))
+        summary = (
+            f"Tool {tc.tool_name} failed while skill '{skill_name}' was active: "
+            f"{result.output[:300]}"
+        )
+        try:
+            from mewcode.evolution import EvolutionEngine
+
+            EvolutionEngine(self.work_dir).record_evidence(
+                summary,
+                kind="failure",
+                source="tool-result",
+                metadata={
+                    "skill_name": skill_name,
+                    "tool_name": tc.tool_name,
+                    "tool_args": tc.arguments,
+                    "summary": summary,
+                },
+            )
+        except Exception:
+            pass
 
     def _snapshot_for_recovery(
         self, tc: ToolCallComplete, result: ToolResult

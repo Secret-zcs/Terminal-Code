@@ -288,6 +288,74 @@ async def test_stop_consecutive_unknown_tools():
     assert "unknown tool" in c["error"][0].message
 
 @pytest.mark.asyncio
+async def test_tool_failure_records_evidence_for_single_active_skill(tmp_path):
+    """工具失败时，唯一 active skill 会收到结构化 evolution evidence。"""
+    from mewcode.evolution import EvolutionEngine
+
+    client = MockLLMClient([
+        [
+            TextDelta("Trying read."),
+            ToolCallComplete(
+                "t1",
+                "ReadFile",
+                {"file_path": str(tmp_path / "missing.txt")},
+            ),
+            StreamEnd("end_turn", input_tokens=10, output_tokens=20),
+        ],
+        [TextDelta("Stopped."), StreamEnd("end_turn", input_tokens=10, output_tokens=5)],
+    ])
+    registry = create_default_registry()
+    agent = Agent(client, registry, "anthropic", work_dir=str(tmp_path))
+    agent.activate_skill("review-loop", "# Review\n")
+    conv = ConversationManager()
+    conv.add_user_message("Read a missing file")
+
+    events = []
+    async for e in agent.run(conv):
+        events.append(e)
+
+    c = _collect(events)
+    assert c["tool_result"][0].is_error
+    evidence = EvolutionEngine(tmp_path).store.load_evidence()
+    assert len(evidence) == 1
+    assert evidence[0].kind == "failure"
+    assert evidence[0].source == "tool-result"
+    assert evidence[0].metadata["skill_name"] == "review-loop"
+    assert evidence[0].metadata["tool_name"] == "ReadFile"
+
+@pytest.mark.asyncio
+async def test_tool_failure_does_not_record_evidence_for_ambiguous_skills(tmp_path):
+    """多个 active skill 时不自动归因，避免错误推动某个 skill 进化。"""
+    from mewcode.evolution import EvolutionEngine
+
+    client = MockLLMClient([
+        [
+            TextDelta("Trying read."),
+            ToolCallComplete(
+                "t1",
+                "ReadFile",
+                {"file_path": str(tmp_path / "missing.txt")},
+            ),
+            StreamEnd("end_turn", input_tokens=10, output_tokens=20),
+        ],
+        [TextDelta("Stopped."), StreamEnd("end_turn", input_tokens=10, output_tokens=5)],
+    ])
+    registry = create_default_registry()
+    agent = Agent(client, registry, "anthropic", work_dir=str(tmp_path))
+    agent.activate_skill("review-loop", "# Review\n")
+    agent.activate_skill("debug-loop", "# Debug\n")
+    conv = ConversationManager()
+    conv.add_user_message("Read a missing file")
+
+    events = []
+    async for e in agent.run(conv):
+        events.append(e)
+
+    c = _collect(events)
+    assert c["tool_result"][0].is_error
+    assert EvolutionEngine(tmp_path).store.load_evidence() == []
+
+@pytest.mark.asyncio
 async def test_message_splicing():
     """assistant 消息包含 text + 多个 tool_use；对应的 tool_result 被打包在一起。"""
     client = MockLLMClient([

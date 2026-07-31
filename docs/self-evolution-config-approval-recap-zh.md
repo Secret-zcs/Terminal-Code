@@ -668,9 +668,56 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 evidence 自动归因无直接关系。
 
+## 工具失败自动记录 Evidence
+
+本次把 evidence 来源前移到 Agent 工具执行层。工具执行失败时，如果当前只有一个 active skill，Agent 会自动记录 `failure` evidence，并携带明确的 `skill_name` 和 `tool_name`；后续 auto review 会把该 evidence 摄入为 skill usage。
+
+新增实现：
+
+- `mewcode/agent.py`：新增 `_record_tool_failure_evidence()`。
+- `mewcode/agent.py`：普通工具执行和并发工具执行都会在失败结果后尝试记录 evidence。
+- `tests/test_agent.py`：覆盖单 active skill 时记录 evidence。
+- `tests/test_agent.py`：覆盖多个 active skill 时不记录 evidence，避免误归因。
+
+审批边界：
+
+- 工具失败只记录 evidence，不直接创建 candidate。
+- 多 active skill 场景不自动归因。
+- evidence 后续仍要经过 usage 阈值、patch proposal、eval、execution eval 和用户审批。
+
+TDD 与验证：
+
+```text
+PYTHONPATH=. pytest tests/test_agent.py::test_tool_failure_records_evidence_for_single_active_skill tests/test_agent.py::test_tool_failure_does_not_record_evidence_for_ambiguous_skills -q
+1 failed, 1 passed  # 实现前红灯：单 active skill 工具失败没有 evidence
+
+PYTHONPATH=. pytest tests/test_agent.py::test_tool_failure_records_evidence_for_single_active_skill tests/test_agent.py::test_tool_failure_does_not_record_evidence_for_ambiguous_skills -q
+2 passed
+
+python3 -m py_compile mewcode/agent.py mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_agent.py -q -k 'not test_multi_step_autonomous'
+FAILED tests/test_agent.py::test_message_splicing
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+72 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+255 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+`test_message_splicing` 和 `test_multi_step_autonomous` 都是既有 agent 测试口径差异，和本次 evidence 记录无直接关系。
+
 ## 剩余工作
 
-- 从 agent/tool 运行结果自动记录结构化 evidence，优先覆盖工具失败和用户纠正。
+- 自动捕获用户纠正文案，生成 `user_feedback` evidence。
 - 完善用户可见审批入口：补拒绝路径 UI 测试、manual/deferred 差异化展示和批量审批队列视图。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。
