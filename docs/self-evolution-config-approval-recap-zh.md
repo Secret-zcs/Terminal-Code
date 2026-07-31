@@ -523,10 +523,58 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 deterministic eval 自动触发无直接关系。
 
+## 自动 Execution Eval
+
+本次把 deterministic eval 通过的 generated candidate 继续推进到 execution eval。自动 review 会调用 `run_execution_eval()`，生成 JSON/Markdown 报告，并通过 `generated_execution_evals` 返回结果。
+
+新增实现：
+
+- `mewcode/evolution/auto_review.py`：`review_ready_skill_candidates()` 新增 `generated_execution_evals` 字段。
+- `mewcode/evolution/auto_review.py`：关闭自进化时也返回空 execution evals，保持结构稳定。
+- `mewcode/evolution/auto_review.py`：新增 `_run_execution_evals_for_generated_candidates()`，只处理 deterministic eval 成功的 candidate。
+- `tests/test_evolution.py`：覆盖 execution eval 自动通过、报告写入、manifest 写入 `execution_eval_status=passed`。
+- `tests/test_evolution.py`：确认该阶段仍不创建 approval request。
+
+审批边界：
+
+- execution eval 通过后才具备提交审批的基础证据。
+- execution eval 失败时应保留报告，但不能进入审批队列。
+- 当前阶段仍不会自动 promote，用户仍必须审批。
+
+TDD 与验证：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_execution_eval_after_eval_passes -q
+1 failed  # 实现前红灯：结果缺少 generated_execution_evals
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_execution_eval_after_eval_passes -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_eval_after_materializing_cases tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions -q
+2 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+69 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+252 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 execution eval 自动触发无直接关系。
+
 ## 剩余工作
 
 - 扩展自动候选 skill 抽取：从当前显式 usage log 扩展到对话轨迹、工具结果、用户纠正和失败记录。
-- deterministic eval 通过后，继续跑 execution eval，再进入 approval request。
+- execution eval 通过后，自动创建 approval request。
 - 完善用户可见审批入口：补拒绝路径 UI 测试、manual/deferred 差异化展示和批量审批队列视图。
 - 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。

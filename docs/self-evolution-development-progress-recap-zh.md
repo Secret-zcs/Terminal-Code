@@ -1554,3 +1554,72 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 在 deterministic eval 通过后触发 execution eval，生成用户可见 JSON/Markdown 报告。
 - execution eval 通过后再提交 approval request，让用户审批时看到完整测试证据。
 - 若 execution eval 失败，保留 candidate 和报告，但不进入审批队列。
+
+## 29. 最新推进记录：自动 Execution Eval
+
+日期：2026-07-31
+
+本次把自动 deterministic eval 继续推进到 execution eval。自动 review 只会对 deterministic eval 通过的 generated candidate 调用 `run_execution_eval()`，生成用户可见 JSON/Markdown execution eval 报告，并通过 `generated_execution_evals` 返回结果。
+
+修改内容：
+
+- 修改 `mewcode/evolution/auto_review.py`：关闭自进化时返回 `generated_execution_evals: []`。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_run_execution_evals_for_generated_candidates()`，只对 `ok=True` 的 deterministic eval 结果运行 execution eval。
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_runs_execution_eval_after_eval_passes`，验证 execution eval 自动通过、报告写入、manifest 写入 `execution_eval_status=passed`。
+- 修改 `tests/test_evolution.py`：更新 deterministic eval 测试，让 execution report 由新测试负责验证。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：记录本次边界和验证结果。
+
+当前链路：
+
+```text
+skill usage failure/user_feedback
+-> auto_review 生成 patch proposal
+-> gate 后写入 eval case
+-> evaluate() 跑 deterministic eval
+-> run_execution_eval() 跑多轮 execution eval
+-> 写 eval_report.json / eval_report.md
+-> 仍不提交审批，不 promote
+```
+
+关键边界：
+
+- 已实现：candidate skill 能自动完成多轮 execution eval。
+- 已实现：execution eval 报告已可作为后续用户审批证据。
+- 已实现：deterministic eval 失败的 candidate 不会进入 execution eval。
+- 未实现：execution eval 通过后自动提交 approval request。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_execution_eval_after_eval_passes -q
+1 failed  # 实现前红灯：结果缺少 generated_execution_evals
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_execution_eval_after_eval_passes -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_runs_eval_after_materializing_cases tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions -q
+2 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+69 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+252 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次 execution eval 自动触发无直接关系。
+
+下一步计划：
+
+- execution eval 通过后自动创建 approval request，并把 request id 返回给调用方。
+- TUI review 需要能直接展示这类新创建 request 的 candidate diff 和 execution eval 报告。
+- approval request 仍必须等待用户 approve/reject，不能自动 promote。

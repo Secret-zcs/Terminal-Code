@@ -41,6 +41,7 @@ def review_ready_skill_candidates(
             "generated_candidate_reviews": [],
             "generated_eval_cases": [],
             "generated_evaluations": [],
+            "generated_execution_evals": [],
         }
 
     approval_mode = getattr(self_evolution_config, "skill_approval_mode", "manual")
@@ -81,6 +82,10 @@ def review_ready_skill_candidates(
         engine,
         generated_eval_cases,
     )
+    generated_execution_evals = _run_execution_evals_for_generated_candidates(
+        engine,
+        generated_evaluations,
+    )
 
     return {
         "status": (
@@ -96,6 +101,7 @@ def review_ready_skill_candidates(
         "generated_candidate_reviews": generated_candidate_reviews,
         "generated_eval_cases": generated_eval_cases,
         "generated_evaluations": generated_evaluations,
+        "generated_execution_evals": generated_execution_evals,
     }
 
 
@@ -195,3 +201,22 @@ def _evaluate_generated_candidates(
             "message": message,
         })
     return evaluations
+
+
+def _run_execution_evals_for_generated_candidates(
+    engine: EvolutionEngine,
+    generated_evaluations: list[dict],
+) -> list[dict]:
+    execution_evals: list[dict] = []
+    for evaluation in generated_evaluations:
+        if not evaluation.get("ok"):
+            continue
+        proposal_id = str(evaluation["proposal_id"])
+        ok, message = engine.run_execution_eval(proposal_id)
+        execution_evals.append({
+            "proposal_id": proposal_id,
+            "skill_name": evaluation["skill_name"],
+            "ok": ok,
+            "message": message,
+        })
+    return execution_evals

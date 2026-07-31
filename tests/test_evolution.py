@@ -1120,7 +1120,65 @@ class TestEvolutionEngine:
             .read_text(encoding="utf-8")
         )
         assert manifest["eval_status"] == "passed"
-        assert not EvolutionEngine(tmp_path).execution_eval_report_path(proposal.id).exists()
+        assert result["generated_execution_evals"][0]["proposal_id"] == proposal.id
+        assert result["requests"] == []
+
+    def test_self_evolution_review_runs_execution_eval_after_eval_passes(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+
+        proposal = EvolutionEngine(tmp_path).store.load_proposals()[0]
+        execution_evals = result["generated_execution_evals"]
+        assert len(execution_evals) == 1
+        assert execution_evals[0]["proposal_id"] == proposal.id
+        assert execution_evals[0]["ok"] is True
+        assert "passed" in execution_evals[0]["message"]
+        report = json.loads(
+            EvolutionEngine(tmp_path)
+            .execution_eval_report_path(proposal.id)
+            .read_text(encoding="utf-8")
+        )
+        assert report["status"] == "passed"
+        assert len(report["rounds"]) == 3
+        manifest = json.loads(
+            EvolutionEngine(tmp_path)
+            .candidate_manifest_path(proposal.id)
+            .read_text(encoding="utf-8")
+        )
+        assert manifest["execution_eval_status"] == "passed"
         assert result["requests"] == []
 
     def test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions(
