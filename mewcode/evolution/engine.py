@@ -1121,6 +1121,7 @@ class EvolutionEngine:
             eval_report = report_path.read_text(encoding="utf-8").strip()
         else:
             eval_report = f"(execution eval report not found: {report_path})"
+        fork_reviewer_evidence = self._render_fork_reviewer_evidence(proposal.id)
 
         lines = [
             "# Self-Evolution Skill Approval",
@@ -1137,11 +1138,20 @@ class EvolutionEngine:
             "",
             skill_preview.strip(),
             "",
+        ]
+        if fork_reviewer_evidence:
+            lines.extend([
+                "## Fork Reviewer Evidence",
+                "",
+                fork_reviewer_evidence.strip(),
+                "",
+            ])
+        lines.extend([
             "## Execution Eval Report",
             "",
             eval_report,
             "",
-        ]
+        ])
         return True, "\n".join(lines)
 
     def resolve_skill_approval_request(
@@ -1367,6 +1377,30 @@ class EvolutionEngine:
             "## Diff",
             "",
             body,
+            "",
+        ])
+
+    def _render_fork_reviewer_evidence(self, proposal_id: str) -> str:
+        matching_runs = [
+            run
+            for run in self.store.load_self_evolution_review_runs()
+            if proposal_id in run.summary.get("requests", [])
+        ]
+        if not matching_runs:
+            return ""
+        matching_runs.sort(key=lambda run: run.completed_at or run.created_at)
+        run = matching_runs[-1]
+        report_path = self.project_root / str(run.artifacts.get("report", ""))
+        if report_path.exists():
+            return report_path.read_text(encoding="utf-8")
+        return "\n".join([
+            "# Self-Evolution Fork Reviewer Run",
+            "",
+            f"- Run ID: `{run.id}`",
+            f"- Mode: `{run.mode}`",
+            f"- Status: `{run.status}`",
+            f"- Can promote: `{run.policy.get('can_promote')}`",
+            f"- Report: `(missing: {report_path})`",
             "",
         ])
 

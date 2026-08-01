@@ -766,6 +766,29 @@ class TestEvolutionEngine:
         assert "## Execution Eval Report" in review
         assert "Execution Eval Report" in review
 
+    def test_render_skill_approval_request_shows_fork_reviewer_evidence(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        engine = EvolutionEngine(tmp_path)
+        _make_ready_skill_candidate(engine)
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+        request = result["requests"][0]
+
+        ok, review = EvolutionEngine(tmp_path).render_skill_approval_request(
+            request.id
+        )
+
+        assert ok, review
+        assert "## Fork Reviewer Evidence" in review
+        assert "Self-Evolution Fork Reviewer Run" in review
+        assert "Can promote: `False`" in review
+
     def test_list_skill_approval_inbox_defaults_to_pending_requests(
         self, tmp_path: Path
     ) -> None:

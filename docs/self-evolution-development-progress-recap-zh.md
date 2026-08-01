@@ -1957,3 +1957,52 @@ PYTHONPATH=. pytest tests/test_evolution.py -q -k "self_evolution_review"
 - 把审批页接入 `review_run.report.md`，让用户审批时看到 fork reviewer 证据链。
 - 扩展 fork reviewer run 的输入快照，纳入触发 evidence 的摘要和来源。
 - 后续再把同步逻辑 fork 替换为受限真实 LLM child reviewer，但仍禁止 approve/promote。
+
+## 35. 最新推进记录：审批页展示 Fork Reviewer 证据链
+
+日期：2026-08-01
+
+本次把上一阶段生成的 `fork_reviewer` 运行报告接入 skill 审批详情。现在通过自动 review 生成的 approval request，在 `render_skill_approval_request()` 中会额外展示 `## Fork Reviewer Evidence`，用户可以在审批前看到 fork reviewer 的运行模式、状态、能力边界和是否允许 promote。
+
+修改内容：
+
+- 修改 `mewcode/evolution/engine.py`：审批详情渲染时查找包含当前 proposal id 的最新 `SelfEvolutionReviewRun`。
+- 修改 `mewcode/evolution/engine.py`：新增 `_render_fork_reviewer_evidence()`，优先读取 `review_runs/<run_id>/report.md`，报告缺失时回退到 run metadata。
+- 修改 `tests/test_evolution.py`：新增审批详情展示 fork reviewer evidence 的回归测试。
+- 修改本文档：记录审批证据链展示和验证结果。
+
+当前链路：
+
+```text
+auto review creates approval request
+-> fork reviewer run summary contains proposal id
+-> approval renderer finds latest matching run
+-> approval markdown includes Fork Reviewer Evidence
+-> user sees review policy before approve/reject
+```
+
+能力边界：
+
+- 已实现：自动 review 生成的审批请求会展示 fork reviewer 报告。
+- 已实现：直接手动提交的审批请求没有匹配 run 时，不强行展示空证据区。
+- 已实现：报告中明确显示 `Can promote: False`，避免用户误以为后台 reviewer 可自行启用 skill。
+- 未实现：审批页还没有展开原始 evidence 摘要和来源明细。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_fork_reviewer_evidence -q
+1 failed  # 实现前红灯：审批详情缺少 Fork Reviewer Evidence
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_fork_reviewer_evidence -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q -k "render_skill_approval_request or self_evolution_review"
+17 passed, 57 deselected
+```
+
+下一步计划：
+
+- 在 fork reviewer input/report 中加入触发 evidence 的摘要、source 和 metadata。
+- 审批页进一步展示 candidate 生成原因、eval case 列表和 execution eval 每轮摘要。
+- 后续再推进真实 LLM child reviewer，但保持只生成候选和审批申请，不允许 promote。
