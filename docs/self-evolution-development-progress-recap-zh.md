@@ -2320,6 +2320,54 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 
 下一步计划：
 
-- 增加 canary skill 临时注入机制。
 - 把 canary 执行结果纳入 approval request，要求候选 skill 正确执行多轮任务后才允许进入应用阶段。
+- 后续支持按 event 类型设置不同 threshold。
+
+## 42. 最新推进记录：候选 Skill Canary 临时注入
+
+日期：2026-08-01
+
+本次把 execution eval 从“复制候选 `SKILL.md` 到每轮 round 目录”推进为“在 child agent 沙盒中临时注入候选 skill”。每一轮执行评测都会在 `child_agent/.mewcode/skills/<skill>/SKILL.md` 写入候选 skill，并在 `input.json`、`result.json` 和 Markdown 报告里记录 canary 路径。正式项目 `.mewcode/skills` 仍不会被写入，只有审批通过或 trusted-auto 满足全部 gate 后才会 promote。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_run_execution_eval_injects_candidate_skill_into_child_agent_sandbox`，验证 canary skill 只出现在 child agent 沙盒。
+- 修改 `mewcode/evolution/engine.py`：`_write_execution_round_artifacts()` 将候选 skill 路径传入 child agent artifact 写入流程。
+- 修改 `mewcode/evolution/engine.py`：`_write_child_agent_artifacts()` 新增 `candidate_canary` 注入，把候选 skill 写到 `child_agent/.mewcode/skills/<name>/SKILL.md`。
+- 修改 `mewcode/evolution/engine.py`：child agent `input.json`、`tool_policy.json`、`transcript.md`、`result.json` 和 execution eval Markdown 都记录 canary 注入信息。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 canary 注入语义、边界和验证结果。
+
+当前链路：
+
+```text
+candidate SKILL.md
+-> run_execution_eval()
+-> round sandbox
+-> child_agent/.mewcode/skills/<skill>/SKILL.md
+-> scripted/deterministic child agent uses candidate_canary
+-> report records canary skill path
+-> approval/promote gate still unchanged
+```
+
+安全边界：
+
+- 已实现：canary 写入范围限制在 execution sandbox 的 child agent 目录。
+- 已实现：正式项目 `.mewcode/skills/<skill>/SKILL.md` 在 execution eval 阶段不存在，避免未审批 skill 提前生效。
+- 已实现：canary 注入结果进入 `input.json` 和 `result.json`，后续审批页读取 execution eval report 时能追溯测试使用的 skill 文件。
+- 未实现：独立的长期 canary 观察窗口；当前 canary 是 execution eval 内的多轮隔离执行。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_injects_candidate_skill_into_child_agent_sandbox -q
+1 failed  # 实现前红灯：child_agent/.mewcode/skills/<skill>/SKILL.md 不存在
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_injects_candidate_skill_into_child_agent_sandbox -q
+1 passed
+```
+
+下一步计划：
+
+- 将 canary 通过轮次摘要显式展示到 approval request 顶部，降低用户审批时翻报告成本。
+- 增加 canary 失败时阻止 approval request 的回归测试。
 - 后续支持按 event 类型设置不同 threshold。

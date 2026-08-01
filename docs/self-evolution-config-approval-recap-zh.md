@@ -884,3 +884,43 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts -q
 1 passed
 ```
+
+## Candidate Canary 执行产物
+
+execution eval 现在会把候选 skill 作为 canary 临时注入到每轮 child agent 沙盒，而不是直接写入正式项目 skill 目录。审批请求仍然依赖 execution eval 通过；`trusted-auto` 也仍然只能在 deterministic eval 和 execution eval 全部通过后自动 promote。
+
+每轮产物新增：
+
+```text
+.mewcode/evolution/candidates/<proposal_id>/execution_sandbox/
+  round_XX_<case>/
+    child_agent/
+      .mewcode/skills/<skill>/SKILL.md
+      input.json
+      tool_policy.json
+      transcript.md
+      final_answer.md
+```
+
+关键字段：
+
+- `input.json.injected_skill.mode = candidate_canary`
+- `input.json.injected_skill.path = <child_agent canary SKILL.md>`
+- `result.json.fork_agent.canary_skill.path = <child_agent canary SKILL.md>`
+- execution eval Markdown 每轮展示 `Canary Skill`
+
+关键边界：
+
+- canary 注入只发生在 execution eval sandbox 内，不会提前写入 `.mewcode/skills`。
+- approval request 和 trusted-auto promote 仍读取 execution eval 状态，不会因为存在 canary 文件而绕过审批。
+- canary 的作用是证明候选 skill 在隔离 child agent 中能完成多轮任务；正式启用仍由 approval/promote 流程决定。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_injects_candidate_skill_into_child_agent_sandbox -q
+1 failed  # 实现前红灯：child_agent/.mewcode/skills/<skill>/SKILL.md 不存在
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_injects_candidate_skill_into_child_agent_sandbox -q
+1 passed
+```

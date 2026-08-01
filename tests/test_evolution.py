@@ -446,6 +446,58 @@ class TestEvolutionEngine:
         assert "Child Agent" in markdown
         assert "Sandbox" in markdown
 
+    def test_run_execution_eval_injects_candidate_skill_into_child_agent_sandbox(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="debug-regression-loop",
+            description="复杂调试任务的回归测试优先流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小修复。\n",
+        )
+        _add_debug_eval_cases(engine, proposal.id)
+        engine.evaluate(proposal.id)
+
+        ok, _ = engine.run_execution_eval(proposal.id)
+
+        assert ok
+        report = json.loads(
+            engine.execution_eval_report_path(proposal.id).read_text(encoding="utf-8")
+        )
+        candidate_skill = engine.candidate_skill_path(proposal.id).read_text(
+            encoding="utf-8"
+        )
+        assert not (
+            tmp_path / ".mewcode" / "skills" / "debug-regression-loop" / "SKILL.md"
+        ).exists()
+        for round_ in report["rounds"]:
+            child_agent_dir = Path(round_["artifacts"]["child_agent"])
+            canary_path = (
+                child_agent_dir
+                / ".mewcode"
+                / "skills"
+                / "debug-regression-loop"
+                / "SKILL.md"
+            )
+            assert canary_path.is_file()
+            assert canary_path.read_text(encoding="utf-8") == candidate_skill
+            input_payload = json.loads(
+                (child_agent_dir / "input.json").read_text(encoding="utf-8")
+            )
+            result_payload = json.loads(
+                (Path(round_["sandbox_dir"]) / "result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            assert input_payload["injected_skill"] == {
+                "mode": "candidate_canary",
+                "name": "debug-regression-loop",
+                "path": str(canary_path),
+            }
+            assert result_payload["fork_agent"]["canary_skill"]["path"] == str(
+                canary_path
+            )
+
     def test_run_execution_eval_executes_scripted_workspace_assertions(
         self, tmp_path: Path
     ) -> None:

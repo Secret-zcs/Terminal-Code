@@ -1674,6 +1674,7 @@ class EvolutionEngine:
         )
         fork_agent = self._write_child_agent_artifacts(
             round_dir,
+            candidate_path,
             skill,
             eval_case,
             rendered,
@@ -1698,6 +1699,7 @@ class EvolutionEngine:
     def _write_child_agent_artifacts(
         self,
         round_dir: Path,
+        candidate_path: Path,
         skill,
         eval_case: dict,
         rendered: str,
@@ -1705,6 +1707,20 @@ class EvolutionEngine:
     ) -> dict:
         child_dir = round_dir / "child_agent"
         child_dir.mkdir(parents=True, exist_ok=False)
+        canary_skill_path = (
+            child_dir / ".mewcode" / "skills" / skill.name / "SKILL.md"
+        )
+        canary_skill_path.parent.mkdir(parents=True, exist_ok=False)
+        canary_skill_path.write_text(
+            candidate_path.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        injected_skill = {
+            "mode": "candidate_canary",
+            "name": skill.name,
+            "path": str(canary_skill_path),
+        }
+        round_record["artifacts"]["canary_skill"] = str(canary_skill_path)
         input_path = child_dir / "input.json"
         tool_policy_path = child_dir / "tool_policy.json"
         transcript_path = child_dir / "transcript.md"
@@ -1714,6 +1730,7 @@ class EvolutionEngine:
             "task": eval_case["task"],
             "skill_name": skill.name,
             "skill_description": skill.description,
+            "injected_skill": injected_skill,
             "rendered_prompt": rendered,
             "must_contain": eval_case["must_contain"],
             "must_not_contain": eval_case.get("must_not_contain", []),
@@ -1731,6 +1748,7 @@ class EvolutionEngine:
             "project_write": "disabled",
             "max_retries": 1,
             "runner": runner,
+            "skill_injection": "candidate_canary",
         }
         workspace_path = child_dir / "workspace"
         workspace_path.mkdir(parents=True, exist_ok=False)
@@ -1808,6 +1826,7 @@ class EvolutionEngine:
             f"- Runner: {runner}",
             "- Network: disabled",
             "- Project writes: disabled",
+            "- Skill injection: candidate_canary",
             "",
             "## User Task",
             "",
@@ -1868,6 +1887,7 @@ class EvolutionEngine:
             "tool_results": tool_results,
             "turns": turns,
             "assertions": assertions,
+            "canary_skill": injected_skill,
         }
 
     def _write_workspace_seed_files(
@@ -2236,6 +2256,7 @@ class EvolutionEngine:
                 f"- Status: `{round_['status']}`",
                 f"- Sandbox: `{round_.get('sandbox_dir', '(none)')}`",
                 f"- Child Agent: `{round_.get('artifacts', {}).get('child_agent', '(none)')}`",
+                f"- Canary Skill: `{round_.get('artifacts', {}).get('canary_skill', '(none)')}`",
                 f"- Must contain: {', '.join(round_['must_contain'])}",
                 f"- Must not contain: {', '.join(round_['must_not_contain']) or '(none)'}",
                 f"- Result: {round_['execution_summary']}",
