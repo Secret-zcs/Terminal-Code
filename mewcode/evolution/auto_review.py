@@ -13,14 +13,26 @@ from mewcode.evolution.models import SelfEvolutionReviewRun, new_evolution_id
 
 def format_review_notification(result: dict) -> str:
     requests = result.get("requests", [])
-    if not requests:
+    blocked = result.get("blocked_generated_candidates", [])
+    if not requests and not blocked:
         return ""
-    lines = ["Self-evolution approval request(s) ready:"]
-    for request in requests:
-        lines.append(
-            f"- {request.proposal_id} / {request.skill_name} "
-            f"mode={request.approval_mode} report={request.eval_report_markdown}"
-        )
+    lines = []
+    if requests:
+        lines.append("Self-evolution approval request(s) ready:")
+        for request in requests:
+            lines.append(
+                f"- {request.proposal_id} / {request.skill_name} "
+                f"mode={request.approval_mode} report={request.eval_report_markdown}"
+            )
+    if blocked:
+        if lines:
+            lines.append("")
+        lines.append("Self-evolution blocked generated candidate(s):")
+        for item in blocked:
+            lines.append(
+                f"- {item.get('proposal_id')} / {item.get('skill_name')} "
+                f"reason={item.get('reason')}"
+            )
     return "\n".join(lines)
 
 

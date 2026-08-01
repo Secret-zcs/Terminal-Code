@@ -1049,3 +1049,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_blocks_failed_generated_candidate_in_report -q
 1 passed
 ```
+
+## Blocked Candidate Notification
+
+`format_review_notification()` 现在除了 pending approval request，也会提示 blocked generated candidates。这样当 auto review 没有可审批项，但有候选 skill 因 canary 失败被阻断时，用户仍能在界面消息中看到原因。
+
+通知示例：
+
+```text
+Self-evolution blocked generated candidate(s):
+- prop_blocked / failing-generated-loop reason=generated candidate canary failed: 0/3 rounds passed
+```
+
+行为边界：
+
+- 通知只展示摘要，不会生成 approval request。
+- 如果同一轮同时存在 pending request 和 blocked candidate，通知会分两个段落展示。
+- 没有 request 且没有 blocked candidate 时，仍返回空字符串。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_blocked_generated_candidates -q
+1 failed  # 实现前红灯：blocked generated candidates 时 notification 为空
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_blocked_generated_candidates -q
+1 passed
+```

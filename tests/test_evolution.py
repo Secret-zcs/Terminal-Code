@@ -1100,6 +1100,24 @@ class TestEvolutionEngine:
         assert format_review_notification(second) == ""
         assert len(engine.store.load_skill_approval_requests()) == 1
 
+    def test_self_evolution_review_notification_shows_blocked_generated_candidates(
+        self,
+    ) -> None:
+        from mewcode.evolution.auto_review import format_review_notification
+
+        message = format_review_notification({
+            "requests": [],
+            "blocked_generated_candidates": [{
+                "proposal_id": "prop_blocked",
+                "skill_name": "failing-generated-loop",
+                "reason": "generated candidate canary failed: 0/3 rounds passed",
+            }],
+        })
+
+        assert "Self-evolution blocked generated candidate(s):" in message
+        assert "prop_blocked / failing-generated-loop" in message
+        assert "generated candidate canary failed: 0/3" in message
+
     def test_self_evolution_review_creates_usage_patch_candidate(
         self, tmp_path: Path
     ) -> None:

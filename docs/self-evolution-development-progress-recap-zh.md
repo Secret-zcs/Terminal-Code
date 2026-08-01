@@ -2553,5 +2553,47 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 
 下一步计划：
 
-- 把 blocked candidates 汇总到 approval/inbox 或 review notification 的摘要里。
+- 后续支持按 event 类型设置不同 threshold。
+
+## 47. 最新推进记录：Blocked Generated Candidate 通知摘要
+
+日期：2026-08-01
+
+本次把 blocked generated candidate 从“只在 fork reviewer report/manifest 可见”推进到“review notification 也会提示”。此前 `format_review_notification()` 只有 pending approval request 才返回消息；如果自进化只产生 blocked generated candidate，用户界面不会主动提示。现在即使没有 approval request，只要存在 `blocked_generated_candidates`，notification 也会输出候选 id、skill 名称和阻断原因。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_notification_shows_blocked_generated_candidates`。
+- 修改 `mewcode/evolution/auto_review.py`：`format_review_notification()` 同时处理 `requests` 和 `blocked_generated_candidates`。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 notification 行为变化。
+
+当前链路：
+
+```text
+blocked_generated_candidates present
+-> format_review_notification()
+-> Self-evolution blocked generated candidate(s)
+-> UI/app can surface blocked candidate reason
+```
+
+安全边界：
+
+- 已实现：blocked notification 只展示摘要，不创建审批请求、不 promote。
+- 已实现：如果同时有 requests 和 blocked candidates，会在同一通知中分段展示。
+- 已实现：没有 requests 且没有 blocked candidates 时仍返回空字符串。
+- 未实现：交互式 inbox 列表独立筛选 blocked candidates。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_blocked_generated_candidates -q
+1 failed  # 实现前红灯：blocked generated candidates 时 notification 为空
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_blocked_generated_candidates -q
+1 passed
+```
+
+下一步计划：
+
+- 支持交互式 inbox 列表按 blocked/generated/pending 分类展示。
 - 后续支持按 event 类型设置不同 threshold。
