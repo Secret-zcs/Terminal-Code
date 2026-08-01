@@ -956,3 +956,33 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_canary_execution_summary -q
 1 passed
 ```
+
+## Canary Failure 审批阻断
+
+候选 skill 的 canary execution eval 如果失败，系统现在会把阻断原因写入 candidate manifest，而不是只返回一个通用错误。
+
+新增 manifest 字段：
+
+```json
+{
+  "approval_status": "blocked",
+  "approval_blocked_reason": "canary execution eval failed: 0/1 rounds passed (runner=fork_agent_sandbox_deterministic)",
+  "approval_blocked_at": 178...
+}
+```
+
+行为边界：
+
+- `submit_skill_approval_request()` 不会为失败 canary 生成 approval request。
+- `manual`、`deferred` 和 `trusted-auto` 都共享同一个 execution eval gate。
+- 后续如果候选 skill 修复并重新通过 execution eval，生成 pending request 时会清空 blocked reason。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_blocks_failed_canary_execution_eval -q
+1 failed  # 实现前红灯：只抛通用 execution eval 错误，manifest 没有 blocked reason
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_blocks_failed_canary_execution_eval -q
+1 passed
+```

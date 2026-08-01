@@ -1075,9 +1075,9 @@ class EvolutionEngine:
         if not self._candidate_eval_passed(proposal.id):
             raise ValueError(f"proposal {proposal_id} must pass eval before approval request")
         if not self._candidate_execution_eval_passed(proposal.id):
-            raise ValueError(
-                f"proposal {proposal_id} must pass execution eval before approval request"
-            )
+            reason = self._candidate_approval_block_reason(proposal.id)
+            self._mark_candidate_approval_blocked(proposal, reason)
+            raise ValueError(f"proposal {proposal_id} blocked before approval request: {reason}")
 
         existing = self.store.get_pending_skill_approval_request(proposal.id)
         if existing is not None:
@@ -1513,6 +1513,8 @@ class EvolutionEngine:
             "approval_status": existing.get("approval_status", ""),
             "approval_mode": existing.get("approval_mode", ""),
             "approval_requested_at": existing.get("approval_requested_at", 0.0),
+            "approval_blocked_reason": existing.get("approval_blocked_reason", ""),
+            "approval_blocked_at": existing.get("approval_blocked_at", 0.0),
         }
         self.candidate_manifest_path(proposal.id).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
@@ -1542,6 +1544,29 @@ class EvolutionEngine:
         manifest["approval_status"] = request.status
         manifest["approval_mode"] = request.approval_mode
         manifest["approval_requested_at"] = request.created_at
+        manifest["approval_blocked_reason"] = ""
+        manifest["approval_blocked_at"] = 0.0
+        self.candidate_manifest_path(proposal.id).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _mark_candidate_approval_blocked(
+        self,
+        proposal: EvolutionProposal,
+        reason: str,
+    ) -> None:
+        manifest = self._load_candidate_manifest(proposal.id)
+        if not manifest:
+            payload = self._decode_skill_change(proposal.change)
+            self._write_candidate_manifest(proposal, payload, status="candidate")
+            manifest = self._load_candidate_manifest(proposal.id)
+        manifest["approval_request_id"] = ""
+        manifest["approval_status"] = "blocked"
+        manifest["approval_mode"] = ""
+        manifest["approval_requested_at"] = 0.0
+        manifest["approval_blocked_reason"] = reason
+        manifest["approval_blocked_at"] = time.time()
         self.candidate_manifest_path(proposal.id).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -1585,6 +1610,25 @@ class EvolutionEngine:
             self._load_candidate_manifest(proposal_id)
             .get("execution_eval_status") == "passed"
         )
+
+    def _candidate_approval_block_reason(self, proposal_id: str) -> str:
+        manifest = self._load_candidate_manifest(proposal_id)
+        status = str(manifest.get("execution_eval_status", "pending"))
+        report_path = self.execution_eval_report_path(proposal_id)
+        if status == "failed" and report_path.exists():
+            try:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                report = {}
+            summary = report.get("summary", {}) if isinstance(report, dict) else {}
+            passed = int(summary.get("passed", 0) or 0)
+            total = int(summary.get("total", 0) or 0)
+            runner = str(report.get("runner", "(unknown)")) if isinstance(report, dict) else "(unknown)"
+            return (
+                f"canary execution eval failed: {passed}/{total} rounds passed "
+                f"(runner={runner})"
+            )
+        return "candidate must pass execution eval before approval request"
 
     def _invalidate_candidate_eval(self, proposal: EvolutionProposal) -> None:
         manifest = self._load_candidate_manifest(proposal.id)

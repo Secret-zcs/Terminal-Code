@@ -797,6 +797,48 @@ class TestEvolutionEngine:
 
         assert engine.store.load_skill_approval_requests() == []
 
+    def test_submit_skill_approval_request_blocks_failed_canary_execution_eval(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="failing-canary-loop",
+            description="失败 canary 的审批阻断流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小补丁。\n",
+            allowed_tools=["ReadFile", "WriteFile"],
+        )
+        engine.add_eval_case(
+            proposal.id,
+            task="写出修复结果，但断言要求故意不匹配。",
+            must_contain=["复现失败", "最小补丁"],
+            scripted_tool_calls=[
+                {
+                    "tool": "WriteFile",
+                    "path": "result.txt",
+                    "content": "actual\n",
+                },
+            ],
+            expected_files={"result.txt": "expected\n"},
+        )
+        ok, message = engine.evaluate(proposal.id)
+        assert ok, message
+        ok, message = engine.run_execution_eval(proposal.id, min_cases=1)
+        assert not ok
+        assert "failed" in message
+
+        with pytest.raises(ValueError, match="canary execution eval failed: 0/1"):
+            engine.submit_skill_approval_request(proposal.id)
+
+        manifest = json.loads(
+            engine.candidate_manifest_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert manifest["approval_status"] == "blocked"
+        assert manifest["approval_blocked_reason"].startswith(
+            "canary execution eval failed: 0/1"
+        )
+        assert manifest["approval_blocked_at"] > 0
+        assert engine.store.load_skill_approval_requests() == []
+
     def test_render_skill_approval_request_shows_review_materials(
         self, tmp_path: Path
     ) -> None:

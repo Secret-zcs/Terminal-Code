@@ -2414,6 +2414,52 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 
 下一步计划：
 
-- 增加 canary 失败时阻止 approval request 的显式回归测试。
 - 把 canary 摘要同步到 fork reviewer report 的 generated execution eval 区块。
+- 后续支持按 event 类型设置不同 threshold。
+
+## 44. 最新推进记录：Canary 失败阻断审批并留痕
+
+日期：2026-08-01
+
+本次把“execution eval 未通过不能进入审批”从通用错误升级为可审计的 canary block 状态。候选 skill 如果在 canary execution eval 中失败，`submit_skill_approval_request()` 不会生成 approval request，并会在 candidate manifest 中记录 `approval_status=blocked`、`approval_blocked_reason` 和 `approval_blocked_at`。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_submit_skill_approval_request_blocks_failed_canary_execution_eval`，构造 expected file mismatch 的失败 canary。
+- 修改 `mewcode/evolution/engine.py`：`submit_skill_approval_request()` 在 execution eval 未通过时写入 blocked manifest，再抛出包含 canary 摘要的错误。
+- 修改 `mewcode/evolution/engine.py`：新增 `_mark_candidate_approval_blocked()`，专门记录审批阻断状态。
+- 修改 `mewcode/evolution/engine.py`：新增 `_candidate_approval_block_reason()`，从 execution eval JSON 提取 `0/1 rounds passed` 等失败摘要。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档阻断语义和验证结果。
+
+当前链路：
+
+```text
+candidate canary execution eval failed
+-> submit_skill_approval_request()
+-> manifest.approval_status = blocked
+-> manifest.approval_blocked_reason = canary execution eval failed: 0/1 rounds passed
+-> no approval request generated
+```
+
+安全边界：
+
+- 已实现：失败 canary 不会进入 manual/deferred/trusted-auto 审批队列。
+- 已实现：阻断原因写在 candidate manifest，后续 fork reviewer 或审批列表可以读取。
+- 已实现：如果后续重新跑 eval 并通过，真正生成 request 时会清空 blocked reason。
+- 未实现：fork reviewer report 尚未集中展示 blocked candidates；下一步会把 generated execution eval 的失败摘要汇总进去。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_blocks_failed_canary_execution_eval -q
+1 failed  # 实现前红灯：只抛通用 execution eval 错误，manifest 没有 blocked reason
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_blocks_failed_canary_execution_eval -q
+1 passed
+```
+
+下一步计划：
+
+- 把 canary 摘要同步到 fork reviewer report 的 generated execution eval 区块。
+- 在 auto review summary 中显式记录 blocked generated candidates。
 - 后续支持按 event 类型设置不同 threshold。
