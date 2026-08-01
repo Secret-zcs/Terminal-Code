@@ -38,12 +38,18 @@ def review_ready_skill_candidates(
         return _empty_review_result("disabled")
 
     approval_mode = getattr(self_evolution_config, "skill_approval_mode", "manual")
+    rollback_threshold = getattr(
+        self_evolution_config,
+        "trusted_auto_rollback_threshold",
+        1,
+    )
     engine = EvolutionEngine(project_root)
     review_run = _start_fork_reviewer_run(engine, approval_mode=approval_mode)
     try:
         result = _review_enabled_skill_candidates(
             engine,
             approval_mode=approval_mode,
+            trusted_auto_rollback_threshold=rollback_threshold,
         )
     except Exception as exc:
         _finish_fork_reviewer_run(
@@ -80,6 +86,7 @@ def _review_enabled_skill_candidates(
     engine: EvolutionEngine,
     *,
     approval_mode: str,
+    trusted_auto_rollback_threshold: int = 1,
 ) -> dict:
     requests = []
     skipped: list[dict] = []
@@ -87,6 +94,7 @@ def _review_enabled_skill_candidates(
     auto_quarantines = _auto_quarantine_trusted_auto_skills(
         engine,
         approval_mode=approval_mode,
+        threshold=trusted_auto_rollback_threshold,
     )
 
     for proposal in engine.store.load_proposals():
@@ -112,7 +120,14 @@ def _review_enabled_skill_candidates(
         requests.append(request)
 
     generated_candidates, generated_candidate_reviews = (
-        _generate_usage_patch_candidates(engine)
+        _generate_usage_patch_candidates(
+            engine,
+            suppressed_skills=(
+                _trusted_auto_managed_skill_names(engine)
+                if approval_mode == "trusted-auto"
+                else set()
+            ),
+        )
     )
     generated_eval_cases = _materialize_safe_eval_suggestions(
         engine,
@@ -373,9 +388,11 @@ def _auto_quarantine_trusted_auto_skills(
     engine: EvolutionEngine,
     *,
     approval_mode: str,
+    threshold: int,
 ) -> list[dict]:
     if approval_mode != "trusted-auto":
         return []
+    threshold = max(1, int(threshold))
 
     results: list[dict] = []
     usage = engine.load_skill_usage()
@@ -394,7 +411,7 @@ def _auto_quarantine_trusted_auto_skills(
             and str(record.get("event", "")).strip() in {"failure", "user_feedback"}
             and float(record.get("created_at", 0.0) or 0.0) > request.resolved_at
         ]
-        if not negative:
+        if len(negative) < threshold:
             continue
         reason = _trusted_auto_quarantine_reason(request, negative)
         ok, path = engine.quarantine_skill(
@@ -412,6 +429,18 @@ def _auto_quarantine_trusted_auto_skills(
             "message": path,
         })
     return results
+
+
+def _trusted_auto_managed_skill_names(engine: EvolutionEngine) -> set[str]:
+    names: set[str] = set()
+    for request in engine.store.load_skill_approval_requests():
+        if request.approval_mode != "trusted-auto":
+            continue
+        if request.status != "approved" or request.resolved_at <= 0:
+            continue
+        if engine.has_project_skill(request.skill_name):
+            names.add(request.skill_name)
+    return names
 
 
 def _trusted_auto_quarantine_reason(request, negative: list[dict]) -> str:
@@ -486,11 +515,16 @@ def _evidence_summary(summary: str, metadata: dict) -> str:
 
 def _generate_usage_patch_candidates(
     engine: EvolutionEngine,
+    *,
+    suppressed_skills: set[str] | None = None,
 ) -> tuple[list[str], list[dict]]:
     generated: list[str] = []
     reviews: list[dict] = []
+    suppressed = suppressed_skills or set()
     for suggestion in engine.suggest_quarantine(failure_threshold=2):
         skill_name = str(suggestion.get("skill_name", "")).strip()
+        if skill_name in suppressed:
+            continue
         if not skill_name or _has_open_patch_candidate(engine, skill_name):
             continue
         try:

@@ -1506,6 +1506,73 @@ class TestEvolutionEngine:
         assert usage[-1]["event"] == "quarantine"
         assert usage[-1]["metadata"]["source"] == "trusted-auto-rollback"
 
+    def test_self_evolution_review_trusted_auto_uses_rollback_threshold(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+        config = SelfEvolutionConfig(
+            enabled=True,
+            skill_approval_mode="trusted-auto",
+            trusted_auto_rollback_threshold=2,
+        )
+        first = review_ready_skill_candidates(tmp_path, config)
+        assert first["status"] == "auto-promoted"
+        promoted_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        assert promoted_path.exists()
+
+        EvolutionEngine(tmp_path).record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="post-promote-test",
+            metadata={"summary": "第一次新失败。"},
+        )
+
+        second = review_ready_skill_candidates(tmp_path, config)
+
+        assert second["auto_quarantines"] == []
+        assert second["generated_candidates"] == []
+        assert promoted_path.exists()
+
+        EvolutionEngine(tmp_path).record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="post-promote-test",
+            metadata={"summary": "第二次新失败。"},
+        )
+
+        third = review_ready_skill_candidates(tmp_path, config)
+
+        assert third["status"] == "quarantined"
+        assert third["auto_quarantines"][0]["negative_events"] == 2
+        assert not promoted_path.exists()
+
     def test_self_evolution_review_report_includes_usage_evidence(
         self, tmp_path: Path
     ) -> None:

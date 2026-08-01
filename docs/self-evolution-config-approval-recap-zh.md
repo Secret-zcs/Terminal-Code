@@ -805,3 +805,23 @@ PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_ev
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_quarantines_after_new_negative_usage -q
 1 passed
 ```
+
+## Trusted-Auto Rollback Threshold
+
+新增配置：
+
+```yaml
+self_evolution:
+  enabled: true
+  skill_approval_mode: trusted-auto
+  trusted_auto_rollback_threshold: 2
+```
+
+默认 `trusted_auto_rollback_threshold: 1`，表示 trusted-auto promote 后出现一条新的 `failure` 或 `user_feedback` usage 即 quarantine。设置为 `2` 后，需要两条 promote 后新负面 usage 才会触发自动隔离。该阈值不统计 promote 前用于生成 candidate 的历史失败。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_set_trusted_auto_rollback_threshold tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_uses_rollback_threshold -q
+2 passed
+```

@@ -2169,3 +2169,56 @@ PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_ev
 - 增加 canary skill 临时注入机制，让 trusted-auto 在正式 promote 前先经过真实任务试用。
 - 增加 rollback policy 配置，例如 `rollback_threshold`、`rollback_events` 和 `patch_after_quarantine`。
 - 在 TUI/报告中展示 trusted-auto 被隔离的原因和 quarantine 路径。
+
+## 39. 最新推进记录：Trusted-Auto Rollback Threshold 配置
+
+日期：2026-08-01
+
+本次把 trusted-auto 自动回滚从硬编码“一次新负面 usage 即隔离”扩展为可配置策略。新增 `self_evolution.trusted_auto_rollback_threshold`，默认值为 `1`，必须为正整数。设置为 `2` 时，trusted-auto promote 后需要两条新的 `failure` / `user_feedback` usage 才会触发 quarantine。
+
+修改内容：
+
+- 修改 `mewcode/validator.py`：新增 `trusted_auto_rollback_threshold` 默认值和正整数校验。
+- 修改 `mewcode/config.py`：`SelfEvolutionConfig` 新增 `trusted_auto_rollback_threshold` 字段，并从配置文件加载。
+- 修改 `mewcode/evolution/auto_review.py`：`review_ready_skill_candidates()` 读取 rollback threshold 并传入 trusted-auto rollback 检查。
+- 修改 `mewcode/evolution/auto_review.py`：`_auto_quarantine_trusted_auto_skills()` 按 threshold 判断是否 quarantine。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_trusted_auto_managed_skill_names()`，避免 trusted-auto 管理中的 skill 因 promote 前旧负面 usage 反复生成 patch candidate。
+- 修改 `tests/test_mcp.py`：新增配置解析 threshold 的测试。
+- 修改 `tests/test_evolution.py`：新增 threshold=2 时第一次新失败不隔离、第二次新失败才隔离的测试。
+
+当前链路：
+
+```text
+self_evolution.trusted_auto_rollback_threshold = 2
+-> trusted-auto promotes skill
+-> first post-promote negative usage
+-> no quarantine and no patch churn
+-> second post-promote negative usage
+-> quarantine triggered
+```
+
+安全边界：
+
+- 已实现：默认仍偏安全，threshold=1。
+- 已实现：threshold 只统计 promote 后的新负面 usage。
+- 已实现：未达到 threshold 时不会继续基于旧负面 usage 生成新的 trusted-auto patch candidate。
+- 未实现：按 event 类型分别设置阈值，例如 `failure=2`、`user_feedback=1`。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_set_trusted_auto_rollback_threshold tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_uses_rollback_threshold -q
+2 failed  # 实现前红灯：配置字段不存在，SelfEvolutionConfig 不接受 threshold
+
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_set_trusted_auto_rollback_threshold tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_uses_rollback_threshold -q
+2 passed
+
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_use_trusted_auto_approval tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_set_trusted_auto_rollback_threshold tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_promotes_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_keeps_existing_ready_candidate_pending tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_quarantines_after_new_negative_usage tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_uses_rollback_threshold -q
+6 passed
+```
+
+下一步计划：
+
+- 增加 canary skill 临时注入机制。
+- 增加 rollback event 类型配置。
+- 在审批/报告 UI 中展示当前 trusted-auto policy 参数。

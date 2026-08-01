@@ -228,6 +228,7 @@ def validate_self_evolution(raw_self_evolution: object) -> dict:
     defaults = {
         "enabled": False,
         "skill_approval_mode": "manual",
+        "trusted_auto_rollback_threshold": 1,
     }
 
     if raw_self_evolution is None:
@@ -252,10 +253,23 @@ def validate_self_evolution(raw_self_evolution: object) -> dict:
             f"'{approval_mode}', must be one of: "
             f"{', '.join(sorted(VALID_SELF_EVOLUTION_APPROVAL_MODES))}"
         )
+    rollback_threshold = raw_self_evolution.get(
+        "trusted_auto_rollback_threshold",
+        defaults["trusted_auto_rollback_threshold"],
+    )
+    if (
+        not isinstance(rollback_threshold, int)
+        or isinstance(rollback_threshold, bool)
+        or rollback_threshold <= 0
+    ):
+        raise ConfigError(
+            "self_evolution.trusted_auto_rollback_threshold must be a positive integer"
+        )
 
     return {
         "enabled": enabled,
         "skill_approval_mode": approval_mode,
+        "trusted_auto_rollback_threshold": rollback_threshold,
     }
 
 

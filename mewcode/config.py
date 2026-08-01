@@ -133,6 +133,7 @@ class WorktreeConfig:
 class SelfEvolutionConfig:
     enabled: bool = False
     skill_approval_mode: str = "manual"
+    trusted_auto_rollback_threshold: int = 1
 
     @property
     def requires_user_approval(self) -> bool:
@@ -202,6 +203,7 @@ def _load_single_file(path: Path) -> AppConfig:
     self_evolution_cfg = SelfEvolutionConfig(
         enabled=se["enabled"],
         skill_approval_mode=se["skill_approval_mode"],
+        trusted_auto_rollback_threshold=se["trusted_auto_rollback_threshold"],
     )
 
     return AppConfig(
