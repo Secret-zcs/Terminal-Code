@@ -1873,6 +1873,84 @@ class TestEvolutionEngine:
         assert "canary_mode=`candidate_canary`" in report
         assert "canary_injections=`3`" in report
 
+    def test_self_evolution_review_blocks_failed_generated_candidate_in_report(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.evolution.auto_review import (
+            _block_failed_generated_candidates,
+            _render_fork_reviewer_report,
+            _run_execution_evals_for_generated_candidates,
+        )
+        from mewcode.evolution.models import SelfEvolutionReviewRun
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="failing-generated-loop",
+            description="自动生成候选的失败 canary 阻断流程",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小补丁。\n",
+            allowed_tools=["WriteFile"],
+        )
+        for index in range(3):
+            engine.add_eval_case(
+                proposal.id,
+                task=f"写出修复结果，但第 {index + 1} 轮断言要求故意不匹配。",
+                must_contain=["复现失败", "最小补丁"],
+                scripted_tool_calls=[
+                    {
+                        "tool": "WriteFile",
+                        "path": "result.txt",
+                        "content": "actual\n",
+                    },
+                ],
+                expected_files={"result.txt": "expected\n"},
+            )
+        ok, message = engine.evaluate(proposal.id)
+        assert ok, message
+        execution_evals = _run_execution_evals_for_generated_candidates(
+            engine,
+            [{
+                "proposal_id": proposal.id,
+                "skill_name": "failing-generated-loop",
+                "ok": True,
+            }],
+        )
+        assert execution_evals[0]["ok"] is False
+
+        blocked = _block_failed_generated_candidates(engine, execution_evals)
+
+        manifest = json.loads(
+            engine.candidate_manifest_path(proposal.id).read_text(encoding="utf-8")
+        )
+        assert manifest["approval_status"] == "blocked"
+        assert blocked[0]["proposal_id"] == proposal.id
+        assert blocked[0]["reason"].startswith(
+            "generated candidate canary failed: 0/3"
+        )
+        run = SelfEvolutionReviewRun(
+            id="review_test",
+            mode="fork_reviewer",
+            status="generated",
+            approval_mode="manual",
+            artifacts={},
+            policy={"can_approve": False, "can_promote": False, "project_write": "disabled"},
+            summary={
+                "requests": [],
+                "auto_promotions": [],
+                "auto_quarantines": [],
+                "generated_candidates": [proposal.id],
+                "generated_eval_cases": [],
+                "generated_execution_evals": execution_evals,
+                "blocked_generated_candidates": blocked,
+                "ingested_usage": [],
+            },
+        )
+        report = _render_fork_reviewer_report(run)
+        assert "## Blocked Generated Candidates" in report
+        assert f"proposal=`{proposal.id}`" in report
+        assert "skill=`failing-generated-loop`" in report
+        assert "rounds=`0/3`" in report
+        assert "reason=generated candidate canary failed: 0/3" in report
+
     def test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions(
         self, tmp_path: Path
     ) -> None:

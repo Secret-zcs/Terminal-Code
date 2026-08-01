@@ -1021,3 +1021,31 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_generated_canary_summary -q
 1 passed
 ```
+
+## Blocked Generated Candidates
+
+fork reviewer report 现在会把 generated candidate 的 canary 失败单独展示为 `Blocked Generated Candidates`。这类候选不会进入 approval request，也不会被 `trusted-auto` 自动应用。
+
+新增区块示例：
+
+```text
+## Blocked Generated Candidates
+
+- proposal=`prop_xxx` skill=`failing-generated-loop` blocked=`True` runner=`fork_agent_sandbox_deterministic` rounds=`0/3` reason=generated candidate canary failed: 0/3 rounds passed (...)
+```
+
+行为边界：
+
+- blocked 只针对 generated execution eval 中 `ok=False` 的候选。
+- 系统会同步写入 candidate manifest：`approval_status=blocked` 和 `approval_blocked_reason`。
+- blocked candidate 不会进入 manual/deferred 审批队列，也不会触发 trusted-auto promote。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_blocks_failed_generated_candidate_in_report -q
+1 failed  # 实现前红灯：缺少 _block_failed_generated_candidates
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_blocks_failed_generated_candidate_in_report -q
+1 passed
+```

@@ -86,6 +86,7 @@ def _empty_review_result(status: str) -> dict:
         "generated_eval_cases": [],
         "generated_evaluations": [],
         "generated_execution_evals": [],
+        "blocked_generated_candidates": [],
         "auto_promotions": [],
         "auto_quarantines": [],
         "ingested_usage": [],
@@ -154,6 +155,10 @@ def _review_enabled_skill_candidates(
         engine,
         generated_evaluations,
     )
+    blocked_generated_candidates = _block_failed_generated_candidates(
+        engine,
+        generated_execution_evals,
+    )
     generated_requests, generated_request_skips, auto_promotions = (
         _submit_generated_approval_requests(
             engine,
@@ -172,6 +177,8 @@ def _review_enabled_skill_candidates(
             if auto_quarantines
             else "auto-promoted"
             if auto_promotions
+            else "blocked"
+            if blocked_generated_candidates
             else "generated"
             if generated_candidates
             else "idle"
@@ -183,6 +190,7 @@ def _review_enabled_skill_candidates(
         "generated_eval_cases": generated_eval_cases,
         "generated_evaluations": generated_evaluations,
         "generated_execution_evals": generated_execution_evals,
+        "blocked_generated_candidates": blocked_generated_candidates,
         "auto_promotions": auto_promotions,
         "auto_quarantines": auto_quarantines,
         "ingested_usage": ingested_usage,
@@ -312,6 +320,9 @@ def _review_run_summary(engine: EvolutionEngine, result: dict) -> dict:
         "generated_execution_evals": list(
             result.get("generated_execution_evals", [])
         ),
+        "blocked_generated_candidates": list(
+            result.get("blocked_generated_candidates", [])
+        ),
         "ingested_usage": list(result.get("ingested_usage", [])),
     }
 
@@ -409,6 +420,20 @@ def _render_fork_reviewer_report(run: SelfEvolutionReviewRun) -> str:
                 f"canary_mode=`{canary.get('mode', '')}` "
                 f"canary_injections=`{canary.get('injections', 0)}` "
                 f"message={item.get('message')}"
+            )
+    blocked_generated_candidates = summary.get("blocked_generated_candidates", [])
+    if blocked_generated_candidates:
+        lines.extend(["", "## Blocked Generated Candidates", ""])
+        for item in blocked_generated_candidates:
+            canary = item.get("canary_summary", {})
+            lines.append(
+                "- "
+                f"proposal=`{item.get('proposal_id')}` "
+                f"skill=`{item.get('skill_name')}` "
+                f"blocked=`{item.get('blocked')}` "
+                f"runner=`{canary.get('runner', '')}` "
+                f"rounds=`{canary.get('rounds', '')}` "
+                f"reason={item.get('reason')}"
             )
     if run.error:
         lines.append(f"- Error: `{run.error}`")
@@ -726,6 +751,44 @@ def _execution_eval_canary_summary(
         "injections": len(canary_paths),
         "first_canary_skill": canary_paths[0] if canary_paths else "",
     }
+
+
+def _block_failed_generated_candidates(
+    engine: EvolutionEngine,
+    generated_execution_evals: list[dict],
+) -> list[dict]:
+    blocked: list[dict] = []
+    for execution_eval in generated_execution_evals:
+        if execution_eval.get("ok"):
+            continue
+        proposal_id = str(execution_eval.get("proposal_id", "")).strip()
+        if not proposal_id:
+            continue
+        proposal = engine.store.get_proposal(proposal_id)
+        if proposal is None:
+            continue
+        reason = _generated_candidate_block_reason(execution_eval)
+        engine._mark_candidate_approval_blocked(proposal, reason)
+        blocked.append({
+            "proposal_id": proposal_id,
+            "skill_name": execution_eval.get("skill_name", ""),
+            "reason": reason,
+            "blocked": True,
+            "canary_summary": dict(execution_eval.get("canary_summary", {})),
+        })
+    return blocked
+
+
+def _generated_candidate_block_reason(execution_eval: dict) -> str:
+    canary = execution_eval.get("canary_summary", {})
+    rounds = str(canary.get("rounds", "0/0")).strip() or "0/0"
+    runner = str(canary.get("runner", "")).strip() or "unknown"
+    message = str(execution_eval.get("message", "")).strip()
+    suffix = f": {message}" if message else ""
+    return (
+        f"generated candidate canary failed: {rounds} rounds passed "
+        f"(runner={runner}){suffix}"
+    )
 
 
 def _submit_generated_approval_requests(

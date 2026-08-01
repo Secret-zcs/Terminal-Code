@@ -2506,6 +2506,52 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 
 下一步计划：
 
-- 在 auto review summary 中显式记录 blocked generated candidates。
-- 把 blocked candidates 渲染成 fork reviewer report 独立区块。
+- 后续支持按 event 类型设置不同 threshold。
+
+## 46. 最新推进记录：Blocked Generated Candidates 独立审计区块
+
+日期：2026-08-01
+
+本次把 generated candidate 的 canary 失败从“execution eval 中的一条失败结果”提升为“显式 blocked generated candidate”。如果自动生成的候选 skill 通过 deterministic eval，但在 canary execution eval 中失败，auto review 会写入 candidate manifest 的 blocked 状态，并在 fork reviewer report 中新增 `## Blocked Generated Candidates` 独立区块。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_blocks_failed_generated_candidate_in_report`，用真实 execution eval 构造三轮 canary 失败候选。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_block_failed_generated_candidates()`，把 failed generated execution eval 转为 blocked candidate。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_generated_candidate_block_reason()`，生成 `generated candidate canary failed: 0/3 rounds passed` 格式的原因。
+- 修改 `mewcode/evolution/auto_review.py`：`_review_enabled_skill_candidates()` 和 `_review_run_summary()` 纳入 `blocked_generated_candidates`。
+- 修改 `mewcode/evolution/auto_review.py`：`_render_fork_reviewer_report()` 新增 `## Blocked Generated Candidates`，展示 proposal、skill、runner、rounds 和 reason。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 blocked generated candidate 的行为边界和验证结果。
+
+当前链路：
+
+```text
+generated candidate
+-> deterministic eval passed
+-> canary execution eval failed
+-> manifest.approval_status = blocked
+-> review summary blocked_generated_candidates
+-> fork reviewer report Blocked Generated Candidates
+```
+
+安全边界：
+
+- 已实现：失败 generated candidate 不会进入 approval request，也不会被 trusted-auto promote。
+- 已实现：blocked reason 写入 candidate manifest，后续可以从 candidate 目录追踪原因。
+- 已实现：fork reviewer report 把 blocked candidates 与普通 generated execution eval 分开展示，避免失败候选被淹没。
+- 未实现：把 blocked candidates 汇总到交互式 inbox 列表；当前在 fork reviewer report 和 manifest 可见。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_blocks_failed_generated_candidate_in_report -q
+1 failed  # 实现前红灯：缺少 _block_failed_generated_candidates
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_blocks_failed_generated_candidate_in_report -q
+1 passed
+```
+
+下一步计划：
+
+- 把 blocked candidates 汇总到 approval/inbox 或 review notification 的摘要里。
 - 后续支持按 event 类型设置不同 threshold。
