@@ -2460,6 +2460,52 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_sk
 
 下一步计划：
 
-- 把 canary 摘要同步到 fork reviewer report 的 generated execution eval 区块。
 - 在 auto review summary 中显式记录 blocked generated candidates。
+- 后续支持按 event 类型设置不同 threshold。
+
+## 45. 最新推进记录：Fork Reviewer 汇总 Generated Canary Eval
+
+日期：2026-08-01
+
+本次把自动生成 candidate 的 execution eval canary 摘要同步进 fork reviewer report。此前 canary 摘要只在 approval request 和 execution eval report 内可见；现在 fork reviewer 的 `report.md` 会新增 `## Generated Execution Evals`，集中展示 proposal、skill、执行是否通过、runner、通过轮次、canary 模式和注入次数。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_report_includes_generated_canary_summary`，要求 fork reviewer report 展示 generated execution eval 的 canary 摘要。
+- 修改 `mewcode/evolution/auto_review.py`：`_run_execution_evals_for_generated_candidates()` 在每次 execution eval 后读取 report JSON，并附加 `canary_summary`。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_execution_eval_canary_summary()`，提取 runner、`passed/total`、`candidate_canary` 模式和 canary 注入数量。
+- 修改 `mewcode/evolution/auto_review.py`：`_render_fork_reviewer_report()` 新增 `## Generated Execution Evals` 区块。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 fork reviewer report 新增摘要字段和验证结果。
+
+当前链路：
+
+```text
+auto review generates candidate
+-> deterministic eval passed
+-> execution eval runs candidate_canary in child agent sandbox
+-> auto_review reads execution eval JSON
+-> fork reviewer report renders Generated Execution Evals
+```
+
+安全边界：
+
+- 已实现：fork reviewer report 只读取 execution eval JSON，不重新执行候选 skill。
+- 已实现：报告展示 canary 摘要，不改变 approval/promote gate。
+- 已实现：manual/deferred/trusted-auto 都能通过同一 report 看到 generated candidate 的 canary 证据。
+- 未实现：失败 generated candidate 的 blocked reason 还没有单独形成 `Blocked Candidates` 区块。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_generated_canary_summary -q
+1 failed  # 实现前红灯：fork reviewer report 缺少 Generated Execution Evals
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_generated_canary_summary -q
+1 passed
+```
+
+下一步计划：
+
+- 在 auto review summary 中显式记录 blocked generated candidates。
+- 把 blocked candidates 渲染成 fork reviewer report 独立区块。
 - 后续支持按 event 类型设置不同 threshold。

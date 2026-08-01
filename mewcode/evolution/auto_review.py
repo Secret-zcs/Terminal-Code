@@ -394,6 +394,22 @@ def _render_fork_reviewer_report(run: SelfEvolutionReviewRun) -> str:
                 f"path=`{item.get('path')}` "
                 f"reason={item.get('reason')}"
             )
+    generated_execution_evals = summary.get("generated_execution_evals", [])
+    if generated_execution_evals:
+        lines.extend(["", "## Generated Execution Evals", ""])
+        for item in generated_execution_evals:
+            canary = item.get("canary_summary", {})
+            lines.append(
+                "- "
+                f"proposal=`{item.get('proposal_id')}` "
+                f"skill=`{item.get('skill_name')}` "
+                f"ok=`{item.get('ok')}` "
+                f"runner=`{canary.get('runner', '')}` "
+                f"rounds=`{canary.get('rounds', '')}` "
+                f"canary_mode=`{canary.get('mode', '')}` "
+                f"canary_injections=`{canary.get('injections', 0)}` "
+                f"message={item.get('message')}"
+            )
     if run.error:
         lines.append(f"- Error: `{run.error}`")
     evidence_by_request = summary.get("request_evidence", {})
@@ -678,8 +694,38 @@ def _run_execution_evals_for_generated_candidates(
             "skill_name": evaluation["skill_name"],
             "ok": ok,
             "message": message,
+            "canary_summary": _execution_eval_canary_summary(engine, proposal_id),
         })
     return execution_evals
+
+
+def _execution_eval_canary_summary(
+    engine: EvolutionEngine,
+    proposal_id: str,
+) -> dict:
+    report_path = engine.execution_eval_report_path(proposal_id)
+    if not report_path.exists():
+        return {}
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    rounds = list(report.get("rounds", [])) if isinstance(report, dict) else []
+    summary = report.get("summary", {}) if isinstance(report, dict) else {}
+    passed = int(summary.get("passed", 0) or 0)
+    total = int(summary.get("total", len(rounds)) or 0)
+    canary_paths = [
+        str(round_.get("artifacts", {}).get("canary_skill", "")).strip()
+        for round_ in rounds
+        if str(round_.get("artifacts", {}).get("canary_skill", "")).strip()
+    ]
+    return {
+        "runner": str(report.get("runner", "")),
+        "rounds": f"{passed}/{total}",
+        "mode": "candidate_canary" if canary_paths else "",
+        "injections": len(canary_paths),
+        "first_canary_skill": canary_paths[0] if canary_paths else "",
+    }
 
 
 def _submit_generated_approval_requests(

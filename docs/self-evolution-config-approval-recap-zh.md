@@ -986,3 +986,38 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_sk
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_submit_skill_approval_request_blocks_failed_canary_execution_eval -q
 1 passed
 ```
+
+## Fork Reviewer Generated Canary 摘要
+
+fork reviewer report 现在会集中展示 auto review 本轮生成 candidate 后的 execution eval canary 摘要。审批人或调试者不需要分别打开每个 `eval_report.json`，即可先看到 generated candidate 是否完成多轮 canary 执行。
+
+新增区块示例：
+
+```text
+## Generated Execution Evals
+
+- proposal=`prop_xxx` skill=`review-loop` ok=`True` runner=`fork_agent_sandbox_deterministic` rounds=`3/3` canary_mode=`candidate_canary` canary_injections=`3`
+```
+
+关键字段：
+
+- `runner`：execution eval runner，例如 `fork_agent_sandbox_deterministic`。
+- `rounds`：通过轮次摘要，例如 `3/3`。
+- `canary_mode`：当前固定为 `candidate_canary`。
+- `canary_injections`：候选 skill 被注入 child agent 沙盒的轮次数。
+
+行为边界：
+
+- fork reviewer 只读取已生成的 execution eval JSON，不重新执行 candidate。
+- 该摘要只增强审计可见性，不改变 approval request、trusted-auto promote 或 rollback gate。
+- 如果 execution eval report 缺失或损坏，摘要字段为空，不会伪造通过结果。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_generated_canary_summary -q
+1 failed  # 实现前红灯：fork reviewer report 缺少 Generated Execution Evals
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_generated_canary_summary -q
+1 passed
+```
