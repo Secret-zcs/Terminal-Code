@@ -1076,3 +1076,44 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_blocked_generated_candidates -q
 1 passed
 ```
+
+## Self-Evolution Inbox 分类
+
+`EvolutionEngine.list_self_evolution_inbox()` 现在提供一个只读分类视图，供 TUI 和后续 review surface 使用。
+
+返回结构：
+
+```json
+{
+  "pending_requests": [{"request_id": "approval_xxx", "proposal_id": "prop_xxx"}],
+  "blocked_candidates": [{"proposal_id": "prop_blocked", "approval_status": "blocked"}],
+  "generated_candidates": [{"proposal_id": "prop_generated", "approval_status": ""}],
+  "counts": {
+    "pending_requests": 1,
+    "blocked_candidates": 1,
+    "generated_candidates": 1
+  }
+}
+```
+
+TUI fallback 行为：
+
+- 有 pending request：继续打开第一个 approval widget。
+- 无 pending 但有 blocked candidate：展示 blocked generated candidate 摘要。
+- 只有 generated candidate：暂不弹审批，也不自动应用。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated -q
+1 failed  # 实现前红灯：EvolutionEngine 缺少 list_self_evolution_inbox()
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
+1 failed  # 实现前红灯：TUI fallback 未读取 blocked inbox
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
+1 passed
+```

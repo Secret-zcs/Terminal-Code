@@ -923,6 +923,62 @@ class TestEvolutionEngine:
         assert [item.id for item in all_requests] == [request.id]
         assert all_requests[0].status == "rejected"
 
+    def test_list_self_evolution_inbox_groups_pending_blocked_and_generated(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        pending_proposal = _make_ready_skill_candidate(engine)
+        pending_request = engine.submit_skill_approval_request(pending_proposal.id)
+        generated_proposal = engine.propose_skill(
+            name="generated-review-loop",
+            description="未进入审批的候选 skill",
+            body="# 任务\n\n记录复盘步骤。\n",
+        )
+        blocked_proposal = engine.propose_skill(
+            name="blocked-review-loop",
+            description="被 canary 阻断的候选 skill",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小补丁。\n",
+            allowed_tools=["WriteFile"],
+        )
+        engine.add_eval_case(
+            blocked_proposal.id,
+            task="写出修复结果，但断言要求故意不匹配。",
+            must_contain=["复现失败", "最小补丁"],
+            scripted_tool_calls=[{
+                "tool": "WriteFile",
+                "path": "result.txt",
+                "content": "actual\n",
+            }],
+            expected_files={"result.txt": "expected\n"},
+        )
+        ok, message = engine.evaluate(blocked_proposal.id)
+        assert ok, message
+        ok, message = engine.run_execution_eval(blocked_proposal.id, min_cases=1)
+        assert not ok
+        with pytest.raises(ValueError):
+            engine.submit_skill_approval_request(blocked_proposal.id)
+
+        inbox = engine.list_self_evolution_inbox()
+
+        assert [item["request_id"] for item in inbox["pending_requests"]] == [
+            pending_request.id
+        ]
+        assert [item["proposal_id"] for item in inbox["blocked_candidates"]] == [
+            blocked_proposal.id
+        ]
+        assert inbox["blocked_candidates"][0]["approval_status"] == "blocked"
+        assert inbox["blocked_candidates"][0]["blocked_reason"].startswith(
+            "canary execution eval failed"
+        )
+        assert [item["proposal_id"] for item in inbox["generated_candidates"]] == [
+            generated_proposal.id
+        ]
+        assert inbox["counts"] == {
+            "pending_requests": 1,
+            "blocked_candidates": 1,
+            "generated_candidates": 1,
+        }
+
     def test_resolve_skill_approval_request_approved_promotes_candidate(
         self, tmp_path: Path
     ) -> None:
@@ -2077,6 +2133,55 @@ class TestEvolutionEngine:
         app._run_self_evolution_review()
 
         assert opened == [request.id]
+
+    def test_tui_self_evolution_review_shows_existing_blocked_candidate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.app import MewCodeApp
+        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="blocked-review-loop",
+            description="被 canary 阻断的候选 skill",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小补丁。\n",
+        )
+        engine._mark_candidate_approval_blocked(
+            proposal,
+            "canary execution eval failed: 0/1 rounds passed",
+        )
+        monkeypatch.setattr(
+            app_module,
+            "review_ready_skill_candidates",
+            lambda *_args, **_kwargs: {"status": "idle", "requests": []},
+        )
+        app = MewCodeApp(
+            providers=[
+                ProviderConfig(
+                    name="test",
+                    protocol="openai",
+                    base_url="https://example.invalid",
+                    model="test-model",
+                )
+            ],
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        opened: list[str] = []
+        messages: list[str] = []
+        app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+
+        assert opened == []
+        assert any("blocked generated candidate" in message for message in messages)
+        assert any(proposal.id in message for message in messages)
 
     def test_tui_skill_approval_response_approves_and_reloads_skills(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -1107,6 +1107,91 @@ class EvolutionEngine:
             requests = [request for request in requests if request.status == status]
         return sorted(requests, key=lambda request: request.created_at)
 
+    def list_self_evolution_inbox(self) -> dict:
+        pending_requests = [
+            self._approval_request_inbox_item(request)
+            for request in self.list_skill_approval_inbox()
+        ]
+        pending_proposal_ids = {
+            item["proposal_id"] for item in pending_requests
+        }
+        blocked_candidates: list[dict] = []
+        generated_candidates: list[dict] = []
+        for manifest in self._load_candidate_manifest_items():
+            proposal_id = str(manifest.get("proposal_id", "")).strip()
+            if not proposal_id:
+                continue
+            proposal = self.store.get_proposal(proposal_id)
+            if proposal is None or proposal.target != "skill":
+                continue
+            if proposal.status != "proposed":
+                continue
+            approval_status = str(manifest.get("approval_status", "")).strip()
+            item = self._candidate_inbox_item(proposal, manifest)
+            if approval_status == "blocked":
+                blocked_candidates.append(item)
+            elif (
+                proposal_id not in pending_proposal_ids
+                and approval_status not in {"pending", "approved", "rejected"}
+            ):
+                generated_candidates.append(item)
+        blocked_candidates.sort(key=lambda item: item.get("created_at", 0.0))
+        generated_candidates.sort(key=lambda item: item.get("created_at", 0.0))
+        return {
+            "pending_requests": pending_requests,
+            "blocked_candidates": blocked_candidates,
+            "generated_candidates": generated_candidates,
+            "counts": {
+                "pending_requests": len(pending_requests),
+                "blocked_candidates": len(blocked_candidates),
+                "generated_candidates": len(generated_candidates),
+            },
+        }
+
+    @staticmethod
+    def _approval_request_inbox_item(request: SkillApprovalRequest) -> dict:
+        return {
+            "request_id": request.id,
+            "proposal_id": request.proposal_id,
+            "skill_name": request.skill_name,
+            "approval_mode": request.approval_mode,
+            "status": request.status,
+            "created_at": request.created_at,
+            "eval_report_markdown": request.eval_report_markdown,
+        }
+
+    def _candidate_inbox_item(
+        self,
+        proposal: EvolutionProposal,
+        manifest: dict,
+    ) -> dict:
+        return {
+            "proposal_id": proposal.id,
+            "skill_name": str(manifest.get("skill_name", "")),
+            "proposal_status": proposal.status,
+            "candidate_status": str(manifest.get("status", "")),
+            "approval_status": str(manifest.get("approval_status", "")),
+            "blocked_reason": str(manifest.get("approval_blocked_reason", "")),
+            "created_at": float(manifest.get("created_at", proposal.created_at) or 0.0),
+            "candidate_skill": str(manifest.get("candidate_skill", "")),
+            "eval_status": str(manifest.get("eval_status", "pending")),
+            "execution_eval_status": str(
+                manifest.get("execution_eval_status", "pending")
+            ),
+        }
+
+    def _load_candidate_manifest_items(self) -> list[dict]:
+        if not self.candidate_skills_path.exists():
+            return []
+        manifests: list[dict] = []
+        for candidate_dir in sorted(self.candidate_skills_path.iterdir()):
+            if not candidate_dir.is_dir():
+                continue
+            manifest = self._load_candidate_manifest(candidate_dir.name)
+            if manifest:
+                manifests.append(manifest)
+        return manifests
+
     def render_skill_approval_request(self, request_id: str) -> tuple[bool, str]:
         request = self.store.get_skill_approval_request(request_id)
         if request is None:

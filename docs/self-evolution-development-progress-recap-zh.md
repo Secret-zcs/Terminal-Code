@@ -2595,5 +2595,56 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 
 下一步计划：
 
-- 支持交互式 inbox 列表按 blocked/generated/pending 分类展示。
+- 后续支持按 event 类型设置不同 threshold。
+
+## 48. 最新推进记录：Self-Evolution Inbox 分类
+
+日期：2026-08-01
+
+本次新增只读 self-evolution inbox 分类，让 UI 可以同时看到 pending approval request、blocked generated candidate 和尚未进入审批的 generated candidate。此前 TUI 只会查 pending approval request；如果已有 blocked candidate 但当前 auto review 没有新结果，界面不会主动提示。现在 TUI fallback 会读取 inbox 分类，pending 仍打开审批组件，blocked 则显示摘要消息。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_list_self_evolution_inbox_groups_pending_blocked_and_generated`，覆盖 pending/blocked/generated 三类。
+- 修改 `mewcode/evolution/engine.py`：新增 `list_self_evolution_inbox()`，返回 `pending_requests`、`blocked_candidates`、`generated_candidates` 和 `counts`。
+- 修改 `mewcode/evolution/engine.py`：新增 `_approval_request_inbox_item()`、`_candidate_inbox_item()` 和 `_load_candidate_manifest_items()`。
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_shows_existing_blocked_candidate`。
+- 修改 `mewcode/app.py`：`_run_self_evolution_review()` 的 fallback 改用 `list_self_evolution_inbox()`；没有 pending 但有 blocked 时展示 blocked 摘要。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 inbox 分类和 TUI 展示路径。
+
+当前链路：
+
+```text
+candidate manifests + approval requests
+-> list_self_evolution_inbox()
+-> pending_requests / blocked_candidates / generated_candidates
+-> TUI opens first pending request OR shows blocked summary
+```
+
+安全边界：
+
+- 已实现：inbox 是只读视图，不创建 request、不 approve、不 promote。
+- 已实现：pending request 优先级最高，保持原有审批弹窗行为。
+- 已实现：blocked candidate 只显示摘要，不允许从提示中直接应用。
+- 未实现：独立的全屏/列表式 inbox UI；当前是 engine 分类接口 + TUI blocked 摘要。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated -q
+1 failed  # 实现前红灯：EvolutionEngine 缺少 list_self_evolution_inbox()
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
+1 failed  # 实现前红灯：TUI fallback 未读取 blocked inbox
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
+1 passed
+```
+
+下一步计划：
+
+- 支持 review notification 或 TUI 文案展示 generated candidate 计数。
 - 后续支持按 event 类型设置不同 threshold。

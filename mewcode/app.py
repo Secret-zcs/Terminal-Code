@@ -1994,13 +1994,33 @@ class MewCodeApp(App):
                 )
             return
         if result.get("status") != "disabled":
-            pending = EvolutionEngine(self.agent.work_dir).list_skill_approval_inbox()
+            inbox = EvolutionEngine(self.agent.work_dir).list_self_evolution_inbox()
+            pending = inbox.get("pending_requests", [])
             if pending:
-                self._show_self_evolution_approval(pending[0].id)
+                self._show_self_evolution_approval(pending[0]["request_id"])
+                return
+            inbox_message = self._format_self_evolution_inbox_message(inbox)
+            if inbox_message:
+                self._show_system_message(inbox_message)
                 return
         message = format_review_notification(result)
         if message:
             self._show_system_message(message)
+
+    @staticmethod
+    def _format_self_evolution_inbox_message(inbox: dict) -> str:
+        blocked = list(inbox.get("blocked_candidates", []))
+        if not blocked:
+            return ""
+        lines = [
+            f"{len(blocked)} self-evolution blocked generated candidate(s)."
+        ]
+        for item in blocked[:5]:
+            lines.append(
+                f"- {item.get('proposal_id')} / {item.get('skill_name')} "
+                f"reason={item.get('blocked_reason')}"
+            )
+        return "\n".join(lines)
 
     def _show_self_evolution_approval(self, request_id: str) -> None:
         if self.agent is None:
