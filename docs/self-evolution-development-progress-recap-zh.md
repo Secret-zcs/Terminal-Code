@@ -1833,3 +1833,73 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 自动捕获用户纠正文案，生成 `user_feedback` evidence。
 - 为审批页展示 evidence 来源：tool-result、conversation、manual、skill-usage。
 - 继续保持用户审批为最终启用门禁。
+
+## 33. 最新推进记录：用户纠正自动记录 Evidence
+
+日期：2026-08-01
+
+本次把用户自然语言纠正接入结构化 evidence 来源。Agent 在运行开始时扫描用户消息；如果当前只有一个 active skill，且消息包含明确纠正标记，例如“用户纠正”“不对”“遗漏”“你刚才”等，会自动记录 `user_feedback` evidence，并写入 `skill_name`、`summary` 和 `message_hash`。后续 auto review 会把该 evidence 摄入为 skill usage，再进入现有自进化闭环。
+
+修改内容：
+
+- 修改 `mewcode/agent.py`：新增 `_record_user_feedback_evidence()`，在 `run()` 开头扫描用户纠正文案。
+- 修改 `mewcode/agent.py`：新增 `_looks_like_user_correction()` 和 `_feedback_message_hash()`，用于保守识别和去重。
+- 修改 `mewcode/agent.py`：新增 `_feedback_evidence_exists()`，避免新 Agent 实例重复记录相同用户纠正。
+- 修改 `tests/test_agent.py`：新增单 active skill 时用户纠正记录 evidence 的测试。
+- 修改 `tests/test_agent.py`：新增多 active skill 时不记录 evidence 的测试。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：记录本次用户反馈来源扩展。
+
+当前链路：
+
+```text
+single active skill + user correction message
+-> Agent records structured user_feedback evidence
+-> auto_review ingests evidence as skill usage
+-> usage threshold
+-> patch candidate / eval / execution eval
+-> pending approval request
+```
+
+关键边界：
+
+- 已实现：用户纠正文案可以自动沉淀为 `user_feedback` evidence。
+- 已实现：只有一个 active skill 时才自动归因，多个 active skill 时跳过。
+- 已实现：使用 message hash 去重，避免同一纠正反复写 evidence。
+- 已实现：记录 evidence 不等于启用 skill；仍必须经过评测和用户审批。
+- 未实现：从多 active skill 场景中通过显式用户指代做安全归因。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_agent.py::test_user_correction_records_feedback_evidence_for_single_active_skill tests/test_agent.py::test_user_correction_does_not_record_feedback_for_ambiguous_skills -q
+1 failed, 1 passed  # 实现前红灯：单 active skill 用户纠正没有 evidence
+
+PYTHONPATH=. pytest tests/test_agent.py::test_user_correction_records_feedback_evidence_for_single_active_skill tests/test_agent.py::test_user_correction_does_not_record_feedback_for_ambiguous_skills -q
+2 passed
+
+python3 -m py_compile mewcode/agent.py mewcode/evolution/auto_review.py
+无输出
+
+git diff --check
+无输出
+
+PYTHONPATH=. pytest tests/test_agent.py::test_tool_failure_records_evidence_for_single_active_skill tests/test_agent.py::test_tool_failure_does_not_record_evidence_for_ambiguous_skills tests/test_agent.py::test_user_correction_records_feedback_evidence_for_single_active_skill tests/test_agent.py::test_user_correction_does_not_record_feedback_for_ambiguous_skills -q
+4 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q
+72 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_self_evolution_dialog.py tests/test_skills.py tests/test_commands.py tests/test_checkpoint.py tests/test_context.py tests/test_self_evolution_benchmark.py -q
+255 passed
+
+PYTHONPATH=. pytest -q -x
+FAILED tests/test_agent.py::test_multi_step_autonomous
+```
+
+全量首个失败点仍是既有安全策略差异：`WriteFile` 写入前必须先 `ReadFile`，旧测试仍期望可直接写入，和本次用户纠正 evidence 记录无直接关系。
+
+下一步计划：
+
+- 为审批页展示 evidence 来源：tool-result、conversation、manual、skill-usage。
+- 增加用户可见的 evidence summary，让审批时能看到“为什么生成这个 skill patch”。
+- 继续保持用户审批为最终启用门禁。

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 import uuid
@@ -81,6 +82,28 @@ def _is_destructive_bash(command: str) -> bool:
         return False
     cmd_lower = command.lower()
     return any(pattern in cmd_lower for pattern in _DESTRUCTIVE_BASH_PATTERNS)
+
+
+_USER_CORRECTION_MARKERS = (
+    "用户纠正",
+    "纠正",
+    "不对",
+    "错误",
+    "遗漏",
+    "漏掉",
+    "漏了",
+    "你刚才",
+    "不是这样",
+)
+
+
+def _looks_like_user_correction(content: str) -> bool:
+    return any(marker in content for marker in _USER_CORRECTION_MARKERS)
+
+
+def _feedback_message_hash(skill_name: str, content: str) -> str:
+    raw = f"{skill_name}\0{content}".encode("utf-8", errors="replace")
+    return hashlib.sha256(raw).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +383,7 @@ class Agent:
         self._extracting = False
         self.session_id: str = ""
         self.active_skills: dict[str, str] = {}
+        self._recorded_user_feedback_hashes: set[str] = set()
         self._skill_catalog: str = ""
         self._agent_catalog: str = ""
         self._agent_catalog_list: list[tuple[str, str]] = []
@@ -451,6 +475,7 @@ class Agent:
 
     async def run(self, conversation: ConversationManager) -> AsyncIterator[AgentEvent]:
         self._current_conversation = conversation
+        self._record_user_feedback_evidence(conversation)
         env_context = build_environment_context(
             self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
         )
@@ -999,6 +1024,55 @@ class Agent:
             )
         except Exception:
             pass
+
+    def _record_user_feedback_evidence(
+        self, conversation: ConversationManager
+    ) -> None:
+        if len(self.active_skills) != 1:
+            return
+        skill_name = next(iter(self.active_skills))
+        for message in conversation.history:
+            if message.role != "user" or message.tool_results or message.tool_uses:
+                continue
+            content = message.content.strip()
+            if not content or content.startswith("<system-reminder>"):
+                continue
+            if not _looks_like_user_correction(content):
+                continue
+            message_hash = _feedback_message_hash(skill_name, content)
+            if message_hash in self._recorded_user_feedback_hashes:
+                continue
+            if self._feedback_evidence_exists(message_hash):
+                self._recorded_user_feedback_hashes.add(message_hash)
+                continue
+            try:
+                from mewcode.evolution import EvolutionEngine
+
+                EvolutionEngine(self.work_dir).record_evidence(
+                    content,
+                    kind="user_feedback",
+                    source="conversation",
+                    metadata={
+                        "skill_name": skill_name,
+                        "summary": content,
+                        "message_hash": message_hash,
+                    },
+                )
+                self._recorded_user_feedback_hashes.add(message_hash)
+            except Exception:
+                pass
+
+    def _feedback_evidence_exists(self, message_hash: str) -> bool:
+        try:
+            from mewcode.evolution import EvolutionEngine
+
+            for evidence in EvolutionEngine(self.work_dir).store.load_evidence():
+                metadata = evidence.metadata
+                if isinstance(metadata, dict) and metadata.get("message_hash") == message_hash:
+                    return True
+        except Exception:
+            return False
+        return False
 
     def _snapshot_for_recovery(
         self, tc: ToolCallComplete, result: ToolResult

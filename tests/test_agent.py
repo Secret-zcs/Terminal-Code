@@ -356,6 +356,54 @@ async def test_tool_failure_does_not_record_evidence_for_ambiguous_skills(tmp_pa
     assert EvolutionEngine(tmp_path).store.load_evidence() == []
 
 @pytest.mark.asyncio
+async def test_user_correction_records_feedback_evidence_for_single_active_skill(tmp_path):
+    """用户自然语言纠正会为唯一 active skill 记录 user_feedback evidence。"""
+    from mewcode.evolution import EvolutionEngine
+
+    client = MockLLMClient([
+        [TextDelta("Acknowledged."), StreamEnd("end_turn", input_tokens=10, output_tokens=5)],
+    ])
+    registry = create_default_registry()
+    agent = Agent(client, registry, "anthropic", work_dir=str(tmp_path))
+    agent.activate_skill("review-loop", "# Review\n")
+    conv = ConversationManager()
+    conv.add_user_message("用户纠正：你刚才遗漏验证，以后必须展示测试结果。")
+
+    events = []
+    async for e in agent.run(conv):
+        events.append(e)
+
+    assert _collect(events)["loop"]
+    evidence = EvolutionEngine(tmp_path).store.load_evidence()
+    assert len(evidence) == 1
+    assert evidence[0].kind == "user_feedback"
+    assert evidence[0].source == "conversation"
+    assert evidence[0].metadata["skill_name"] == "review-loop"
+    assert "遗漏验证" in evidence[0].summary
+
+@pytest.mark.asyncio
+async def test_user_correction_does_not_record_feedback_for_ambiguous_skills(tmp_path):
+    """多个 active skill 时不把自然语言纠正自动归因给任意一个 skill。"""
+    from mewcode.evolution import EvolutionEngine
+
+    client = MockLLMClient([
+        [TextDelta("Acknowledged."), StreamEnd("end_turn", input_tokens=10, output_tokens=5)],
+    ])
+    registry = create_default_registry()
+    agent = Agent(client, registry, "anthropic", work_dir=str(tmp_path))
+    agent.activate_skill("review-loop", "# Review\n")
+    agent.activate_skill("debug-loop", "# Debug\n")
+    conv = ConversationManager()
+    conv.add_user_message("用户纠正：你刚才遗漏验证，以后必须展示测试结果。")
+
+    events = []
+    async for e in agent.run(conv):
+        events.append(e)
+
+    assert _collect(events)["loop"]
+    assert EvolutionEngine(tmp_path).store.load_evidence() == []
+
+@pytest.mark.asyncio
 async def test_message_splicing():
     """assistant 消息包含 text + 多个 tool_use；对应的 tool_result 被打包在一起。"""
     client = MockLLMClient([
