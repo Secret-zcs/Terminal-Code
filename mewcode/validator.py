@@ -20,6 +20,7 @@ VALID_PERMISSION_MODES = {
 VALID_TEAMMATE_MODES = {"", "in-process"}
 
 VALID_SELF_EVOLUTION_APPROVAL_MODES = {"manual", "deferred", "trusted-auto"}
+VALID_SELF_EVOLUTION_ROLLBACK_EVENTS = {"failure", "user_feedback"}
 
 DEFAULT_CONTEXT_WINDOW = 200_000
 
@@ -229,6 +230,7 @@ def validate_self_evolution(raw_self_evolution: object) -> dict:
         "enabled": False,
         "skill_approval_mode": "manual",
         "trusted_auto_rollback_threshold": 1,
+        "trusted_auto_rollback_events": ["failure", "user_feedback"],
     }
 
     if raw_self_evolution is None:
@@ -265,11 +267,35 @@ def validate_self_evolution(raw_self_evolution: object) -> dict:
         raise ConfigError(
             "self_evolution.trusted_auto_rollback_threshold must be a positive integer"
         )
+    rollback_events = raw_self_evolution.get(
+        "trusted_auto_rollback_events",
+        defaults["trusted_auto_rollback_events"],
+    )
+    if (
+        not isinstance(rollback_events, list)
+        or not rollback_events
+        or not all(isinstance(event, str) for event in rollback_events)
+    ):
+        raise ConfigError(
+            "self_evolution.trusted_auto_rollback_events must be a non-empty list"
+        )
+    clean_rollback_events = []
+    for event in rollback_events:
+        clean = event.strip()
+        if clean not in VALID_SELF_EVOLUTION_ROLLBACK_EVENTS:
+            raise ConfigError(
+                "Invalid self_evolution.trusted_auto_rollback_events item "
+                f"'{event}', must be one of: "
+                f"{', '.join(sorted(VALID_SELF_EVOLUTION_ROLLBACK_EVENTS))}"
+            )
+        if clean not in clean_rollback_events:
+            clean_rollback_events.append(clean)
 
     return {
         "enabled": enabled,
         "skill_approval_mode": approval_mode,
         "trusted_auto_rollback_threshold": rollback_threshold,
+        "trusted_auto_rollback_events": clean_rollback_events,
     }
 
 

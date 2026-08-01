@@ -43,6 +43,11 @@ def review_ready_skill_candidates(
         "trusted_auto_rollback_threshold",
         1,
     )
+    rollback_events = getattr(
+        self_evolution_config,
+        "trusted_auto_rollback_events",
+        ["failure", "user_feedback"],
+    )
     engine = EvolutionEngine(project_root)
     review_run = _start_fork_reviewer_run(engine, approval_mode=approval_mode)
     try:
@@ -50,6 +55,7 @@ def review_ready_skill_candidates(
             engine,
             approval_mode=approval_mode,
             trusted_auto_rollback_threshold=rollback_threshold,
+            trusted_auto_rollback_events=rollback_events,
         )
     except Exception as exc:
         _finish_fork_reviewer_run(
@@ -87,6 +93,7 @@ def _review_enabled_skill_candidates(
     *,
     approval_mode: str,
     trusted_auto_rollback_threshold: int = 1,
+    trusted_auto_rollback_events: list[str] | None = None,
 ) -> dict:
     requests = []
     skipped: list[dict] = []
@@ -95,6 +102,7 @@ def _review_enabled_skill_candidates(
         engine,
         approval_mode=approval_mode,
         threshold=trusted_auto_rollback_threshold,
+        rollback_events=trusted_auto_rollback_events,
     )
 
     for proposal in engine.store.load_proposals():
@@ -389,10 +397,18 @@ def _auto_quarantine_trusted_auto_skills(
     *,
     approval_mode: str,
     threshold: int,
+    rollback_events: list[str] | None,
 ) -> list[dict]:
     if approval_mode != "trusted-auto":
         return []
     threshold = max(1, int(threshold))
+    event_filter = {
+        str(event).strip()
+        for event in (rollback_events or ["failure", "user_feedback"])
+        if str(event).strip()
+    }
+    if not event_filter:
+        event_filter = {"failure", "user_feedback"}
 
     results: list[dict] = []
     usage = engine.load_skill_usage()
@@ -408,7 +424,7 @@ def _auto_quarantine_trusted_auto_skills(
             record
             for record in usage
             if str(record.get("skill_name", "")).strip() == skill_name
-            and str(record.get("event", "")).strip() in {"failure", "user_feedback"}
+            and str(record.get("event", "")).strip() in event_filter
             and float(record.get("created_at", 0.0) or 0.0) > request.resolved_at
         ]
         if len(negative) < threshold:

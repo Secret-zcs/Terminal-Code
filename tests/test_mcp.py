@@ -243,6 +243,24 @@ class TestLoadConfigSelfEvolution:
         config = load_config(path)
         assert config.self_evolution.trusted_auto_rollback_threshold == 2
 
+    def test_self_evolution_can_set_trusted_auto_rollback_events(
+        self, tmp_path: Path
+    ) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            self_evolution:
+              enabled: true
+              skill_approval_mode: trusted-auto
+              trusted_auto_rollback_events:
+                - user_feedback
+        """)
+        config = load_config(path)
+        assert config.self_evolution.trusted_auto_rollback_events == ["user_feedback"]
+
     def test_self_evolution_rejects_invalid_approval_mode(
         self, tmp_path: Path
     ) -> None:

@@ -2222,3 +2222,56 @@ PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_ev
 - 增加 canary skill 临时注入机制。
 - 增加 rollback event 类型配置。
 - 在审批/报告 UI 中展示当前 trusted-auto policy 参数。
+
+## 40. 最新推进记录：Trusted-Auto Rollback Events 配置
+
+日期：2026-08-01
+
+本次把 trusted-auto 自动回滚的触发事件从固定 `failure/user_feedback` 扩展为可配置列表。新增 `self_evolution.trusted_auto_rollback_events`，默认仍为 `['failure', 'user_feedback']`；用户可以只保留 `user_feedback`，让普通失败先进入观察状态，只有明确用户纠正才触发 quarantine。
+
+修改内容：
+
+- 修改 `mewcode/validator.py`：新增 `VALID_SELF_EVOLUTION_ROLLBACK_EVENTS`，目前允许 `failure` 和 `user_feedback`。
+- 修改 `mewcode/validator.py`：新增 `trusted_auto_rollback_events` 默认值、非空列表校验、事件名校验和去重。
+- 修改 `mewcode/config.py`：`SelfEvolutionConfig` 新增 `trusted_auto_rollback_events` 字段，并从配置文件加载。
+- 修改 `mewcode/evolution/auto_review.py`：`review_ready_skill_candidates()` 读取 rollback events 并传入 trusted-auto rollback 检查。
+- 修改 `mewcode/evolution/auto_review.py`：`_auto_quarantine_trusted_auto_skills()` 只统计配置允许的 promote 后 usage event。
+- 修改 `tests/test_mcp.py`：新增配置解析 rollback events 的测试。
+- 修改 `tests/test_evolution.py`：新增只允许 `user_feedback` 时 failure 不隔离、user_feedback 才隔离的测试。
+
+当前链路：
+
+```text
+trusted_auto_rollback_events = [user_feedback]
+-> trusted-auto promotes skill
+-> post-promote failure usage
+-> no quarantine and no patch churn
+-> post-promote user_feedback usage
+-> quarantine triggered
+```
+
+安全边界：
+
+- 已实现：默认行为不变，仍对 `failure` 和 `user_feedback` 敏感。
+- 已实现：可以只让用户纠正触发 rollback，降低普通失败带来的误隔离。
+- 已实现：未命中配置事件时不会生成新 patch candidate，避免 trusted-auto 管理中的 skill 自我抖动。
+- 未实现：按 event 类型分别设置不同阈值；当前 threshold 对配置后的事件集合统一计数。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_set_trusted_auto_rollback_events tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_filters_rollback_events -q
+2 failed  # 实现前红灯：配置字段不存在，SelfEvolutionConfig 不接受 rollback events
+
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_set_trusted_auto_rollback_events tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_filters_rollback_events -q
+2 passed
+
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_use_trusted_auto_approval tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_set_trusted_auto_rollback_threshold tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_set_trusted_auto_rollback_events tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_promotes_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_keeps_existing_ready_candidate_pending tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_quarantines_after_new_negative_usage tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_uses_rollback_threshold tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_filters_rollback_events -q
+8 passed
+```
+
+下一步计划：
+
+- 将 trusted-auto policy 参数写入 fork reviewer input/report。
+- 增加 canary skill 临时注入机制。
+- 后续支持按 event 类型设置不同 threshold。

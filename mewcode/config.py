@@ -134,6 +134,9 @@ class SelfEvolutionConfig:
     enabled: bool = False
     skill_approval_mode: str = "manual"
     trusted_auto_rollback_threshold: int = 1
+    trusted_auto_rollback_events: list[str] = field(
+        default_factory=lambda: ["failure", "user_feedback"]
+    )
 
     @property
     def requires_user_approval(self) -> bool:
@@ -204,6 +207,7 @@ def _load_single_file(path: Path) -> AppConfig:
         enabled=se["enabled"],
         skill_approval_mode=se["skill_approval_mode"],
         trusted_auto_rollback_threshold=se["trusted_auto_rollback_threshold"],
+        trusted_auto_rollback_events=se["trusted_auto_rollback_events"],
     )
 
     return AppConfig(

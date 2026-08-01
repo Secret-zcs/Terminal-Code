@@ -825,3 +825,24 @@ self_evolution:
 PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_set_trusted_auto_rollback_threshold tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_uses_rollback_threshold -q
 2 passed
 ```
+
+## Trusted-Auto Rollback Events
+
+新增配置：
+
+```yaml
+self_evolution:
+  enabled: true
+  skill_approval_mode: trusted-auto
+  trusted_auto_rollback_events:
+    - user_feedback
+```
+
+默认 `trusted_auto_rollback_events: [failure, user_feedback]`。如果配置为只包含 `user_feedback`，则 trusted-auto promote 后的普通 `failure` 不会触发自动 quarantine；只有明确用户纠正类 usage 才会回滚隔离。该配置和 `trusted_auto_rollback_threshold` 组合使用，threshold 只统计命中的 event 类型。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_set_trusted_auto_rollback_events tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_filters_rollback_events -q
+2 passed
+```
