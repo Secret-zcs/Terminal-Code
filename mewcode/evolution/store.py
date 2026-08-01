@@ -10,6 +10,7 @@ from typing import Callable, TypeVar
 from mewcode.evolution.models import (
     EvolutionEvidence,
     EvolutionProposal,
+    SelfEvolutionReviewRun,
     SkillApprovalRequest,
 )
 
@@ -23,6 +24,7 @@ class EvolutionStore:
         self.evidence_path = self.dir / "evidence.jsonl"
         self.proposals_path = self.dir / "proposals.jsonl"
         self.skill_approval_requests_path = self.dir / "approval_requests.jsonl"
+        self.self_evolution_review_runs_path = self.dir / "review_runs.jsonl"
         self._lock = threading.Lock()
 
     def save_evidence(self, evidence: EvolutionEvidence) -> None:
@@ -76,6 +78,35 @@ class EvolutionStore:
             self._rewrite(
                 self.skill_approval_requests_path,
                 [request.to_jsonl() for request in requests],
+            )
+
+    def save_self_evolution_review_run(
+        self, run: SelfEvolutionReviewRun
+    ) -> None:
+        self._append(self.self_evolution_review_runs_path, run.to_jsonl())
+
+    def load_self_evolution_review_runs(self) -> list[SelfEvolutionReviewRun]:
+        return self._load_jsonl(
+            self.self_evolution_review_runs_path,
+            SelfEvolutionReviewRun.from_jsonl,
+        )
+
+    def update_self_evolution_review_run(
+        self, updated: SelfEvolutionReviewRun
+    ) -> None:
+        with self._lock:
+            runs = self.load_self_evolution_review_runs()
+            replaced = False
+            for i, run in enumerate(runs):
+                if run.id == updated.id:
+                    runs[i] = updated
+                    replaced = True
+                    break
+            if not replaced:
+                runs.append(updated)
+            self._rewrite(
+                self.self_evolution_review_runs_path,
+                [run.to_jsonl() for run in runs],
             )
 
     def get_evidence(self, evidence_id: str) -> EvolutionEvidence | None:

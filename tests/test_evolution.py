@@ -868,6 +868,36 @@ class TestEvolutionEngine:
         assert result["status"] == "disabled"
         assert result["requests"] == []
         assert engine.store.load_skill_approval_requests() == []
+        assert engine.store.load_self_evolution_review_runs() == []
+
+    def test_self_evolution_review_records_fork_reviewer_run(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+
+        runs = EvolutionEngine(tmp_path).store.load_self_evolution_review_runs()
+        assert len(runs) == 1
+        run = runs[0]
+        assert result["review_run"].id == run.id
+        assert run.mode == "fork_reviewer"
+        assert run.status == "submitted"
+        assert run.policy["can_promote"] is False
+        assert run.policy["project_write"] == "disabled"
+        assert run.summary["requests"] == [proposal.id]
+        assert run.artifacts["input"].endswith("input.json")
+        assert run.artifacts["report"].endswith("report.md")
+        assert (tmp_path / run.artifacts["input"]).is_file()
+        assert (tmp_path / run.artifacts["policy"]).is_file()
+        assert (tmp_path / run.artifacts["report"]).is_file()
 
     def test_self_evolution_review_submits_ready_candidates_once(
         self, tmp_path: Path

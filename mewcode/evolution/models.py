@@ -26,6 +26,13 @@ ProposalTarget = Literal["memory", "skill"]
 ProposalStatus = Literal["proposed", "approved", "rejected", "applied"]
 ProposalRisk = Literal["low", "medium", "high"]
 SkillApprovalStatus = Literal["pending", "approved", "rejected"]
+SelfEvolutionReviewRunStatus = Literal[
+    "running",
+    "idle",
+    "generated",
+    "submitted",
+    "failed",
+]
 
 
 def new_evolution_id(prefix: str) -> str:
@@ -186,4 +193,54 @@ class SkillApprovalRequest:
 
     @classmethod
     def from_jsonl(cls, line: str) -> "SkillApprovalRequest":
+        return cls.from_dict(json.loads(line))
+
+
+@dataclass
+class SelfEvolutionReviewRun:
+    id: str
+    mode: str
+    status: SelfEvolutionReviewRunStatus
+    approval_mode: str
+    artifacts: dict = field(default_factory=dict)
+    policy: dict = field(default_factory=dict)
+    summary: dict = field(default_factory=dict)
+    created_at: float = field(default_factory=time.time)
+    completed_at: float = 0.0
+    error: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "mode": self.mode,
+            "status": self.status,
+            "approval_mode": self.approval_mode,
+            "artifacts": self.artifacts,
+            "policy": self.policy,
+            "summary": self.summary,
+            "created_at": self.created_at,
+            "completed_at": self.completed_at,
+            "error": self.error,
+        }
+
+    def to_jsonl(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SelfEvolutionReviewRun":
+        return cls(
+            id=data["id"],
+            mode=data.get("mode", "fork_reviewer"),
+            status=data.get("status", "running"),
+            approval_mode=data.get("approval_mode", "manual"),
+            artifacts=data.get("artifacts", {}),
+            policy=data.get("policy", {}),
+            summary=data.get("summary", {}),
+            created_at=data.get("created_at", 0.0),
+            completed_at=data.get("completed_at", 0.0),
+            error=data.get("error", ""),
+        )
+
+    @classmethod
+    def from_jsonl(cls, line: str) -> "SelfEvolutionReviewRun":
         return cls.from_dict(json.loads(line))

@@ -1903,3 +1903,57 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 - 为审批页展示 evidence 来源：tool-result、conversation、manual、skill-usage。
 - 增加用户可见的 evidence summary，让审批时能看到“为什么生成这个 skill patch”。
 - 继续保持用户审批为最终启用门禁。
+
+## 34. 最新推进记录：自进化 Fork Reviewer 审计运行
+
+日期：2026-08-01
+
+本次把自进化自动 review 从“主流程里直接执行一个确定性 pipeline”推进为“每次 enabled review 都生成一个可审计的 fork reviewer run”。它不是完整 Hermes 的真实后台 LLM reviewer，但已经把自进化审查隔离成独立运行记录，拥有自己的输入快照、能力策略、输出摘要和 Markdown 报告。
+
+修改内容：
+
+- 修改 `mewcode/evolution/models.py`：新增 `SelfEvolutionReviewRun`，记录 `mode`、`status`、`approval_mode`、`artifacts`、`policy`、`summary`、`error`。
+- 修改 `mewcode/evolution/store.py`：新增 `review_runs.jsonl` 的保存、读取和更新方法。
+- 修改 `mewcode/evolution/auto_review.py`：enabled review 开始时创建 `fork_reviewer` run，写入 `input.json` 和 `policy.json`。
+- 修改 `mewcode/evolution/auto_review.py`：review 完成后写入 `output.json` 和 `report.md`，并把 `review_run` 返回给调用方。
+- 修改 `tests/test_evolution.py`：新增 fork reviewer run 持久化、策略和产物测试。
+- 修改本文档：记录本次 fork reviewer 审计机制、测试结果和下一步。
+
+当前链路：
+
+```text
+self_evolution.enabled = true
+-> create fork_reviewer run
+-> write input snapshot + policy
+-> run existing evidence/candidate/eval/execution-eval/approval pipeline
+-> write output summary + report
+-> return review_run to caller
+```
+
+能力边界：
+
+- 已实现：每次 enabled auto review 都有独立 `review_runs/<run_id>/` 产物。
+- 已实现：policy 明确记录 `can_approve=false`、`can_promote=false`、`project_write=disabled`。
+- 已实现：run summary 记录 approval request、generated candidate、eval case、execution eval 和 ingested usage。
+- 已实现：disabled self-evolution 不创建 review run。
+- 未实现：真实后台 LLM reviewer 自主读取 trace 并生成候选 skill。
+- 未实现：reviewer 作为独立进程/任务异步运行；当前仍是同步逻辑 fork。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_fork_reviewer_run -q
+1 failed  # 实现前红灯：EvolutionStore 尚无 load_self_evolution_review_runs()
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_fork_reviewer_run -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -q -k "self_evolution_review"
+15 passed, 58 deselected
+```
+
+下一步计划：
+
+- 把审批页接入 `review_run.report.md`，让用户审批时看到 fork reviewer 证据链。
+- 扩展 fork reviewer run 的输入快照，纳入触发 evidence 的摘要和来源。
+- 后续再把同步逻辑 fork 替换为受限真实 LLM child reviewer，但仍禁止 approve/promote。

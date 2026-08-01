@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
 from mewcode.evolution.engine import EvolutionEngine, MIN_EXECUTION_EVAL_CASES
+from mewcode.evolution.models import SelfEvolutionReviewRun, new_evolution_id
 
 
 def format_review_notification(result: dict) -> str:
@@ -33,20 +35,50 @@ def review_ready_skill_candidates(
     approval requests when self-evolution is enabled.
     """
     if not getattr(self_evolution_config, "enabled", False):
-        return {
-            "status": "disabled",
-            "requests": [],
-            "skipped": [],
-            "generated_candidates": [],
-            "generated_candidate_reviews": [],
-            "generated_eval_cases": [],
-            "generated_evaluations": [],
-            "generated_execution_evals": [],
-            "ingested_usage": [],
-        }
+        return _empty_review_result("disabled")
 
     approval_mode = getattr(self_evolution_config, "skill_approval_mode", "manual")
     engine = EvolutionEngine(project_root)
+    review_run = _start_fork_reviewer_run(engine, approval_mode=approval_mode)
+    try:
+        result = _review_enabled_skill_candidates(
+            engine,
+            approval_mode=approval_mode,
+        )
+    except Exception as exc:
+        _finish_fork_reviewer_run(
+            engine,
+            review_run,
+            _empty_review_result("failed"),
+            status="failed",
+            error=str(exc),
+        )
+        raise
+
+    result["review_run"] = _finish_fork_reviewer_run(engine, review_run, result)
+    return result
+
+
+def _empty_review_result(status: str) -> dict:
+    return {
+        "status": status,
+        "requests": [],
+        "skipped": [],
+        "generated_candidates": [],
+        "generated_candidate_reviews": [],
+        "generated_eval_cases": [],
+        "generated_evaluations": [],
+        "generated_execution_evals": [],
+        "ingested_usage": [],
+        "review_run": None,
+    }
+
+
+def _review_enabled_skill_candidates(
+    engine: EvolutionEngine,
+    *,
+    approval_mode: str,
+) -> dict:
     requests = []
     skipped: list[dict] = []
     ingested_usage = _ingest_evidence_as_skill_usage(engine)
@@ -114,7 +146,132 @@ def review_ready_skill_candidates(
         "generated_evaluations": generated_evaluations,
         "generated_execution_evals": generated_execution_evals,
         "ingested_usage": ingested_usage,
+        "review_run": None,
     }
+
+
+def _start_fork_reviewer_run(
+    engine: EvolutionEngine,
+    *,
+    approval_mode: str,
+) -> SelfEvolutionReviewRun:
+    run_id = new_evolution_id("review")
+    run_dir = engine.project_root / ".mewcode" / "evolution" / "review_runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+    artifacts = {
+        "input": _project_relative(engine, run_dir / "input.json"),
+        "policy": _project_relative(engine, run_dir / "policy.json"),
+        "output": _project_relative(engine, run_dir / "output.json"),
+        "report": _project_relative(engine, run_dir / "report.md"),
+    }
+    policy = {
+        "mode": "fork_reviewer",
+        "can_record_evidence": True,
+        "can_generate_candidate": True,
+        "can_generate_eval_case": True,
+        "can_run_eval": True,
+        "can_submit_approval_request": True,
+        "can_approve": False,
+        "can_promote": False,
+        "project_write": "disabled",
+        "network": "disabled",
+    }
+    input_payload = {
+        "approval_mode": approval_mode,
+        "counts": {
+            "evidence": len(engine.store.load_evidence()),
+            "proposals": len(engine.store.load_proposals()),
+            "approval_requests": len(engine.store.load_skill_approval_requests()),
+            "skill_usage": len(engine.load_skill_usage()),
+        },
+        "policy": policy,
+    }
+    (engine.project_root / artifacts["input"]).write_text(
+        json.dumps(input_payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (engine.project_root / artifacts["policy"]).write_text(
+        json.dumps(policy, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    run = SelfEvolutionReviewRun(
+        id=run_id,
+        mode="fork_reviewer",
+        status="running",
+        approval_mode=approval_mode,
+        artifacts=artifacts,
+        policy=policy,
+    )
+    engine.store.save_self_evolution_review_run(run)
+    return run
+
+
+def _finish_fork_reviewer_run(
+    engine: EvolutionEngine,
+    run: SelfEvolutionReviewRun,
+    result: dict,
+    *,
+    status: str | None = None,
+    error: str = "",
+) -> SelfEvolutionReviewRun:
+    summary = _review_run_summary(result)
+    run.status = status or str(result.get("status", "idle"))
+    run.summary = summary
+    run.completed_at = time.time()
+    run.error = error
+    (engine.project_root / run.artifacts["output"]).write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (engine.project_root / run.artifacts["report"]).write_text(
+        _render_fork_reviewer_report(run),
+        encoding="utf-8",
+    )
+    engine.store.update_self_evolution_review_run(run)
+    return run
+
+
+def _review_run_summary(result: dict) -> dict:
+    return {
+        "status": result.get("status", "idle"),
+        "requests": [
+            request.proposal_id for request in result.get("requests", [])
+        ],
+        "skipped": list(result.get("skipped", [])),
+        "generated_candidates": list(result.get("generated_candidates", [])),
+        "generated_eval_cases": list(result.get("generated_eval_cases", [])),
+        "generated_evaluations": list(result.get("generated_evaluations", [])),
+        "generated_execution_evals": list(
+            result.get("generated_execution_evals", [])
+        ),
+        "ingested_usage": list(result.get("ingested_usage", [])),
+    }
+
+
+def _render_fork_reviewer_report(run: SelfEvolutionReviewRun) -> str:
+    summary = run.summary
+    lines = [
+        "# Self-Evolution Fork Reviewer Run",
+        "",
+        f"- Run ID: `{run.id}`",
+        f"- Mode: `{run.mode}`",
+        f"- Status: `{run.status}`",
+        f"- Approval mode: `{run.approval_mode}`",
+        f"- Can approve: `{run.policy.get('can_approve')}`",
+        f"- Can promote: `{run.policy.get('can_promote')}`",
+        f"- Project write: `{run.policy.get('project_write')}`",
+        f"- Requests: `{len(summary.get('requests', []))}`",
+        f"- Generated candidates: `{len(summary.get('generated_candidates', []))}`",
+        f"- Generated eval case groups: `{len(summary.get('generated_eval_cases', []))}`",
+        f"- Ingested usage records: `{len(summary.get('ingested_usage', []))}`",
+    ]
+    if run.error:
+        lines.append(f"- Error: `{run.error}`")
+    return "\n".join(lines) + "\n"
+
+
+def _project_relative(engine: EvolutionEngine, path: Path) -> str:
+    return str(path.relative_to(engine.project_root))
 
 
 def _ingest_evidence_as_skill_usage(engine: EvolutionEngine) -> list[str]:
