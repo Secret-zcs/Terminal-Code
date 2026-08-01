@@ -818,6 +818,22 @@ class TestEvolutionEngine:
         assert "## Execution Eval Report" in review
         assert "Execution Eval Report" in review
 
+    def test_render_skill_approval_request_shows_canary_execution_summary(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        request = engine.submit_skill_approval_request(proposal.id)
+
+        ok, review = engine.render_skill_approval_request(request.id)
+
+        assert ok, review
+        assert "## Canary Execution Summary" in review
+        assert "- Runner: `fork_agent_sandbox_deterministic`" in review
+        assert "- Rounds: `3/3` passed" in review
+        assert "- Canary skills injected: `3`" in review
+        assert "candidate_canary" in review
+
     def test_render_skill_approval_request_shows_fork_reviewer_evidence(
         self, tmp_path: Path
     ) -> None:

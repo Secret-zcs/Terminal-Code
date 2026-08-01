@@ -2368,6 +2368,52 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execu
 
 下一步计划：
 
-- 将 canary 通过轮次摘要显式展示到 approval request 顶部，降低用户审批时翻报告成本。
 - 增加 canary 失败时阻止 approval request 的回归测试。
+- 后续支持按 event 类型设置不同 threshold。
+
+## 43. 最新推进记录：审批页展示 Canary 执行摘要
+
+日期：2026-08-01
+
+本次把 canary 执行结果从完整 execution eval 报告中提取到 approval request 顶部。审批人现在可以先看到 runner、通过轮次、canary 注入数量和首个 canary skill 路径，再决定是否展开阅读完整评测报告。这解决了“候选 skill 是否真的跑过多轮任务”需要翻长报告才能确认的问题。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_render_skill_approval_request_shows_canary_execution_summary`，要求审批 Markdown 包含 `## Canary Execution Summary`。
+- 修改 `mewcode/evolution/engine.py`：`render_skill_approval_request()` 在 Candidate Diff 前插入 canary 摘要。
+- 修改 `mewcode/evolution/engine.py`：新增 `_render_canary_execution_summary()`，只读 execution eval JSON，提取 runner、passed/total、`candidate_canary` 模式和注入数量。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档审批展示改动和验证结果。
+
+当前链路：
+
+```text
+execution eval JSON
+-> render_skill_approval_request()
+-> Canary Execution Summary
+-> Candidate Diff
+-> Fork Reviewer Evidence
+-> full Execution Eval Report
+```
+
+安全边界：
+
+- 已实现：审批渲染只读已有 report，不重新运行 eval、不写入新状态。
+- 已实现：canary 摘要出现在 Candidate Diff 之前，优先暴露候选 skill 的执行证据。
+- 已实现：如果 execution eval JSON 缺失或损坏，则不展示摘要，原有完整报告缺失提示逻辑仍保留。
+- 未实现：把 canary 摘要同步到 approval inbox 列表视图；当前在单个 approval detail 中展示。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_canary_execution_summary -q
+1 failed  # 实现前红灯：审批 Markdown 缺少 Canary Execution Summary
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_canary_execution_summary -q
+1 passed
+```
+
+下一步计划：
+
+- 增加 canary 失败时阻止 approval request 的显式回归测试。
+- 把 canary 摘要同步到 fork reviewer report 的 generated execution eval 区块。
 - 后续支持按 event 类型设置不同 threshold。

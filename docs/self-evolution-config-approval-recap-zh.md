@@ -924,3 +924,35 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execu
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_run_execution_eval_injects_candidate_skill_into_child_agent_sandbox -q
 1 passed
 ```
+
+## Approval Request Canary 摘要
+
+approval request 的 Markdown 现在会在 `Candidate Diff` 之前展示 canary 执行摘要，方便审批人先判断候选 skill 是否已经完成隔离多轮任务验证。
+
+新增区块：
+
+```text
+## Canary Execution Summary
+
+- Runner: `fork_agent_sandbox_deterministic`
+- Rounds: `3/3` passed
+- Mode: `candidate_canary`
+- Canary skills injected: `3`
+- First canary skill: `<child_agent/.mewcode/skills/<skill>/SKILL.md>`
+```
+
+关键边界：
+
+- 摘要来自已生成的 execution eval JSON，不会重新运行 eval。
+- 摘要缺失不会绕过原有 gate；`submit_skill_approval_request()` 仍要求 execution eval passed。
+- 审批详情仍保留完整 `Execution Eval Report`，canary 摘要只是把最关键执行证据前置。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_canary_execution_summary -q
+1 failed  # 实现前红灯：审批 Markdown 缺少 Canary Execution Summary
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_canary_execution_summary -q
+1 passed
+```

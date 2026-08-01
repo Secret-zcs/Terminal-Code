@@ -1128,6 +1128,7 @@ class EvolutionEngine:
             eval_report = report_path.read_text(encoding="utf-8").strip()
         else:
             eval_report = f"(execution eval report not found: {report_path})"
+        canary_summary = self._render_canary_execution_summary(proposal.id)
         fork_reviewer_evidence = self._render_fork_reviewer_evidence(proposal.id)
 
         lines = [
@@ -1141,11 +1142,20 @@ class EvolutionEngine:
             f"Candidate: {request.candidate_skill}",
             f"Eval report: {request.eval_report_markdown}",
             "",
+        ]
+        if canary_summary:
+            lines.extend([
+                "## Canary Execution Summary",
+                "",
+                canary_summary,
+                "",
+            ])
+        lines.extend([
             "## Candidate Diff",
             "",
             skill_preview.strip(),
             "",
-        ]
+        ])
         if fork_reviewer_evidence:
             lines.extend([
                 "## Fork Reviewer Evidence",
@@ -1160,6 +1170,33 @@ class EvolutionEngine:
             "",
         ])
         return True, "\n".join(lines)
+
+    def _render_canary_execution_summary(self, proposal_id: str) -> str:
+        report_path = self.execution_eval_report_path(proposal_id)
+        if not report_path.exists():
+            return ""
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return ""
+        rounds = list(report.get("rounds", []))
+        summary = report.get("summary", {})
+        passed = int(summary.get("passed", 0) or 0)
+        total = int(summary.get("total", len(rounds)) or 0)
+        canary_paths = [
+            str(round_.get("artifacts", {}).get("canary_skill", "")).strip()
+            for round_ in rounds
+            if str(round_.get("artifacts", {}).get("canary_skill", "")).strip()
+        ]
+        lines = [
+            f"- Runner: `{report.get('runner', '(unknown)')}`",
+            f"- Rounds: `{passed}/{total}` passed",
+            "- Mode: `candidate_canary`",
+            f"- Canary skills injected: `{len(canary_paths)}`",
+        ]
+        if canary_paths:
+            lines.append(f"- First canary skill: `{canary_paths[0]}`")
+        return "\n".join(lines)
 
     def resolve_skill_approval_request(
         self,
