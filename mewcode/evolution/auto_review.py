@@ -69,6 +69,7 @@ def _empty_review_result(status: str) -> dict:
         "generated_eval_cases": [],
         "generated_evaluations": [],
         "generated_execution_evals": [],
+        "auto_promotions": [],
         "ingested_usage": [],
         "review_run": None,
     }
@@ -120,7 +121,7 @@ def _review_enabled_skill_candidates(
         engine,
         generated_evaluations,
     )
-    generated_requests, generated_request_skips = (
+    generated_requests, generated_request_skips, auto_promotions = (
         _submit_generated_approval_requests(
             engine,
             generated_execution_evals,
@@ -134,6 +135,8 @@ def _review_enabled_skill_candidates(
         "status": (
             "submitted"
             if requests
+            else "auto-promoted"
+            if auto_promotions
             else "generated"
             if generated_candidates
             else "idle"
@@ -145,6 +148,7 @@ def _review_enabled_skill_candidates(
         "generated_eval_cases": generated_eval_cases,
         "generated_evaluations": generated_evaluations,
         "generated_execution_evals": generated_execution_evals,
+        "auto_promotions": auto_promotions,
         "ingested_usage": ingested_usage,
         "review_run": None,
     }
@@ -235,12 +239,23 @@ def _review_run_summary(engine: EvolutionEngine, result: dict) -> dict:
     request_ids = [
         request.proposal_id for request in result.get("requests", [])
     ]
+    auto_promotion_ids = [
+        str(item.get("proposal_id", ""))
+        for item in result.get("auto_promotions", [])
+        if item.get("proposal_id")
+    ]
+    evidence_ids = request_ids + [
+        proposal_id
+        for proposal_id in auto_promotion_ids
+        if proposal_id not in request_ids
+    ]
     return {
         "status": result.get("status", "idle"),
         "requests": request_ids,
+        "auto_promotions": list(result.get("auto_promotions", [])),
         "request_evidence": {
             proposal_id: _proposal_evidence_details(engine, proposal_id)
-            for proposal_id in request_ids
+            for proposal_id in evidence_ids
         },
         "skipped": list(result.get("skipped", [])),
         "generated_candidates": list(result.get("generated_candidates", [])),
@@ -288,10 +303,22 @@ def _render_fork_reviewer_report(run: SelfEvolutionReviewRun) -> str:
         f"- Can promote: `{run.policy.get('can_promote')}`",
         f"- Project write: `{run.policy.get('project_write')}`",
         f"- Requests: `{len(summary.get('requests', []))}`",
+        f"- Auto promotions: `{len(summary.get('auto_promotions', []))}`",
         f"- Generated candidates: `{len(summary.get('generated_candidates', []))}`",
         f"- Generated eval case groups: `{len(summary.get('generated_eval_cases', []))}`",
         f"- Ingested usage records: `{len(summary.get('ingested_usage', []))}`",
     ]
+    auto_promotions = summary.get("auto_promotions", [])
+    if auto_promotions:
+        lines.extend(["", "## Auto Promotions", ""])
+        for item in auto_promotions:
+            lines.append(
+                "- "
+                f"proposal=`{item.get('proposal_id')}` "
+                f"request=`{item.get('request_id')}` "
+                f"ok=`{item.get('ok')}` "
+                f"message={item.get('message')}"
+            )
     if run.error:
         lines.append(f"- Error: `{run.error}`")
     evidence_by_request = summary.get("request_evidence", {})
@@ -497,9 +524,10 @@ def _submit_generated_approval_requests(
     generated_execution_evals: list[dict],
     *,
     approval_mode: str,
-) -> tuple[list[Any], list[dict]]:
+) -> tuple[list[Any], list[dict], list[dict]]:
     requests: list[Any] = []
     skipped: list[dict] = []
+    auto_promotions: list[dict] = []
     for execution_eval in generated_execution_evals:
         if not execution_eval.get("ok"):
             continue
@@ -513,5 +541,25 @@ def _submit_generated_approval_requests(
         except ValueError as exc:
             skipped.append({"proposal_id": proposal_id, "reason": str(exc)})
             continue
+        if approval_mode == "trusted-auto":
+            ok, message = engine.resolve_skill_approval_request(
+                request.id,
+                approved=True,
+                reviewer="self-evolution-policy",
+                reason=(
+                    "trusted-auto: generated candidate passed deterministic "
+                    "eval and execution eval"
+                ),
+            )
+            auto_promotions.append({
+                "proposal_id": proposal_id,
+                "skill_name": execution_eval["skill_name"],
+                "request_id": request.id,
+                "ok": ok,
+                "message": message,
+            })
+            if not ok:
+                skipped.append({"proposal_id": proposal_id, "reason": message})
+            continue
         requests.append(request)
-    return requests, skipped
+    return requests, skipped, auto_promotions

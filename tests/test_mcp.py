@@ -209,6 +209,23 @@ class TestLoadConfigSelfEvolution:
         assert config.self_evolution.enabled is True
         assert config.self_evolution.skill_approval_mode == "deferred"
 
+    def test_self_evolution_can_use_trusted_auto_approval(
+        self, tmp_path: Path
+    ) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            self_evolution:
+              enabled: true
+              skill_approval_mode: trusted-auto
+        """)
+        config = load_config(path)
+        assert config.self_evolution.enabled is True
+        assert config.self_evolution.skill_approval_mode == "trusted-auto"
+
     def test_self_evolution_rejects_invalid_approval_mode(
         self, tmp_path: Path
     ) -> None:

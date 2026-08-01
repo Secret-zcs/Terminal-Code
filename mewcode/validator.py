@@ -19,7 +19,7 @@ VALID_PERMISSION_MODES = {
 
 VALID_TEAMMATE_MODES = {"", "in-process"}
 
-VALID_SELF_EVOLUTION_APPROVAL_MODES = {"manual", "deferred"}
+VALID_SELF_EVOLUTION_APPROVAL_MODES = {"manual", "deferred", "trusted-auto"}
 
 DEFAULT_CONTEXT_WINDOW = 200_000
 
@@ -222,8 +222,8 @@ def validate_teammate_mode(mode: object) -> str:
 def validate_self_evolution(raw_self_evolution: object) -> dict:
     """校验 self_evolution 配置段。
 
-    自进化只由配置开关控制；candidate skill 仍必须经过用户审批，不能
-    通过配置进入自动提升路径。
+    自进化只由配置开关控制；trusted-auto 只允许通过完整评测门禁的
+    自动生成 candidate 进入策略化提升路径。
     """
     defaults = {
         "enabled": False,

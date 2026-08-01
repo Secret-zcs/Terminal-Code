@@ -136,7 +136,7 @@ class SelfEvolutionConfig:
 
     @property
     def requires_user_approval(self) -> bool:
-        return True
+        return self.skill_approval_mode != "trusted-auto"
 
     @property
     def valid_approval_modes(self) -> set[str]:

@@ -2058,3 +2058,59 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 - 把 `Request Evidence` 进一步结构化给 TUI 审批组件，避免用户只看长 Markdown。
 - 在 review report 中补充 eval case 与 execution eval 的逐轮摘要。
 - 后续再实现真实 LLM child reviewer 的只读/候选生成模式。
+
+## 37. 最新推进记录：Trusted-Auto 策略化自进化模式
+
+日期：2026-08-01
+
+本次回应“是否必须每次都用户审批”的设计问题，把审批机制从固定人工门禁扩展为策略化自治模式。新增 `self_evolution.skill_approval_mode: trusted-auto`，允许系统对“本轮自动 review 新生成、且已经通过 deterministic eval 与 execution eval 的 candidate skill”自动完成 approval request resolve 和 promote。
+
+修改内容：
+
+- 修改 `mewcode/validator.py`：`VALID_SELF_EVOLUTION_APPROVAL_MODES` 新增 `trusted-auto`。
+- 修改 `mewcode/config.py`：`SelfEvolutionConfig.requires_user_approval` 对 `trusted-auto` 返回 `False`。
+- 修改 `mewcode/evolution/auto_review.py`：自动 review result 新增 `auto_promotions`。
+- 修改 `mewcode/evolution/auto_review.py`：`trusted-auto` 只在 generated candidate submission 路径中调用 `resolve_skill_approval_request(... approved=True ...)`。
+- 修改 `mewcode/evolution/auto_review.py`：fork reviewer summary/report 展示 auto promotion 数量、proposal、request 和执行结果。
+- 修改 `tests/test_mcp.py`：覆盖配置文件接受 `trusted-auto`。
+- 修改 `tests/test_evolution.py`：覆盖 generated candidate 自动 promote，以及 existing ready candidate 不被静默 promote。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：记录新的策略边界。
+
+当前链路：
+
+```text
+skill_approval_mode = trusted-auto
+-> auto review generates candidate from usage evidence
+-> safe eval suggestions materialized
+-> deterministic eval passed
+-> execution eval passed
+-> submit approval request for audit
+-> self-evolution-policy resolves approved
+-> promote candidate skill
+-> report auto_promotions
+```
+
+安全边界：
+
+- 已实现：只有本轮 auto review 生成并完成全部评测的 candidate 会 trusted-auto promote。
+- 已实现：已有 ready candidate 即使配置为 `trusted-auto`，仍只进入 pending request，不会静默启用。
+- 已实现：自动启用仍会留下 approval request、reviewer=`self-evolution-policy`、resolution reason 和 candidate manifest。
+- 已实现：fork reviewer report 记录 auto promotion 结果。
+- 未实现：真实任务 canary 与自动回滚；当前 trusted-auto 仍基于现有 eval/execution eval gate。
+- 未实现：用户可配置更细的 risk policy，例如只允许 patch 不允许 create、只允许低风险工具集。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_use_trusted_auto_approval tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_promotes_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_keeps_existing_ready_candidate_pending -q
+3 failed  # 实现前红灯：模式未被接受，auto_promotions 不存在，trusted-auto ready candidate 被跳过
+
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_use_trusted_auto_approval tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_promotes_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_keeps_existing_ready_candidate_pending -q
+3 passed
+```
+
+下一步计划：
+
+- 增加 canary skill 使用模式：candidate 只在匹配任务中临时注入，成功若干轮后才允许 trusted-auto。
+- 增加自动 rollback/quarantine：trusted-auto skill 后续触发用户纠正或失败 evidence 时自动禁用。
+- 将 trusted-auto policy 做成可配置风控项，而不是只有一个总开关。

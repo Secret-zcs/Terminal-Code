@@ -767,5 +767,23 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 
 - 为审批页展示 evidence 来源：tool-result、conversation、manual、skill-usage。
 - 完善用户可见审批入口：补拒绝路径 UI 测试、manual/deferred 差异化展示和批量审批队列视图。
-- 实现 `manual` 与 `deferred` 的审批队列差异，但两者都必须保留用户最终审批。
+- 实现 `manual`、`deferred` 与 `trusted-auto` 的策略差异：manual/deferred 保留用户最终审批，trusted-auto 只允许本轮自动生成且通过全部评测门禁的 candidate 自动 promote。
 - 补充多轮任务回放评测，确保 candidate skill 在若干轮任务正确执行后才进入审批。
+
+## Trusted-Auto 策略模式
+
+本次新增 `self_evolution.skill_approval_mode: trusted-auto`。该模式不是完全放开自进化，而是把“用户最终审批”替换为“策略化审批”：只有 auto review 本轮从 usage evidence 生成、自动 materialize eval case、通过 deterministic eval、通过 execution eval 的 candidate skill，才会由 `self-evolution-policy` 自动 resolve approval request 并 promote。
+
+关键边界：
+
+- `manual`：生成 pending approval request，用户逐个审批。
+- `deferred`：生成 pending approval request，可延后集中审批。
+- `trusted-auto`：generated candidate 满足全部门禁后自动 approve/promote；已有 ready candidate 仍只进入 pending request。
+- 所有模式都会保留 approval request、candidate manifest 和 fork reviewer report，便于审计和回滚。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_use_trusted_auto_approval tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_promotes_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_keeps_existing_ready_candidate_pending -q
+3 passed
+```

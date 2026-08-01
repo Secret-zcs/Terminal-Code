@@ -1372,6 +1372,84 @@ class TestEvolutionEngine:
         stored_requests = EvolutionEngine(tmp_path).store.load_skill_approval_requests()
         assert [request.id for request in stored_requests] == [requests[0].id]
 
+    def test_self_evolution_review_trusted_auto_promotes_generated_candidate(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="trusted-auto"),
+        )
+
+        proposal = EvolutionEngine(tmp_path).store.load_proposals()[0]
+        assert result["status"] == "auto-promoted"
+        assert result["requests"] == []
+        assert result["auto_promotions"][0]["proposal_id"] == proposal.id
+        assert result["auto_promotions"][0]["ok"] is True
+        assert (
+            tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        ).exists()
+        stored_request = EvolutionEngine(tmp_path).store.load_skill_approval_requests()[0]
+        assert stored_request.status == "approved"
+        assert stored_request.reviewer == "self-evolution-policy"
+        stored_proposal = EvolutionEngine(tmp_path).store.get_proposal(proposal.id)
+        assert stored_proposal is not None
+        assert stored_proposal.status == "applied"
+
+    def test_self_evolution_review_trusted_auto_keeps_existing_ready_candidate_pending(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="trusted-auto"),
+        )
+
+        assert result["status"] == "submitted"
+        assert result["auto_promotions"] == []
+        assert len(result["requests"]) == 1
+        assert result["requests"][0].proposal_id == proposal.id
+        assert result["requests"][0].approval_mode == "trusted-auto"
+        assert not (
+            tmp_path / ".mewcode" / "skills" / "debug-regression-loop" / "SKILL.md"
+        ).exists()
+        stored_proposal = EvolutionEngine(tmp_path).store.get_proposal(proposal.id)
+        assert stored_proposal is not None
+        assert stored_proposal.status == "proposed"
+
     def test_self_evolution_review_report_includes_usage_evidence(
         self, tmp_path: Path
     ) -> None:
