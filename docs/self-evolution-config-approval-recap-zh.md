@@ -846,3 +846,41 @@ self_evolution:
 PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_set_trusted_auto_rollback_events tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_filters_rollback_events -q
 2 passed
 ```
+
+## Trusted-Auto Policy 审计展示
+
+fork reviewer 的审计产物现在会记录并展示本次 `trusted-auto` 生效的策略参数，避免用户只看到“自动通过/自动回滚”结果，却不知道自动决策依据。
+
+新增审计字段：
+
+```json
+{
+  "trusted_auto_policy": {
+    "auto_promote_scope": "same_pass_generated_candidates_only",
+    "rollback_threshold": 2,
+    "rollback_events": ["user_feedback"]
+  }
+}
+```
+
+展示位置：
+
+- `.mewcode/evolution/review_runs/<run_id>/input.json`：保存本次 review 启动时的配置快照。
+- `.mewcode/evolution/review_runs/<run_id>/policy.json`：保存 fork reviewer 能力边界和 trusted-auto policy。
+- `.mewcode/evolution/review_runs/<run_id>/report.md`：新增 `## Trusted-Auto Policy`，展示 auto promote scope、rollback threshold 和 rollback events。
+
+关键边界：
+
+- `auto_promote_scope` 固定为 `same_pass_generated_candidates_only`，表示只有本轮自动生成并通过全部 eval/execution eval 的 candidate 才能自动 promote。
+- 既有 ready candidate 即使处于 `trusted-auto` 模式，也仍进入 pending approval request，不会因为策略展示而被自动应用。
+- 该改动只增强可审计性，不放宽 gate，也不改变 rollback 判定。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts -q
+1 failed  # 实现前红灯：input.json 缺少 trusted_auto_policy
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts -q
+1 passed
+```

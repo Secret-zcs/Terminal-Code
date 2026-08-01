@@ -49,7 +49,12 @@ def review_ready_skill_candidates(
         ["failure", "user_feedback"],
     )
     engine = EvolutionEngine(project_root)
-    review_run = _start_fork_reviewer_run(engine, approval_mode=approval_mode)
+    review_run = _start_fork_reviewer_run(
+        engine,
+        approval_mode=approval_mode,
+        trusted_auto_rollback_threshold=rollback_threshold,
+        trusted_auto_rollback_events=rollback_events,
+    )
     try:
         result = _review_enabled_skill_candidates(
             engine,
@@ -189,6 +194,8 @@ def _start_fork_reviewer_run(
     engine: EvolutionEngine,
     *,
     approval_mode: str,
+    trusted_auto_rollback_threshold: int = 1,
+    trusted_auto_rollback_events: list[str] | None = None,
 ) -> SelfEvolutionReviewRun:
     run_id = new_evolution_id("review")
     run_dir = engine.project_root / ".mewcode" / "evolution" / "review_runs" / run_id
@@ -198,6 +205,13 @@ def _start_fork_reviewer_run(
         "policy": _project_relative(engine, run_dir / "policy.json"),
         "output": _project_relative(engine, run_dir / "output.json"),
         "report": _project_relative(engine, run_dir / "report.md"),
+    }
+    trusted_auto_policy = {
+        "auto_promote_scope": "same_pass_generated_candidates_only",
+        "rollback_threshold": max(1, int(trusted_auto_rollback_threshold)),
+        "rollback_events": list(
+            trusted_auto_rollback_events or ["failure", "user_feedback"]
+        ),
     }
     policy = {
         "mode": "fork_reviewer",
@@ -210,9 +224,11 @@ def _start_fork_reviewer_run(
         "can_promote": False,
         "project_write": "disabled",
         "network": "disabled",
+        "trusted_auto_policy": trusted_auto_policy,
     }
     input_payload = {
         "approval_mode": approval_mode,
+        "trusted_auto_policy": trusted_auto_policy,
         "counts": {
             "evidence": len(engine.store.load_evidence()),
             "proposals": len(engine.store.load_proposals()),
@@ -341,6 +357,21 @@ def _render_fork_reviewer_report(run: SelfEvolutionReviewRun) -> str:
         f"- Generated eval case groups: `{len(summary.get('generated_eval_cases', []))}`",
         f"- Ingested usage records: `{len(summary.get('ingested_usage', []))}`",
     ]
+    trusted_auto_policy = run.policy.get("trusted_auto_policy", {})
+    if run.approval_mode == "trusted-auto" and isinstance(trusted_auto_policy, dict):
+        rollback_events = ", ".join(
+            str(event) for event in trusted_auto_policy.get("rollback_events", [])
+        )
+        lines.extend([
+            "",
+            "## Trusted-Auto Policy",
+            "",
+            "- Auto promote scope: "
+            f"`{trusted_auto_policy.get('auto_promote_scope', '')}`",
+            "- Rollback threshold: "
+            f"`{trusted_auto_policy.get('rollback_threshold', '')}`",
+            f"- Rollback events: `{rollback_events}`",
+        ])
     auto_promotions = summary.get("auto_promotions", [])
     if auto_promotions:
         lines.extend(["", "## Auto Promotions", ""])

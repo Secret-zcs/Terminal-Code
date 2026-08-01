@@ -2272,6 +2272,54 @@ PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_ev
 
 下一步计划：
 
-- 将 trusted-auto policy 参数写入 fork reviewer input/report。
 - 增加 canary skill 临时注入机制。
+- 后续支持按 event 类型设置不同 threshold。
+
+## 41. 最新推进记录：Fork Reviewer 展示 Trusted-Auto 策略参数
+
+日期：2026-08-01
+
+本次把 `trusted-auto` 的关键策略参数写入 fork reviewer 的审计产物。此前 reviewer report 会展示是否允许 approve/promote，但不会展示当前自动 promote 范围、rollback threshold 和 rollback event 过滤条件；现在审批和复盘时可以直接看到本次自动审查具体按什么策略运行。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts`，要求 `input.json` 和 `report.md` 都展示 trusted-auto policy。
+- 修改 `mewcode/evolution/auto_review.py`：`review_ready_skill_candidates()` 将配置中的 `trusted_auto_rollback_threshold` 和 `trusted_auto_rollback_events` 传入 fork reviewer run。
+- 修改 `mewcode/evolution/auto_review.py`：`_start_fork_reviewer_run()` 在 `input.json`、`policy.json` 和 run policy 中记录 `trusted_auto_policy`。
+- 修改 `mewcode/evolution/auto_review.py`：`_render_fork_reviewer_report()` 新增 `## Trusted-Auto Policy` 区块，展示 auto promote scope、rollback threshold 和 rollback events。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档本次策略透明度改动和验证结果。
+
+当前链路：
+
+```text
+self_evolution.skill_approval_mode = trusted-auto
+trusted_auto_rollback_threshold = 2
+trusted_auto_rollback_events = [user_feedback]
+-> review_ready_skill_candidates()
+-> fork reviewer input.json records trusted_auto_policy
+-> fork reviewer report.md renders Trusted-Auto Policy
+-> approval/recap can audit exact autonomous policy
+```
+
+安全边界：
+
+- 已实现：自动 promote 范围固定展示为 `same_pass_generated_candidates_only`，避免误解为所有 candidate 都会自动应用。
+- 已实现：rollback threshold 和 rollback events 来自当前配置快照，而不是报告生成时重新读取外部状态。
+- 已实现：策略只增强审计可见性，不改变 approve/promote/quarantine 的既有门禁。
+- 未实现：把 trusted-auto policy 暴露到交互式审批队列的摘要列表；当前主要在 reviewer report 和 approval detail 中可见。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts -q
+1 failed  # 实现前红灯：input.json 缺少 trusted_auto_policy
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts -q
+1 passed
+```
+
+下一步计划：
+
+- 增加 canary skill 临时注入机制。
+- 把 canary 执行结果纳入 approval request，要求候选 skill 正确执行多轮任务后才允许进入应用阶段。
 - 后续支持按 event 类型设置不同 threshold。

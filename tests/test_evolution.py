@@ -922,6 +922,38 @@ class TestEvolutionEngine:
         assert (tmp_path / run.artifacts["policy"]).is_file()
         assert (tmp_path / run.artifacts["report"]).is_file()
 
+    def test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="trusted-auto",
+                trusted_auto_rollback_threshold=2,
+                trusted_auto_rollback_events=["user_feedback"],
+            ),
+        )
+
+        run = result["review_run"]
+        input_payload = json.loads(
+            (tmp_path / run.artifacts["input"]).read_text(encoding="utf-8")
+        )
+        report = (tmp_path / run.artifacts["report"]).read_text(encoding="utf-8")
+
+        assert input_payload["trusted_auto_policy"] == {
+            "auto_promote_scope": "same_pass_generated_candidates_only",
+            "rollback_threshold": 2,
+            "rollback_events": ["user_feedback"],
+        }
+        assert "## Trusted-Auto Policy" in report
+        assert "- Auto promote scope: `same_pass_generated_candidates_only`" in report
+        assert "- Rollback threshold: `2`" in report
+        assert "- Rollback events: `user_feedback`" in report
+
     def test_self_evolution_review_submits_ready_candidates_once(
         self, tmp_path: Path
     ) -> None:
