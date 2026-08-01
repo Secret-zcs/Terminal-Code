@@ -214,7 +214,7 @@ def _finish_fork_reviewer_run(
     status: str | None = None,
     error: str = "",
 ) -> SelfEvolutionReviewRun:
-    summary = _review_run_summary(result)
+    summary = _review_run_summary(engine, result)
     run.status = status or str(result.get("status", "idle"))
     run.summary = summary
     run.completed_at = time.time()
@@ -231,12 +231,17 @@ def _finish_fork_reviewer_run(
     return run
 
 
-def _review_run_summary(result: dict) -> dict:
+def _review_run_summary(engine: EvolutionEngine, result: dict) -> dict:
+    request_ids = [
+        request.proposal_id for request in result.get("requests", [])
+    ]
     return {
         "status": result.get("status", "idle"),
-        "requests": [
-            request.proposal_id for request in result.get("requests", [])
-        ],
+        "requests": request_ids,
+        "request_evidence": {
+            proposal_id: _proposal_evidence_details(engine, proposal_id)
+            for proposal_id in request_ids
+        },
         "skipped": list(result.get("skipped", [])),
         "generated_candidates": list(result.get("generated_candidates", [])),
         "generated_eval_cases": list(result.get("generated_eval_cases", [])),
@@ -246,6 +251,28 @@ def _review_run_summary(result: dict) -> dict:
         ),
         "ingested_usage": list(result.get("ingested_usage", [])),
     }
+
+
+def _proposal_evidence_details(
+    engine: EvolutionEngine,
+    proposal_id: str,
+) -> list[dict]:
+    proposal = engine.store.get_proposal(proposal_id)
+    if proposal is None:
+        return []
+    details: list[dict] = []
+    for evidence_id in proposal.evidence_ids:
+        evidence = engine.store.get_evidence(evidence_id)
+        if evidence is None:
+            continue
+        details.append({
+            "id": evidence.id,
+            "kind": evidence.kind,
+            "source": evidence.source,
+            "summary": evidence.summary,
+            "metadata": evidence.metadata,
+        })
+    return details
 
 
 def _render_fork_reviewer_report(run: SelfEvolutionReviewRun) -> str:
@@ -267,6 +294,26 @@ def _render_fork_reviewer_report(run: SelfEvolutionReviewRun) -> str:
     ]
     if run.error:
         lines.append(f"- Error: `{run.error}`")
+    evidence_by_request = summary.get("request_evidence", {})
+    if evidence_by_request:
+        lines.extend(["", "## Request Evidence", ""])
+        for proposal_id, evidences in evidence_by_request.items():
+            lines.append(f"### Proposal `{proposal_id}`")
+            if not evidences:
+                lines.append("- No linked evidence was recorded.")
+                continue
+            for evidence in evidences:
+                lines.append(
+                    "- "
+                    f"`{evidence.get('id')}` "
+                    f"kind=`{evidence.get('kind')}` "
+                    f"source=`{evidence.get('source')}` "
+                    f"summary={evidence.get('summary')}"
+                )
+                metadata = evidence.get("metadata", {})
+                summaries = metadata.get("summaries", []) if isinstance(metadata, dict) else []
+                for item in summaries:
+                    lines.append(f"  - usage summary: {item}")
     return "\n".join(lines) + "\n"
 
 

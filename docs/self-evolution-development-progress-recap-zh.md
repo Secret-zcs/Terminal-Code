@@ -2006,3 +2006,55 @@ PYTHONPATH=. pytest tests/test_evolution.py -q -k "render_skill_approval_request
 - 在 fork reviewer input/report 中加入触发 evidence 的摘要、source 和 metadata。
 - 审批页进一步展示 candidate 生成原因、eval case 列表和 execution eval 每轮摘要。
 - 后续再推进真实 LLM child reviewer，但保持只生成候选和审批申请，不允许 promote。
+
+## 36. 最新推进记录：Fork Reviewer 报告展示 Usage Evidence
+
+日期：2026-08-01
+
+本次把 fork reviewer 报告从“只展示运行策略和数量统计”推进为“展示审批请求背后的 evidence”。自动 usage patch candidate 会通过 `proposal.evidence_ids` 关联 `source=skill-usage` 的 evidence；现在 fork reviewer `output.json` 和 `report.md` 会按 proposal 展示 evidence id、kind、source、summary，以及 metadata 中的 usage summaries。
+
+修改内容：
+
+- 修改 `mewcode/evolution/auto_review.py`：`_review_run_summary()` 接收 `EvolutionEngine`，为每个 request proposal 收集 linked evidence。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_proposal_evidence_details()`，从 `proposal.evidence_ids` 读取 evidence 明细。
+- 修改 `mewcode/evolution/auto_review.py`：`_render_fork_reviewer_report()` 新增 `## Request Evidence` 区块。
+- 修改 `tests/test_evolution.py`：新增 usage evidence 出现在 fork reviewer report 中的回归测试。
+- 修改本文档：记录 evidence 展示逻辑和验证结果。
+
+当前链路：
+
+```text
+negative skill usage
+-> propose_skill_patch_from_usage()
+-> record evidence source=skill-usage
+-> proposal.evidence_ids links evidence
+-> fork reviewer summary resolves evidence
+-> report.md shows source and usage summaries
+-> approval page includes the same report
+```
+
+能力边界：
+
+- 已实现：generated skill patch 审批报告能看到 `source=skill-usage`。
+- 已实现：usage summary 会展示具体用户纠正或失败摘要。
+- 已实现：报告数据来自持久化 proposal/evidence，不依赖运行期临时变量。
+- 未实现：还没有把 tool-result、conversation、manual evidence 分组做成更适合 UI 的摘要卡片。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_usage_evidence -q
+1 failed  # 实现前红灯：fork reviewer report 缺少 Request Evidence
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_usage_evidence -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_fork_reviewer_evidence tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_usage_evidence -q
+2 passed
+```
+
+下一步计划：
+
+- 把 `Request Evidence` 进一步结构化给 TUI 审批组件，避免用户只看长 Markdown。
+- 在 review report 中补充 eval case 与 execution eval 的逐轮摘要。
+- 后续再实现真实 LLM child reviewer 的只读/候选生成模式。

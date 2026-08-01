@@ -1372,6 +1372,51 @@ class TestEvolutionEngine:
         stored_requests = EvolutionEngine(tmp_path).store.load_skill_approval_requests()
         assert [request.id for request in stored_requests] == [requests[0].id]
 
+    def test_self_evolution_review_report_includes_usage_evidence(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+
+        report = (tmp_path / result["review_run"].artifacts["report"]).read_text(
+            encoding="utf-8"
+        )
+        assert "## Request Evidence" in report
+        assert "source=`skill-usage`" in report
+        assert "错误地跳过复盘文档" in report
+        assert "用户纠正：遗漏验证" in report
+
     def test_self_evolution_review_does_not_materialize_uncovered_eval_suggestions(
         self, tmp_path: Path
     ) -> None:
