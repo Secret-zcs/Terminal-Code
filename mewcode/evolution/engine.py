@@ -758,7 +758,13 @@ class EvolutionEngine:
             })
         return suggestions
 
-    def quarantine_skill(self, skill_name: str, *, reason: str = "") -> tuple[bool, str]:
+    def quarantine_skill(
+        self,
+        skill_name: str,
+        *,
+        reason: str = "",
+        source: str = "evolve",
+    ) -> tuple[bool, str]:
         clean_name = skill_name.strip()
         if not VALID_NAME_RE.match(clean_name):
             return False, "invalid skill name"
@@ -796,10 +802,11 @@ class EvolutionEngine:
         self.record_skill_usage(
             clean_name,
             event="quarantine",
-            source="evolve",
+            source=source.strip() or "evolve",
             metadata={
                 "reason": reason.strip(),
                 "quarantine_path": str(quarantined_skill),
+                "source": source.strip() or "evolve",
             },
         )
         return True, str(quarantined_skill)

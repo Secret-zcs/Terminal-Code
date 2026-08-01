@@ -2114,3 +2114,58 @@ PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_ev
 - 增加 canary skill 使用模式：candidate 只在匹配任务中临时注入，成功若干轮后才允许 trusted-auto。
 - 增加自动 rollback/quarantine：trusted-auto skill 后续触发用户纠正或失败 evidence 时自动禁用。
 - 将 trusted-auto policy 做成可配置风控项，而不是只有一个总开关。
+
+## 38. 最新推进记录：Trusted-Auto 自动回滚隔离
+
+日期：2026-08-01
+
+本次补齐 `trusted-auto` 的第一层回滚机制：如果某个 skill 是由 `trusted-auto` 自动 promote 的，并且在 approval resolved 之后又出现新的 `failure` 或 `user_feedback` usage，下一次 auto review 会自动把该正式项目 skill 移入 quarantine，避免错误 skill 长期留在 loader 路径里继续影响任务。
+
+修改内容：
+
+- 修改 `mewcode/evolution/auto_review.py`：新增 `auto_quarantines` result 字段。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_auto_quarantine_trusted_auto_skills()`，只检查 `approval_mode=trusted-auto` 且 `status=approved` 的 approval request。
+- 修改 `mewcode/evolution/auto_review.py`：回滚只统计 `created_at > request.resolved_at` 的负面 usage，避免把 promote 前用于生成 patch 的旧失败误判为新失败。
+- 修改 `mewcode/evolution/auto_review.py`：fork reviewer summary/report 展示 `Auto Quarantines`。
+- 修改 `mewcode/evolution/engine.py`：`quarantine_skill()` 新增 `source` 参数，默认仍为 `evolve`，自动回滚使用 `trusted-auto-rollback`。
+- 修改 `tests/test_evolution.py`：新增 trusted-auto promote 后出现新负面 usage 自动 quarantine 的回归测试。
+- 修改本文档：记录自动回滚隔离的触发条件和验证结果。
+
+当前链路：
+
+```text
+trusted-auto promotes skill
+-> later failure/user_feedback usage is recorded
+-> next auto review checks approved trusted-auto requests
+-> only usage after resolved_at counts
+-> quarantine_skill(source=trusted-auto-rollback)
+-> formal skill leaves .mewcode/skills
+-> review report records auto_quarantines
+```
+
+安全边界：
+
+- 已实现：只回滚 trusted-auto 自动启用过的正式项目 skill。
+- 已实现：只看 promote 之后的新负面 usage，不会因为历史失败立即隔离新 skill。
+- 已实现：quarantine 会写 usage log，后续 `suggest_quarantine()` 会因 quarantine 事件重置旧负面链。
+- 未实现：自动恢复上一个版本；当前回滚方式是隔离，不是版本级 revert。
+- 未实现：需要多次失败才回滚的阈值策略；当前 trusted-auto 后一次新负面 usage 即隔离，偏安全。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_quarantines_after_new_negative_usage -q
+1 failed  # 实现前红灯：post-promote failure 仍生成新 candidate，没有 quarantine
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_quarantines_after_new_negative_usage -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_use_trusted_auto_approval tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_promotes_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_keeps_existing_ready_candidate_pending tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_quarantines_after_new_negative_usage -q
+4 passed
+```
+
+下一步计划：
+
+- 增加 canary skill 临时注入机制，让 trusted-auto 在正式 promote 前先经过真实任务试用。
+- 增加 rollback policy 配置，例如 `rollback_threshold`、`rollback_events` 和 `patch_after_quarantine`。
+- 在 TUI/报告中展示 trusted-auto 被隔离的原因和 quarantine 路径。

@@ -787,3 +787,21 @@ FAILED tests/test_agent.py::test_multi_step_autonomous
 PYTHONPATH=. pytest tests/test_mcp.py::TestLoadConfigSelfEvolution::test_self_evolution_can_use_trusted_auto_approval tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_promotes_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_keeps_existing_ready_candidate_pending -q
 3 passed
 ```
+
+## Trusted-Auto 自动回滚隔离
+
+`trusted-auto` 现在新增自动回滚隔离：如果由 trusted-auto promote 的 skill 在 approval resolved 之后又出现新的 `failure` 或 `user_feedback` usage，下一次 auto review 会自动调用 `quarantine_skill(source="trusted-auto-rollback")`，把正式项目 skill 移出 `.mewcode/skills`。
+
+关键边界：
+
+- 只处理 `approval_mode=trusted-auto` 且已 approved 的 request。
+- 只统计 `created_at > resolved_at` 的负面 usage，避免 promote 前的旧失败立即触发回滚。
+- 回滚是 quarantine，不是版本级恢复；skill 会进入 `.mewcode/evolution/quarantine/`。
+- 当前策略偏安全：一次 promote 后新负面 usage 即隔离；后续可改成可配置阈值。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_quarantines_after_new_negative_usage -q
+1 passed
+```

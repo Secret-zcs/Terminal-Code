@@ -70,6 +70,7 @@ def _empty_review_result(status: str) -> dict:
         "generated_evaluations": [],
         "generated_execution_evals": [],
         "auto_promotions": [],
+        "auto_quarantines": [],
         "ingested_usage": [],
         "review_run": None,
     }
@@ -83,6 +84,10 @@ def _review_enabled_skill_candidates(
     requests = []
     skipped: list[dict] = []
     ingested_usage = _ingest_evidence_as_skill_usage(engine)
+    auto_quarantines = _auto_quarantine_trusted_auto_skills(
+        engine,
+        approval_mode=approval_mode,
+    )
 
     for proposal in engine.store.load_proposals():
         if proposal.target != "skill":
@@ -135,6 +140,8 @@ def _review_enabled_skill_candidates(
         "status": (
             "submitted"
             if requests
+            else "quarantined"
+            if auto_quarantines
             else "auto-promoted"
             if auto_promotions
             else "generated"
@@ -149,6 +156,7 @@ def _review_enabled_skill_candidates(
         "generated_evaluations": generated_evaluations,
         "generated_execution_evals": generated_execution_evals,
         "auto_promotions": auto_promotions,
+        "auto_quarantines": auto_quarantines,
         "ingested_usage": ingested_usage,
         "review_run": None,
     }
@@ -253,6 +261,7 @@ def _review_run_summary(engine: EvolutionEngine, result: dict) -> dict:
         "status": result.get("status", "idle"),
         "requests": request_ids,
         "auto_promotions": list(result.get("auto_promotions", [])),
+        "auto_quarantines": list(result.get("auto_quarantines", [])),
         "request_evidence": {
             proposal_id: _proposal_evidence_details(engine, proposal_id)
             for proposal_id in evidence_ids
@@ -304,6 +313,7 @@ def _render_fork_reviewer_report(run: SelfEvolutionReviewRun) -> str:
         f"- Project write: `{run.policy.get('project_write')}`",
         f"- Requests: `{len(summary.get('requests', []))}`",
         f"- Auto promotions: `{len(summary.get('auto_promotions', []))}`",
+        f"- Auto quarantines: `{len(summary.get('auto_quarantines', []))}`",
         f"- Generated candidates: `{len(summary.get('generated_candidates', []))}`",
         f"- Generated eval case groups: `{len(summary.get('generated_eval_cases', []))}`",
         f"- Ingested usage records: `{len(summary.get('ingested_usage', []))}`",
@@ -318,6 +328,17 @@ def _render_fork_reviewer_report(run: SelfEvolutionReviewRun) -> str:
                 f"request=`{item.get('request_id')}` "
                 f"ok=`{item.get('ok')}` "
                 f"message={item.get('message')}"
+            )
+    auto_quarantines = summary.get("auto_quarantines", [])
+    if auto_quarantines:
+        lines.extend(["", "## Auto Quarantines", ""])
+        for item in auto_quarantines:
+            lines.append(
+                "- "
+                f"skill=`{item.get('skill_name')}` "
+                f"ok=`{item.get('ok')}` "
+                f"path=`{item.get('path')}` "
+                f"reason={item.get('reason')}"
             )
     if run.error:
         lines.append(f"- Error: `{run.error}`")
@@ -346,6 +367,67 @@ def _render_fork_reviewer_report(run: SelfEvolutionReviewRun) -> str:
 
 def _project_relative(engine: EvolutionEngine, path: Path) -> str:
     return str(path.relative_to(engine.project_root))
+
+
+def _auto_quarantine_trusted_auto_skills(
+    engine: EvolutionEngine,
+    *,
+    approval_mode: str,
+) -> list[dict]:
+    if approval_mode != "trusted-auto":
+        return []
+
+    results: list[dict] = []
+    usage = engine.load_skill_usage()
+    for request in engine.store.load_skill_approval_requests():
+        if request.approval_mode != "trusted-auto":
+            continue
+        if request.status != "approved" or request.resolved_at <= 0:
+            continue
+        skill_name = request.skill_name
+        if not engine.has_project_skill(skill_name):
+            continue
+        negative = [
+            record
+            for record in usage
+            if str(record.get("skill_name", "")).strip() == skill_name
+            and str(record.get("event", "")).strip() in {"failure", "user_feedback"}
+            and float(record.get("created_at", 0.0) or 0.0) > request.resolved_at
+        ]
+        if not negative:
+            continue
+        reason = _trusted_auto_quarantine_reason(request, negative)
+        ok, path = engine.quarantine_skill(
+            skill_name,
+            reason=reason,
+            source="trusted-auto-rollback",
+        )
+        results.append({
+            "skill_name": skill_name,
+            "request_id": request.id,
+            "ok": ok,
+            "path": path if ok else "",
+            "reason": reason,
+            "negative_events": len(negative),
+            "message": path,
+        })
+    return results
+
+
+def _trusted_auto_quarantine_reason(request, negative: list[dict]) -> str:
+    summaries = []
+    for record in negative:
+        metadata = record.get("metadata", {})
+        if isinstance(metadata, dict):
+            summary = str(metadata.get("summary", "")).strip()
+            if summary:
+                summaries.append(summary)
+    detail = "; ".join(summaries[:3]) or "negative usage after trusted-auto promotion"
+    return (
+        "trusted-auto rollback: "
+        f"skill '{request.skill_name}' had {len(negative)} negative usage "
+        f"event(s) after approval {request.id}: {detail}"
+    )
 
 
 def _ingest_evidence_as_skill_usage(engine: EvolutionEngine) -> list[str]:
