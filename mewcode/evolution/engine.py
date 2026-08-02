@@ -1166,7 +1166,7 @@ class EvolutionEngine:
         proposal: EvolutionProposal,
         manifest: dict,
     ) -> dict:
-        return {
+        item = {
             "proposal_id": proposal.id,
             "skill_name": str(manifest.get("skill_name", "")),
             "proposal_status": proposal.status,
@@ -1179,6 +1179,28 @@ class EvolutionEngine:
             "execution_eval_status": str(
                 manifest.get("execution_eval_status", "pending")
             ),
+        }
+        item.update(self._candidate_source_review_run_item(proposal.id))
+        return item
+
+    def _candidate_source_review_run_item(self, proposal_id: str) -> dict:
+        matching_runs = []
+        for run in self.store.load_self_evolution_review_runs():
+            summary = run.summary or {}
+            if proposal_id in summary.get("generated_candidates", []):
+                matching_runs.append(run)
+                continue
+            blocked = list(summary.get("blocked_generated_candidates", []))
+            if any(item.get("proposal_id") == proposal_id for item in blocked):
+                matching_runs.append(run)
+        if not matching_runs:
+            return {}
+        matching_runs.sort(key=lambda run: run.completed_at or run.created_at)
+        run = matching_runs[-1]
+        return {
+            "review_run_id": run.id,
+            "review_run_status": run.status,
+            "review_run_report": str(run.artifacts.get("report", "")),
         }
 
     def _load_candidate_manifest_items(self) -> list[dict]:

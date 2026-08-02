@@ -2304,12 +2304,29 @@ class TestEvolutionEngine:
         import mewcode.app as app_module
         from mewcode.app import MewCodeApp
         from mewcode.config import ProviderConfig, SelfEvolutionConfig
+        from mewcode.evolution.models import SelfEvolutionReviewRun
 
         engine = EvolutionEngine(tmp_path)
         proposal = engine.propose_skill(
             name="generated-review-loop",
             description="等待 eval/approval gate 的候选 skill",
             body="# 任务\n\n记录复盘步骤，并保留验证证据。\n",
+        )
+        engine.store.save_self_evolution_review_run(
+            SelfEvolutionReviewRun(
+                id="review_generated_source",
+                mode="fork_reviewer",
+                status="generated",
+                approval_mode="manual",
+                artifacts={
+                    "report": (
+                        ".mewcode/evolution/review_runs/"
+                        "review_generated_source/report.md"
+                    )
+                },
+                summary={"generated_candidates": [proposal.id]},
+                completed_at=1.0,
+            )
         )
         monkeypatch.setattr(
             app_module,
@@ -2342,6 +2359,10 @@ class TestEvolutionEngine:
         assert any("generated candidate" in message for message in messages)
         assert any(proposal.id in message for message in messages)
         assert any("generated-review-loop" in message for message in messages)
+        assert any(
+            "review=review_generated_source" in message
+            for message in messages
+        )
 
     def test_tui_skill_approval_response_approves_and_reloads_skills(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

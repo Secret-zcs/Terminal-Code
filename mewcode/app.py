@@ -2029,10 +2029,13 @@ class MewCodeApp(App):
                 "awaiting eval/approval gate."
             )
             for item in generated[:5]:
+                review_run = str(item.get("review_run_id") or "").strip()
+                review_part = f" review={review_run}" if review_run else ""
                 lines.append(
                     f"- {item.get('proposal_id')} / {item.get('skill_name')} "
                     f"eval={item.get('eval_status') or 'pending'} "
                     f"execution={item.get('execution_eval_status') or 'pending'}"
+                    f"{review_part}"
                 )
         return "\n".join(lines)
 

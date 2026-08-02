@@ -2766,3 +2766,44 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 
 - 把 generated candidate 的来源 review run id 显示到 TUI 摘要里。
 - 继续把 approval inbox 从“内部数据结构”推进成更完整的列表视图。
+
+## 52. 最新推进记录：Generated Candidate 来源 Review Run
+
+日期：2026-08-02
+
+本次把 generated candidate 的来源 review run id 接入 self-evolution inbox 和 TUI 摘要。此前界面只能看到“有一个 generated candidate”，但看不到它是哪次自动复盘生成的。现在 generated candidate 行会附带 `review=<run_id>`，用户可以把候选 skill 反查到对应 fork reviewer run、报告和生成证据。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_tui_self_evolution_review_shows_existing_generated_candidate`，要求 TUI 消息包含来源 review run id。
+- 修改 `mewcode/evolution/engine.py`：candidate inbox item 会根据 review run summary 查找 `generated_candidates` / `blocked_generated_candidates`，并返回 `review_run_id`、`review_run_status`、`review_run_report`。
+- 修改 `mewcode/app.py`：generated candidate 摘要行在有来源 run 时追加 `review=<run_id>`。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档展示字段和验证结果。
+
+用户能看到什么：
+
+- candidate proposal id。
+- skill 名称。
+- eval / execution eval 状态。
+- 来源 review run id。
+
+安全边界：
+
+- 已实现：只增加来源展示，不改变候选生成、eval、审批或 promote 行为。
+- 已实现：没有来源 run 的手工 candidate 仍按原样显示，不强行造来源。
+- 未实现：TUI 中直接打开 review report；目前只展示 run id 和在 inbox item 中准备 report path。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+1 failed  # 实现前红灯：generated candidate 摘要没有 review run id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+1 passed
+```
+
+下一步计划：
+
+- 把 review report path 进一步接到 TUI 操作面，减少用户手动查 JSONL。
+- 继续把 approval inbox 从“内部数据结构”推进成可浏览列表。

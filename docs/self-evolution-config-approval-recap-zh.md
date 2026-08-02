@@ -1185,3 +1185,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_trusted_auto_rollback_guard -q
 1 passed
 ```
+
+## Generated Candidate 来源 Review Run
+
+TUI generated candidate 摘要现在会显示来源 review run id。这个字段用于回答“这个候选 skill 是哪次自动复盘生成的”，方便后续打开 fork reviewer 报告查证生成原因、eval 状态和阻断/审批路径。
+
+展示形式：
+
+```text
+- prop_xxx / generated-review-loop eval=pending execution=pending review=review_xxx
+```
+
+行为边界：
+
+- 有来源 run：显示 `review=<run_id>`。
+- 无来源 run：保持原摘要，不伪造来源。
+- 该字段只用于审计追踪，不影响审批和自动应用。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+1 failed  # 实现前红灯：generated candidate 摘要没有 review run id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+1 passed
+```
