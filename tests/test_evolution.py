@@ -1640,6 +1640,52 @@ class TestEvolutionEngine:
         assert stored_proposal is not None
         assert stored_proposal.status == "applied"
 
+    def test_render_skill_approval_request_shows_trusted_auto_rollback_guard(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+        review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="trusted-auto"),
+        )
+        request = EvolutionEngine(tmp_path).store.load_skill_approval_requests()[0]
+
+        ok, review = EvolutionEngine(tmp_path).render_skill_approval_request(
+            request.id
+        )
+
+        assert ok, review
+        assert "## Trusted-Auto Rollback Guard" in review
+        assert "- Usage baseline count: `2`" in review
+        assert "- Post-approval usage source: `jsonl_append_cursor`" in review
+
     def test_self_evolution_review_trusted_auto_rollback_uses_usage_cursor(
         self, tmp_path: Path
     ) -> None:

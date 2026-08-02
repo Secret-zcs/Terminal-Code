@@ -2726,3 +2726,43 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 
 - 为 approval inbox 增加 cursor/baseline 展示，方便审计 rollback 判断边界。
 - 后续可考虑给 usage log 增加显式递增序号，替代单纯依赖文件追加位置。
+
+## 51. 最新推进记录：审批详情展示 Rollback Guard
+
+日期：2026-08-02
+
+本次把 trusted-auto 的回滚边界显示到审批 Markdown 详情里。上一阶段已经让系统在自动批准时记录 `usage_baseline_count`，但用户或审计者打开 approval request 时看不到这个数字。现在 `render_skill_approval_request()` 会在 trusted-auto request 中展示 `## Trusted-Auto Rollback Guard`，说明自动回滚只统计 baseline 之后追加的 usage 记录。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_render_skill_approval_request_shows_trusted_auto_rollback_guard`。
+- 修改 `mewcode/evolution/engine.py`：审批详情新增 `Trusted-Auto Rollback Guard` 段落。
+- 修改 `mewcode/evolution/engine.py`：approval inbox item 透出 `usage_baseline_count`，便于后续列表页展示。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档展示字段和验证结果。
+
+用户能看到什么：
+
+- `Usage baseline count`：自动批准时 usage log 已有多少条记录。
+- `Post-approval usage source`：后续失败从 JSONL 追加位置之后开始算。
+- `Timestamp fallback`：该 request 已有 cursor，不再靠时间戳兜底。
+
+安全边界：
+
+- 已实现：只增加审计展示，不改变 approve/promote/rollback 判断。
+- 已实现：只有 trusted-auto 且存在 `usage_baseline_count` 的 request 才显示该段。
+- 未实现：TUI 列表页直接显示 baseline；目前详情页和 inbox item 数据已准备好。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_trusted_auto_rollback_guard -q
+1 failed  # 实现前红灯：审批详情没有 Trusted-Auto Rollback Guard
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_trusted_auto_rollback_guard -q
+1 passed
+```
+
+下一步计划：
+
+- 把 generated candidate 的来源 review run id 显示到 TUI 摘要里。
+- 继续把 approval inbox 从“内部数据结构”推进成更完整的列表视图。

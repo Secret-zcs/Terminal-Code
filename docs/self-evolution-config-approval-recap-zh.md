@@ -1165,3 +1165,23 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_rollback_uses_usage_cursor -q
 1 passed
 ```
+
+## Trusted-Auto Rollback Guard 展示
+
+approval request 详情现在会在 trusted-auto 自动批准后展示 rollback guard。这个段落不是新的审批条件，只是把系统已经记录的 `usage_baseline_count` 展示给用户，方便判断后续 quarantine 是否只基于审批后的新失败。
+
+展示内容：
+
+- `Usage baseline count`：自动批准时 usage log 的记录数。
+- `Post-approval usage source`：后续 usage 以 JSONL 追加游标为准。
+- `Timestamp fallback`：有 cursor 的 request 不再使用时间戳兜底。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_trusted_auto_rollback_guard -q
+1 failed  # 实现前红灯：审批详情没有 rollback guard
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_trusted_auto_rollback_guard -q
+1 passed
+```

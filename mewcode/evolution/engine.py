@@ -1158,6 +1158,7 @@ class EvolutionEngine:
             "status": request.status,
             "created_at": request.created_at,
             "eval_report_markdown": request.eval_report_markdown,
+            "usage_baseline_count": request.usage_baseline_count,
         }
 
     def _candidate_inbox_item(
@@ -1214,6 +1215,7 @@ class EvolutionEngine:
         else:
             eval_report = f"(execution eval report not found: {report_path})"
         canary_summary = self._render_canary_execution_summary(proposal.id)
+        rollback_guard = self._render_trusted_auto_rollback_guard(request)
         fork_reviewer_evidence = self._render_fork_reviewer_evidence(proposal.id)
 
         lines = [
@@ -1233,6 +1235,13 @@ class EvolutionEngine:
                 "## Canary Execution Summary",
                 "",
                 canary_summary,
+                "",
+            ])
+        if rollback_guard:
+            lines.extend([
+                "## Trusted-Auto Rollback Guard",
+                "",
+                rollback_guard,
                 "",
             ])
         lines.extend([
@@ -1255,6 +1264,18 @@ class EvolutionEngine:
             "",
         ])
         return True, "\n".join(lines)
+
+    @staticmethod
+    def _render_trusted_auto_rollback_guard(request: SkillApprovalRequest) -> str:
+        if request.approval_mode != "trusted-auto":
+            return ""
+        if request.usage_baseline_count is None:
+            return ""
+        return "\n".join([
+            f"- Usage baseline count: `{request.usage_baseline_count}`",
+            "- Post-approval usage source: `jsonl_append_cursor`",
+            "- Timestamp fallback: `disabled_for_this_request`",
+        ])
 
     def _render_canary_execution_summary(self, proposal_id: str) -> str:
         report_path = self.execution_eval_report_path(proposal_id)
