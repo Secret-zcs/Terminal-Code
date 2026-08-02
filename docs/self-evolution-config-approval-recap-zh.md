@@ -1146,6 +1146,32 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 1 passed
 ```
 
+## Markdown Self-Evolution Inbox
+
+`EvolutionEngine.render_self_evolution_inbox()` 现在可以把 self-evolution inbox 渲染为 Markdown。它集中展示 pending approval request、blocked generated candidate 和 generated candidate 三类内容，作为后续 TUI/API 列表视图的只读输出基础。
+
+展示内容：
+
+- pending approval request：request id、proposal id、skill、审批模式、状态和 eval report。
+- blocked generated candidate：proposal id、skill、阻断原因、review run 和 report path。
+- generated candidate：proposal id、skill、eval/execution 状态、review run 和 report path。
+
+行为边界：
+
+- 只读渲染，不创建或修改任何 request/candidate/skill。
+- 空分组显示 `None`。
+- 该能力只是列表输出基础，不代表新增自动审批入口。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups -q
+1 failed  # 实现前红灯：缺少 Markdown inbox 渲染函数
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups -q
+1 passed
+```
+
 ## Review Report 路径展示
 
 TUI 的 blocked/generated candidate 摘要现在会同时显示来源 report path。此前只显示 `review=<run_id>`，用户还需要再查 review run 才能找到报告文件。现在摘要会补充 `report=<path>`，直接指向 fork reviewer report。

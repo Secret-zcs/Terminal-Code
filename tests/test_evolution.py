@@ -979,6 +979,81 @@ class TestEvolutionEngine:
             "generated_candidates": 1,
         }
 
+    def test_render_self_evolution_inbox_summarizes_all_candidate_groups(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.evolution.models import SelfEvolutionReviewRun
+
+        engine = EvolutionEngine(tmp_path)
+        pending_proposal = _make_ready_skill_candidate(engine)
+        pending_request = engine.submit_skill_approval_request(pending_proposal.id)
+        generated_proposal = engine.propose_skill(
+            name="generated-review-loop",
+            description="未进入审批的候选 skill",
+            body="# 任务\n\n记录复盘步骤。\n",
+        )
+        blocked_proposal = engine.propose_skill(
+            name="blocked-review-loop",
+            description="被 canary 阻断的候选 skill",
+            body="# 任务\n\n先复现失败，再写回归测试，最后实现最小补丁。\n",
+        )
+        engine._mark_candidate_approval_blocked(
+            blocked_proposal,
+            "canary execution eval failed: 0/1 rounds passed",
+        )
+        engine.store.save_self_evolution_review_run(
+            SelfEvolutionReviewRun(
+                id="review_inbox_generated",
+                mode="fork_reviewer",
+                status="generated",
+                approval_mode="manual",
+                artifacts={
+                    "report": (
+                        ".mewcode/evolution/review_runs/"
+                        "review_inbox_generated/report.md"
+                    )
+                },
+                summary={"generated_candidates": [generated_proposal.id]},
+                completed_at=1.0,
+            )
+        )
+        engine.store.save_self_evolution_review_run(
+            SelfEvolutionReviewRun(
+                id="review_inbox_blocked",
+                mode="fork_reviewer",
+                status="blocked",
+                approval_mode="manual",
+                artifacts={
+                    "report": (
+                        ".mewcode/evolution/review_runs/"
+                        "review_inbox_blocked/report.md"
+                    )
+                },
+                summary={
+                    "blocked_generated_candidates": [{
+                        "proposal_id": blocked_proposal.id,
+                        "skill_name": "blocked-review-loop",
+                    }]
+                },
+                completed_at=2.0,
+            )
+        )
+
+        markdown = engine.render_self_evolution_inbox()
+
+        assert "# Self-Evolution Inbox" in markdown
+        assert "## Pending Approval Requests" in markdown
+        assert pending_request.id in markdown
+        assert "debug-regression-loop" in markdown
+        assert "## Blocked Generated Candidates" in markdown
+        assert blocked_proposal.id in markdown
+        assert "review_inbox_blocked" in markdown
+        assert ".mewcode/evolution/review_runs/review_inbox_blocked/report.md" in markdown
+        assert "## Generated Candidates" in markdown
+        assert generated_proposal.id in markdown
+        assert "review_inbox_generated" in markdown
+        assert ".mewcode/evolution/review_runs/review_inbox_generated/report.md" in markdown
+
     def test_resolve_skill_approval_request_approved_promotes_candidate(
         self, tmp_path: Path
     ) -> None:

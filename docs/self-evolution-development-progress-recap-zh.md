@@ -2886,3 +2886,44 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 把 report path 接到可浏览详情入口，而不是只显示文本路径。
 - 继续把 approval inbox 从“内部数据结构”推进成可浏览列表。
+
+## 55. 最新推进记录：Markdown Self-Evolution Inbox
+
+日期：2026-08-02
+
+本次新增 Markdown 版 self-evolution inbox。此前 engine 只能返回结构化 dict，TUI 只能拼接很短的提示文本；现在 `render_self_evolution_inbox()` 可以把 pending approval request、blocked generated candidate 和 generated candidate 三类集中渲染成一份可读 Markdown，后续 TUI/API 可以直接展示这个列表。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_render_self_evolution_inbox_summarizes_all_candidate_groups`，覆盖 pending/blocked/generated 三类输出。
+- 修改 `mewcode/evolution/engine.py`：新增 `render_self_evolution_inbox()`。
+- 修改 `mewcode/evolution/engine.py`：新增 pending、blocked、generated 三类 inbox 行 formatter，并复用 review/report 来源字段。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 Markdown inbox 能力和验证结果。
+
+用户能看到什么：
+
+- pending approval request 列表。
+- blocked generated candidate 列表及阻断原因。
+- generated candidate 列表及 eval/execution 状态。
+- 每个候选关联的 review run 和 report path。
+
+安全边界：
+
+- 已实现：只读渲染，不创建 approval request、不 approve、不 promote。
+- 已实现：空分组会显示 `None`，避免用户误以为列表渲染失败。
+- 未实现：TUI 全屏列表入口；当前先提供 engine 层 Markdown 渲染函数。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups -q
+1 failed  # 实现前红灯：EvolutionEngine 缺少 render_self_evolution_inbox()
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups -q
+1 passed
+```
+
+下一步计划：
+
+- 把 Markdown inbox 接入 TUI fallback，替代当前短摘要提示。
+- 继续完善 approval inbox 的可浏览列表和详情入口。

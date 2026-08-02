@@ -1148,6 +1148,81 @@ class EvolutionEngine:
             },
         }
 
+    def render_self_evolution_inbox(self) -> str:
+        inbox = self.list_self_evolution_inbox()
+        counts = inbox.get("counts", {})
+        lines = [
+            "# Self-Evolution Inbox",
+            "",
+            "## Summary",
+            "",
+            f"- Pending approval requests: `{counts.get('pending_requests', 0)}`",
+            f"- Blocked generated candidates: `{counts.get('blocked_candidates', 0)}`",
+            f"- Generated candidates: `{counts.get('generated_candidates', 0)}`",
+            "",
+            "## Pending Approval Requests",
+            "",
+        ]
+        pending = list(inbox.get("pending_requests", []))
+        if pending:
+            for item in pending:
+                lines.append(self._render_pending_inbox_line(item))
+        else:
+            lines.append("- None")
+        lines.extend(["", "## Blocked Generated Candidates", ""])
+        blocked = list(inbox.get("blocked_candidates", []))
+        if blocked:
+            for item in blocked:
+                lines.append(self._render_blocked_candidate_inbox_line(item))
+        else:
+            lines.append("- None")
+        lines.extend(["", "## Generated Candidates", ""])
+        generated = list(inbox.get("generated_candidates", []))
+        if generated:
+            for item in generated:
+                lines.append(self._render_generated_candidate_inbox_line(item))
+        else:
+            lines.append("- None")
+        lines.append("")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _render_pending_inbox_line(item: dict) -> str:
+        return (
+            f"- {item.get('request_id')} / {item.get('proposal_id')} / "
+            f"{item.get('skill_name')} mode={item.get('approval_mode')} "
+            f"status={item.get('status')} report={item.get('eval_report_markdown')}"
+        )
+
+    @staticmethod
+    def _render_blocked_candidate_inbox_line(item: dict) -> str:
+        source = EvolutionEngine._render_candidate_source_suffix(item)
+        return (
+            f"- {item.get('proposal_id')} / {item.get('skill_name')} "
+            f"reason={item.get('blocked_reason')}{source}"
+        )
+
+    @staticmethod
+    def _render_generated_candidate_inbox_line(item: dict) -> str:
+        source = EvolutionEngine._render_candidate_source_suffix(item)
+        return (
+            f"- {item.get('proposal_id')} / {item.get('skill_name')} "
+            f"eval={item.get('eval_status') or 'pending'} "
+            f"execution={item.get('execution_eval_status') or 'pending'}"
+            f"{source}"
+        )
+
+    @staticmethod
+    def _render_candidate_source_suffix(item: dict) -> str:
+        parts = []
+        review_run = str(item.get("review_run_id") or "").strip()
+        if review_run:
+            parts.append(f"review={review_run}")
+        report = str(item.get("review_run_report") or "").strip()
+        if report:
+            parts.append(f"report={report}")
+        return (" " + " ".join(parts)) if parts else ""
+
     @staticmethod
     def _approval_request_inbox_item(request: SkillApprovalRequest) -> dict:
         return {
