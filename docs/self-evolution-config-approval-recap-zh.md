@@ -1146,6 +1146,32 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 1 passed
 ```
 
+## Review Report 路径展示
+
+TUI 的 blocked/generated candidate 摘要现在会同时显示来源 report path。此前只显示 `review=<run_id>`，用户还需要再查 review run 才能找到报告文件。现在摘要会补充 `report=<path>`，直接指向 fork reviewer report。
+
+展示形式：
+
+```text
+- prop_xxx / generated-review-loop eval=pending execution=pending review=review_xxx report=.mewcode/evolution/review_runs/review_xxx/report.md
+```
+
+行为边界：
+
+- 有 report path：显示 `report=<path>`。
+- 无 report path：保持原摘要。
+- 该字段只用于定位报告，不读取、不修改、不自动打开报告。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+2 failed  # 实现前红灯：TUI 摘要没有 report path
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+2 passed
+```
+
 ## Blocked Candidate 来源 Review Run
 
 TUI blocked generated candidate 摘要现在也会显示来源 review run id。这个字段用于回答“这个候选 skill 是哪次自动复盘阻断的”，方便从 blocked 提示反查 fork reviewer 报告和 canary 失败证据。

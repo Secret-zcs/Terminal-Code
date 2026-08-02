@@ -2847,3 +2847,42 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 把 review report path 接到 TUI 摘要或详情入口。
 - 继续把 approval inbox 从“内部数据结构”推进成可浏览列表。
+
+## 54. 最新推进记录：TUI 摘要展示 Review Report 路径
+
+日期：2026-08-02
+
+本次把来源 review run 的 report 路径接入 TUI 摘要。前两阶段已经能显示 `review=<run_id>`，但用户仍需要自己去查 review run 记录才能找到报告文件。现在 blocked/generated candidate 的摘要会同时显示 `report=<path>`，用户能直接定位 fork reviewer 报告。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 blocked/generated TUI 测试，要求消息包含来源 report path。
+- 修改 `mewcode/app.py`：新增 `_format_self_evolution_source_part()`，统一格式化 `review=<id>` 和 `report=<path>`。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 report path 展示和验证结果。
+
+用户能看到什么：
+
+- 来源 review run id。
+- 来源 report markdown/json 路径。
+- blocked/generated candidate 的当前状态。
+
+安全边界：
+
+- 已实现：只增加 TUI 摘要展示，不读取或修改 report 文件。
+- 已实现：没有 report path 的候选仍按原样显示。
+- 未实现：TUI 中点击/展开 report；当前先显示可复制路径。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+2 failed  # 实现前红灯：TUI 摘要没有 report path
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+2 passed
+```
+
+下一步计划：
+
+- 把 report path 接到可浏览详情入口，而不是只显示文本路径。
+- 继续把 approval inbox 从“内部数据结构”推进成可浏览列表。

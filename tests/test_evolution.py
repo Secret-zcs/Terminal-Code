@@ -2322,6 +2322,11 @@ class TestEvolutionEngine:
             "review=review_blocked_source" in message
             for message in messages
         )
+        assert any(
+            "report=.mewcode/evolution/review_runs/"
+            "review_blocked_source/report.md" in message
+            for message in messages
+        )
 
     def test_tui_self_evolution_review_shows_existing_generated_candidate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2387,6 +2392,11 @@ class TestEvolutionEngine:
         assert any("generated-review-loop" in message for message in messages)
         assert any(
             "review=review_generated_source" in message
+            for message in messages
+        )
+        assert any(
+            "report=.mewcode/evolution/review_runs/"
+            "review_generated_source/report.md" in message
             for message in messages
         )
 
