@@ -1146,6 +1146,32 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 1 passed
 ```
 
+## Blocked Candidate 来源 Review Run
+
+TUI blocked generated candidate 摘要现在也会显示来源 review run id。这个字段用于回答“这个候选 skill 是哪次自动复盘阻断的”，方便从 blocked 提示反查 fork reviewer 报告和 canary 失败证据。
+
+展示形式：
+
+```text
+- prop_xxx / blocked-review-loop reason=... review=review_xxx
+```
+
+行为边界：
+
+- 有来源 run：显示 `review=<run_id>`。
+- 无来源 run：保持原 blocked 摘要。
+- 该字段只用于审计追踪，不影响阻断、审批和自动应用。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
+1 failed  # 实现前红灯：blocked candidate 摘要没有 review run id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
+1 passed
+```
+
 ## Trusted-Auto Rollback Cursor
 
 trusted-auto rollback 现在优先使用 approval request 中的 `usage_baseline_count` 判断“审批后新增负反馈”。该值在 approval resolve 成功时写入，表示当时 usage log 的记录数量。后续 rollback 只检查该 cursor 之后追加的 usage 记录，避免系统时间回拨、时间戳粒度不足或测试环境时间乱序导致 approval 前负反馈被误算。

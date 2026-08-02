@@ -2807,3 +2807,43 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 把 review report path 进一步接到 TUI 操作面，减少用户手动查 JSONL。
 - 继续把 approval inbox 从“内部数据结构”推进成可浏览列表。
+
+## 53. 最新推进记录：Blocked Candidate 来源 Review Run
+
+日期：2026-08-02
+
+本次把 blocked generated candidate 的来源 review run id 也接入 TUI 摘要。上一阶段 generated candidate 已经能显示 `review=<run_id>`，但如果候选 skill 被 canary 阻断，blocked 提示仍只展示 proposal id 和原因。现在 blocked 行也会带上来源 review run，方便用户从阻断结果反查 fork reviewer 报告。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_tui_self_evolution_review_shows_existing_blocked_candidate`，要求 blocked 提示包含来源 review run id。
+- 修改 `mewcode/app.py`：blocked generated candidate 摘要行在有来源 run 时追加 `review=<run_id>`。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 blocked 来源展示和验证结果。
+
+用户能看到什么：
+
+- blocked candidate proposal id。
+- skill 名称。
+- canary 阻断原因。
+- 来源 review run id。
+
+安全边界：
+
+- 已实现：只增加 blocked 来源展示，不改变阻断、审批或 promote 行为。
+- 已实现：没有来源 run 的 blocked candidate 仍按原样显示。
+- 未实现：TUI 中直接打开 review report；当前仍先展示 run id。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
+1 failed  # 实现前红灯：blocked candidate 摘要没有 review run id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
+1 passed
+```
+
+下一步计划：
+
+- 把 review report path 接到 TUI 摘要或详情入口。
+- 继续把 approval inbox 从“内部数据结构”推进成可浏览列表。

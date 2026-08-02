@@ -2019,9 +2019,12 @@ class MewCodeApp(App):
                 f"{len(blocked)} self-evolution blocked generated candidate(s)."
             )
             for item in blocked[:5]:
+                review_run = str(item.get("review_run_id") or "").strip()
+                review_part = f" review={review_run}" if review_run else ""
                 lines.append(
                     f"- {item.get('proposal_id')} / {item.get('skill_name')} "
                     f"reason={item.get('blocked_reason')}"
+                    f"{review_part}"
                 )
         if generated:
             lines.append(

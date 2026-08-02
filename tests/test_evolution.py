@@ -2255,6 +2255,7 @@ class TestEvolutionEngine:
         import mewcode.app as app_module
         from mewcode.app import MewCodeApp
         from mewcode.config import ProviderConfig, SelfEvolutionConfig
+        from mewcode.evolution.models import SelfEvolutionReviewRun
 
         engine = EvolutionEngine(tmp_path)
         proposal = engine.propose_skill(
@@ -2265,6 +2266,27 @@ class TestEvolutionEngine:
         engine._mark_candidate_approval_blocked(
             proposal,
             "canary execution eval failed: 0/1 rounds passed",
+        )
+        engine.store.save_self_evolution_review_run(
+            SelfEvolutionReviewRun(
+                id="review_blocked_source",
+                mode="fork_reviewer",
+                status="blocked",
+                approval_mode="manual",
+                artifacts={
+                    "report": (
+                        ".mewcode/evolution/review_runs/"
+                        "review_blocked_source/report.md"
+                    )
+                },
+                summary={
+                    "blocked_generated_candidates": [{
+                        "proposal_id": proposal.id,
+                        "skill_name": "blocked-review-loop",
+                    }]
+                },
+                completed_at=1.0,
+            )
         )
         monkeypatch.setattr(
             app_module,
@@ -2296,6 +2318,10 @@ class TestEvolutionEngine:
         assert opened == []
         assert any("blocked generated candidate" in message for message in messages)
         assert any(proposal.id in message for message in messages)
+        assert any(
+            "review=review_blocked_source" in message
+            for message in messages
+        )
 
     def test_tui_self_evolution_review_shows_existing_generated_candidate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
