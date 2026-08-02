@@ -1304,6 +1304,8 @@ class EvolutionEngine:
         request.reviewer = reviewer.strip() or "user"
         request.resolution_reason = reason.strip()
         request.resolved_at = time.time()
+        if approved:
+            request.usage_baseline_count = len(self.load_skill_usage())
 
         if not approved:
             request.status = "rejected"

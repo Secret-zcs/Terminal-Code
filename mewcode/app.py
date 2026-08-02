@@ -2010,16 +2010,30 @@ class MewCodeApp(App):
     @staticmethod
     def _format_self_evolution_inbox_message(inbox: dict) -> str:
         blocked = list(inbox.get("blocked_candidates", []))
-        if not blocked:
+        generated = list(inbox.get("generated_candidates", []))
+        if not blocked and not generated:
             return ""
-        lines = [
-            f"{len(blocked)} self-evolution blocked generated candidate(s)."
-        ]
-        for item in blocked[:5]:
+        lines = []
+        if blocked:
             lines.append(
-                f"- {item.get('proposal_id')} / {item.get('skill_name')} "
-                f"reason={item.get('blocked_reason')}"
+                f"{len(blocked)} self-evolution blocked generated candidate(s)."
             )
+            for item in blocked[:5]:
+                lines.append(
+                    f"- {item.get('proposal_id')} / {item.get('skill_name')} "
+                    f"reason={item.get('blocked_reason')}"
+                )
+        if generated:
+            lines.append(
+                f"{len(generated)} self-evolution generated candidate(s) "
+                "awaiting eval/approval gate."
+            )
+            for item in generated[:5]:
+                lines.append(
+                    f"- {item.get('proposal_id')} / {item.get('skill_name')} "
+                    f"eval={item.get('eval_status') or 'pending'} "
+                    f"execution={item.get('execution_eval_status') or 'pending'}"
+                )
         return "\n".join(lines)
 
     def _show_self_evolution_approval(self, request_id: str) -> None:

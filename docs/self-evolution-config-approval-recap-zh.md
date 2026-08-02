@@ -1117,3 +1117,51 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
 1 passed
 ```
+
+## Generated Candidate TUI 提示
+
+TUI fallback 现在会在没有 pending approval request 时读取 `generated_candidates`，并展示只读摘要。该摘要用于提示“已有候选 skill 进入生成态，但尚未完成 eval/approval gate”，不会创建 approval request，也不会自动 approve/promote。
+
+展示字段：
+
+- candidate 数量。
+- proposal id。
+- skill 名称。
+- deterministic eval 状态。
+- execution eval 状态。
+
+行为边界：
+
+- 有 pending request：继续优先打开 approval widget。
+- 有 blocked candidate：继续展示阻断原因。
+- 只有 generated candidate：展示 generated 摘要，不弹审批、不应用。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+1 failed  # 实现前红灯：TUI fallback 忽略 generated_candidates
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+1 passed
+```
+
+## Trusted-Auto Rollback Cursor
+
+trusted-auto rollback 现在优先使用 approval request 中的 `usage_baseline_count` 判断“审批后新增负反馈”。该值在 approval resolve 成功时写入，表示当时 usage log 的记录数量。后续 rollback 只检查该 cursor 之后追加的 usage 记录，避免系统时间回拨、时间戳粒度不足或测试环境时间乱序导致 approval 前负反馈被误算。
+
+兼容策略：
+
+- 新 approval request：使用 `usage_baseline_count` 按 JSONL 追加顺序截断。
+- 旧 approval request：字段缺失时继续使用 `usage.created_at > approval.resolved_at`。
+- rollback threshold 和 rollback events 语义不变，只改变“审批后 usage”的判定方式。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_rollback_uses_usage_cursor -q
+1 failed  # 实现前红灯：时间戳乱序导致误 quarantine
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_rollback_uses_usage_cursor -q
+1 passed
+```

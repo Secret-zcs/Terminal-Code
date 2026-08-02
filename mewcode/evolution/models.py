@@ -150,6 +150,7 @@ class SkillApprovalRequest:
     reviewer: str = ""
     resolution_reason: str = ""
     result_path: str = ""
+    usage_baseline_count: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -167,6 +168,7 @@ class SkillApprovalRequest:
             "reviewer": self.reviewer,
             "resolution_reason": self.resolution_reason,
             "result_path": self.result_path,
+            "usage_baseline_count": self.usage_baseline_count,
         }
 
     def to_jsonl(self) -> str:
@@ -189,6 +191,7 @@ class SkillApprovalRequest:
             reviewer=data.get("reviewer", ""),
             resolution_reason=data.get("resolution_reason", ""),
             result_path=data.get("result_path", ""),
+            usage_baseline_count=data.get("usage_baseline_count"),
         )
 
     @classmethod

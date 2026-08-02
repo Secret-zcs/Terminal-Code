@@ -2648,3 +2648,81 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 支持 review notification 或 TUI 文案展示 generated candidate 计数。
 - 后续支持按 event 类型设置不同 threshold。
+
+## 49. 最新推进记录：Generated Candidate TUI 可见性
+
+日期：2026-08-02
+
+本次把 self-evolution inbox 中“已生成但尚未进入 eval/approval gate 的 candidate”暴露到 TUI fallback 消息。此前 TUI 只会优先打开 pending approval request，或在没有 pending 时展示 blocked candidate；如果只有 generated candidate，用户界面没有任何提示。现在 TUI 会显示 generated candidate 数量、proposal id、skill 名称、deterministic eval 状态和 execution eval 状态。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_shows_existing_generated_candidate`，覆盖 generated-only 场景。
+- 修改 `mewcode/app.py`：扩展 `_format_self_evolution_inbox_message()`，在没有 pending request 时同时展示 blocked 与 generated 摘要。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 generated-only 展示路径、红绿测试和安全边界。
+
+当前链路：
+
+```text
+candidate manifests + approval requests
+-> list_self_evolution_inbox()
+-> pending_requests / blocked_candidates / generated_candidates
+-> TUI opens first pending request OR shows blocked/generated summary
+```
+
+安全边界：
+
+- 已实现：generated candidate 只进入只读提示，不创建 approval request。
+- 已实现：generated candidate 不会因展示而 approve、promote 或写入正式 skill。
+- 已实现：pending request 优先级仍最高；已有审批项会先打开审批组件。
+- 未实现：独立的 generated candidate 详情页；当前只展示摘要状态。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+1 failed  # 实现前红灯：TUI fallback 忽略 generated_candidates，messages 为空
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+1 passed
+```
+
+下一步计划：
+
+- 把 generated candidate 摘要与 fork reviewer run id 关联，方便用户追踪候选来源。
+- 继续完善 trusted-auto/canary 结果在 approval inbox 中的列表级展示。
+
+## 50. 最新推进记录：Trusted-Auto Rollback Usage Cursor
+
+日期：2026-08-02
+
+本次修复 trusted-auto rollback 的时间戳脆弱性。此前 rollback 判断只使用 `usage.created_at > approval.resolved_at`，如果系统时间回拨或测试环境时间戳乱序，approval 前的负反馈可能被误判为 approval 后事件，导致候选 skill 被错误 quarantine。现在 approval 成功时会记录 `usage_baseline_count`，rollback 优先按 usage log 追加顺序只检查审批之后新增的记录；旧 approval request 没有 cursor 时仍回退到原时间戳逻辑。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_trusted_auto_rollback_uses_usage_cursor`，复现审批前 usage 时间戳晚于 approval 的误判场景。
+- 修改 `mewcode/evolution/models.py`：`SkillApprovalRequest` 新增兼容字段 `usage_baseline_count`。
+- 修改 `mewcode/evolution/engine.py`：approval resolve 成功时记录当前 usage log 长度。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_usage_records_after_approval()`，优先用 cursor 截取 post-approval usage，缺失 cursor 时兼容旧时间戳判断。
+
+安全边界：
+
+- 已实现：trusted-auto rollback 不再依赖 wall-clock 单点判断。
+- 已实现：旧 JSONL approval request 仍能加载和按原规则工作。
+- 已实现：cursor 只影响 rollback 读取范围，不改变 eval、approval 或 promote 条件。
+- 未实现：usage log 的全局 monotonic sequence id；当前 cursor 使用 JSONL 追加顺序。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_rollback_uses_usage_cursor -q
+1 failed  # 实现前红灯：approval 前 usage 时间戳被改到未来后触发误 quarantine
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_trusted_auto_rollback_uses_usage_cursor -q
+1 passed
+```
+
+下一步计划：
+
+- 为 approval inbox 增加 cursor/baseline 展示，方便审计 rollback 判断边界。
+- 后续可考虑给 usage log 增加显式递增序号，替代单纯依赖文件追加位置。

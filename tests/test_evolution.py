@@ -1640,6 +1640,74 @@ class TestEvolutionEngine:
         assert stored_proposal is not None
         assert stored_proposal.status == "applied"
 
+    def test_self_evolution_review_trusted_auto_rollback_uses_usage_cursor(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n",
+            encoding="utf-8",
+        )
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="test",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="test",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+        config = SelfEvolutionConfig(
+            enabled=True,
+            skill_approval_mode="trusted-auto",
+            trusted_auto_rollback_threshold=2,
+        )
+        first = review_ready_skill_candidates(tmp_path, config)
+        assert first["status"] == "auto-promoted"
+        request = EvolutionEngine(tmp_path).store.load_skill_approval_requests()[0]
+
+        usage_path = EvolutionEngine(tmp_path).skill_usage_path
+        usage_records = [
+            json.loads(line)
+            for line in usage_path.read_text(encoding="utf-8").splitlines()
+        ]
+        for record in usage_records:
+            record["created_at"] = request.resolved_at + 10.0
+        usage_path.write_text(
+            "".join(
+                json.dumps(record, ensure_ascii=False) + "\n"
+                for record in usage_records
+            ),
+            encoding="utf-8",
+        )
+        EvolutionEngine(tmp_path).record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="post-promote-test",
+            metadata={"summary": "第一次新失败。"},
+        )
+
+        second = review_ready_skill_candidates(tmp_path, config)
+
+        assert second["auto_quarantines"] == []
+        assert (
+            tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        ).exists()
+
     def test_self_evolution_review_trusted_auto_keeps_existing_ready_candidate_pending(
         self, tmp_path: Path
     ) -> None:
@@ -2182,6 +2250,52 @@ class TestEvolutionEngine:
         assert opened == []
         assert any("blocked generated candidate" in message for message in messages)
         assert any(proposal.id in message for message in messages)
+
+    def test_tui_self_evolution_review_shows_existing_generated_candidate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.app import MewCodeApp
+        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="generated-review-loop",
+            description="等待 eval/approval gate 的候选 skill",
+            body="# 任务\n\n记录复盘步骤，并保留验证证据。\n",
+        )
+        monkeypatch.setattr(
+            app_module,
+            "review_ready_skill_candidates",
+            lambda *_args, **_kwargs: {"status": "idle", "requests": []},
+        )
+        app = MewCodeApp(
+            providers=[
+                ProviderConfig(
+                    name="test",
+                    protocol="openai",
+                    base_url="https://example.invalid",
+                    model="test-model",
+                )
+            ],
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        opened: list[str] = []
+        messages: list[str] = []
+        app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+
+        assert opened == []
+        assert any("generated candidate" in message for message in messages)
+        assert any(proposal.id in message for message in messages)
+        assert any("generated-review-loop" in message for message in messages)
 
     def test_tui_skill_approval_response_approves_and_reloads_skills(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

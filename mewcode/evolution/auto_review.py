@@ -504,12 +504,12 @@ def _auto_quarantine_trusted_auto_skills(
         skill_name = request.skill_name
         if not engine.has_project_skill(skill_name):
             continue
+        post_approval_usage = _usage_records_after_approval(usage, request)
         negative = [
             record
-            for record in usage
+            for record in post_approval_usage
             if str(record.get("skill_name", "")).strip() == skill_name
             and str(record.get("event", "")).strip() in event_filter
-            and float(record.get("created_at", 0.0) or 0.0) > request.resolved_at
         ]
         if len(negative) < threshold:
             continue
@@ -529,6 +529,22 @@ def _auto_quarantine_trusted_auto_skills(
             "message": path,
         })
     return results
+
+
+def _usage_records_after_approval(usage: list[dict], request) -> list[dict]:
+    baseline_count = getattr(request, "usage_baseline_count", None)
+    if baseline_count is not None:
+        try:
+            cursor = max(0, int(baseline_count))
+        except (TypeError, ValueError):
+            cursor = len(usage)
+        return usage[min(cursor, len(usage)) :]
+
+    return [
+        record
+        for record in usage
+        if float(record.get("created_at", 0.0) or 0.0) > request.resolved_at
+    ]
 
 
 def _trusted_auto_managed_skill_names(engine: EvolutionEngine) -> set[str]:
