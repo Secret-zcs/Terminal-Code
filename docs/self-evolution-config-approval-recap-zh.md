@@ -1338,3 +1338,31 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_drops_legacy_short_summary_formatter -q
 1 passed
 ```
+
+## Review Run 报告只读读取接口
+
+`EvolutionEngine.read_self_evolution_review_report(review_run_id)` 现在可以按 review run id 读取 fork reviewer 的 Markdown report。它是后续 TUI inbox 详情入口的基础能力，不会创建 approval request，也不会 approve、promote 或 quarantine。
+
+行为边界：
+
+- 正常 report 路径：读取 `.mewcode/evolution/review_runs/<review_id>/report.md`。
+- 未知 review run：返回失败消息。
+- report 缺失：返回失败消息。
+- artifact path 指向 review_runs 外部：拒绝读取。
+
+安全策略：
+
+- report path 必须是相对路径。
+- 解析后的路径必须留在 `.mewcode/evolution/review_runs/` 下。
+- 文件名必须是 `report.md`。
+- 拒绝读取项目其它文件，避免污染的 artifact path 泄露内容。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_read_self_evolution_review_report_returns_markdown tests/test_evolution.py::TestEvolutionEngine::test_read_self_evolution_review_report_rejects_escaped_report_path -q
+2 failed  # 实现前红灯：engine 缺少 review report 读取接口
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_read_self_evolution_review_report_returns_markdown tests/test_evolution.py::TestEvolutionEngine::test_read_self_evolution_review_report_rejects_escaped_report_path -q
+2 passed
+```

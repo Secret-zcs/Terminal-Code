@@ -203,6 +203,10 @@ class EvolutionEngine:
     def quarantine_skills_path(self) -> Path:
         return self.project_root / ".mewcode" / "evolution" / "quarantine"
 
+    @property
+    def review_run_artifacts_path(self) -> Path:
+        return self.project_root / ".mewcode" / "evolution" / "review_runs"
+
     def candidate_dir(self, proposal_id: str) -> Path:
         return self.candidate_skills_path / proposal_id
 
@@ -1050,6 +1054,30 @@ class EvolutionEngine:
             return False, f"execution eval report not found for {proposal_id}"
         return True, path.read_text(encoding="utf-8")
 
+    def read_self_evolution_review_report(
+        self, review_run_id: str
+    ) -> tuple[bool, str]:
+        clean_id = review_run_id.strip()
+        if not clean_id:
+            return False, "review run id cannot be empty"
+        run = None
+        for item in self.store.load_self_evolution_review_runs():
+            if item.id == clean_id:
+                run = item
+                break
+        if run is None:
+            return False, f"review run {clean_id} not found"
+        report_path_text = str(run.artifacts.get("report") or "").strip()
+        if not report_path_text:
+            report_path_text = f".mewcode/evolution/review_runs/{run.id}/report.md"
+        try:
+            report_path = self._resolve_review_run_report_path(report_path_text)
+        except ValueError as exc:
+            return False, str(exc)
+        if not report_path.exists():
+            return False, f"review report not found for {clean_id}: {report_path}"
+        return True, report_path.read_text(encoding="utf-8")
+
     def submit_skill_approval_request(
         self,
         proposal_id: str,
@@ -1277,6 +1305,24 @@ class EvolutionEngine:
             "review_run_status": run.status,
             "review_run_report": str(run.artifacts.get("report", "")),
         }
+
+    def _resolve_review_run_report_path(self, report_path: str) -> Path:
+        if not report_path:
+            raise ValueError("review report path cannot be empty")
+        candidate = Path(report_path)
+        if candidate.is_absolute():
+            raise ValueError(f"review report path must be relative: {report_path}")
+        review_root = self.review_run_artifacts_path.resolve()
+        resolved = (self.project_root / candidate).resolve()
+        if not resolved.is_relative_to(review_root):
+            raise ValueError(
+                f"review report path escapes review_runs: {report_path}"
+            )
+        if resolved.name != "report.md":
+            raise ValueError(
+                f"review report path must end with report.md: {report_path}"
+            )
+        return resolved
 
     def _load_candidate_manifest_items(self) -> list[dict]:
         if not self.candidate_skills_path.exists():

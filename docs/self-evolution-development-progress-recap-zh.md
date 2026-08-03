@@ -3012,3 +3012,44 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 跑完整 `tests/test_evolution.py` 确认没有 self-evolution 回归。
 - 把 Markdown inbox 继续推进到更正式的 TUI 列表/详情入口。
+
+## 58. 最新推进记录：Review Run 报告只读读取接口
+
+日期：2026-08-03
+
+本次新增 engine 层的 review run 报告读取接口。此前 inbox 只能显示 `report=<path>`，后续 TUI/详情页如果要打开报告，还需要自己拼路径、自己读文件。现在 `EvolutionEngine.read_self_evolution_review_report(review_run_id)` 可以按 review run id 读取对应 `report.md`，并在 engine 层统一做路径安全校验。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增正常读取 report Markdown 的测试。
+- 修改 `tests/test_evolution.py`：新增 artifact path 指向 review_runs 外部时拒绝读取的测试。
+- 修改 `mewcode/evolution/engine.py`：新增 `review_run_artifacts_path`、`read_self_evolution_review_report()` 和 `_resolve_review_run_report_path()`。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档报告读取接口、路径边界和测试结果。
+
+用户能看到什么：
+
+- 后续界面可以通过 review run id 读取 fork reviewer report 内容。
+- 当前 inbox 仍只显示路径；本次先补 engine 层只读能力。
+- 缺失 report、未知 run 或非法路径会返回错误文本，不会抛到 UI。
+
+安全边界：
+
+- 只允许读取 `.mewcode/evolution/review_runs/` 下的 `report.md`。
+- artifact path 如果指向项目其它文件，例如 `README.md`，会被拒绝。
+- 不改变候选生成、审批、promote、rollback 或 quarantine 逻辑。
+- 不新增用户命令，不允许通过该接口写文件。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_read_self_evolution_review_report_returns_markdown tests/test_evolution.py::TestEvolutionEngine::test_read_self_evolution_review_report_rejects_escaped_report_path -q
+2 failed  # 实现前红灯：EvolutionEngine 缺少 read_self_evolution_review_report()
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_read_self_evolution_review_report_returns_markdown tests/test_evolution.py::TestEvolutionEngine::test_read_self_evolution_review_report_rejects_escaped_report_path -q
+2 passed
+```
+
+下一步计划：
+
+- 把该只读 report 接口接入 TUI inbox 详情入口。
+- 增加 missing report / unknown review run 的展示测试。

@@ -1054,6 +1054,69 @@ class TestEvolutionEngine:
         assert "review_inbox_generated" in markdown
         assert ".mewcode/evolution/review_runs/review_inbox_generated/report.md" in markdown
 
+    def test_read_self_evolution_review_report_returns_markdown(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.evolution.models import SelfEvolutionReviewRun
+
+        engine = EvolutionEngine(tmp_path)
+        report_path = (
+            tmp_path
+            / ".mewcode"
+            / "evolution"
+            / "review_runs"
+            / "review_detail"
+            / "report.md"
+        )
+        report_path.parent.mkdir(parents=True)
+        report_path.write_text(
+            "# Review Detail\n\n候选 skill 评测通过。\n",
+            encoding="utf-8",
+        )
+        engine.store.save_self_evolution_review_run(
+            SelfEvolutionReviewRun(
+                id="review_detail",
+                mode="fork_reviewer",
+                status="generated",
+                approval_mode="manual",
+                artifacts={
+                    "report": (
+                        ".mewcode/evolution/review_runs/"
+                        "review_detail/report.md"
+                    )
+                },
+            )
+        )
+
+        ok, report = engine.read_self_evolution_review_report("review_detail")
+
+        assert ok
+        assert "# Review Detail" in report
+        assert "候选 skill 评测通过" in report
+
+    def test_read_self_evolution_review_report_rejects_escaped_report_path(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.evolution.models import SelfEvolutionReviewRun
+
+        engine = EvolutionEngine(tmp_path)
+        (tmp_path / "README.md").write_text("project secret\n", encoding="utf-8")
+        engine.store.save_self_evolution_review_run(
+            SelfEvolutionReviewRun(
+                id="review_escaped",
+                mode="fork_reviewer",
+                status="generated",
+                approval_mode="manual",
+                artifacts={"report": "README.md"},
+            )
+        )
+
+        ok, message = engine.read_self_evolution_review_report("review_escaped")
+
+        assert not ok
+        assert "review report path escapes review_runs" in message
+        assert "project secret" not in message
+
     def test_resolve_skill_approval_request_approved_promotes_candidate(
         self, tmp_path: Path
     ) -> None:
