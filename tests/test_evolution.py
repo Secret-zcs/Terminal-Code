@@ -2477,6 +2477,15 @@ class TestEvolutionEngine:
             for message in messages
         )
 
+    def test_tui_self_evolution_review_drops_legacy_short_summary_formatter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.app import MewCodeApp
+
+        assert not hasattr(MewCodeApp, "_format_self_evolution_inbox_message")
+        assert not hasattr(MewCodeApp, "_format_self_evolution_source_part")
+
     def test_tui_skill_approval_response_approves_and_reloads_skills(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

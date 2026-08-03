@@ -2008,50 +2008,6 @@ class MewCodeApp(App):
         if message:
             self._show_system_message(message)
 
-    @staticmethod
-    def _format_self_evolution_inbox_message(inbox: dict) -> str:
-        blocked = list(inbox.get("blocked_candidates", []))
-        generated = list(inbox.get("generated_candidates", []))
-        if not blocked and not generated:
-            return ""
-        lines = []
-        if blocked:
-            lines.append(
-                f"{len(blocked)} self-evolution blocked generated candidate(s)."
-            )
-            for item in blocked[:5]:
-                source_part = MewCodeApp._format_self_evolution_source_part(item)
-                lines.append(
-                    f"- {item.get('proposal_id')} / {item.get('skill_name')} "
-                    f"reason={item.get('blocked_reason')}"
-                    f"{source_part}"
-                )
-        if generated:
-            lines.append(
-                f"{len(generated)} self-evolution generated candidate(s) "
-                "awaiting eval/approval gate."
-            )
-            for item in generated[:5]:
-                source_part = MewCodeApp._format_self_evolution_source_part(item)
-                lines.append(
-                    f"- {item.get('proposal_id')} / {item.get('skill_name')} "
-                    f"eval={item.get('eval_status') or 'pending'} "
-                    f"execution={item.get('execution_eval_status') or 'pending'}"
-                    f"{source_part}"
-                )
-        return "\n".join(lines)
-
-    @staticmethod
-    def _format_self_evolution_source_part(item: dict) -> str:
-        parts = []
-        review_run = str(item.get("review_run_id") or "").strip()
-        if review_run:
-            parts.append(f"review={review_run}")
-        report = str(item.get("review_run_report") or "").strip()
-        if report:
-            parts.append(f"report={report}")
-        return (" " + " ".join(parts)) if parts else ""
-
     def _show_self_evolution_approval(self, request_id: str) -> None:
         if self.agent is None:
             return

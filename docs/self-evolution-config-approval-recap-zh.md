@@ -1317,3 +1317,24 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
 1 passed
 ```
+
+## 清理旧 TUI 短摘要 Formatter
+
+TUI self-evolution fallback 现在只使用 `EvolutionEngine.render_self_evolution_inbox()` 的 Markdown 输出。旧的 `MewCodeApp._format_self_evolution_inbox_message()` 和 `_format_self_evolution_source_part()` 已删除，避免 blocked/generated 候选出现两套不同展示逻辑。
+
+行为边界：
+
+- pending request 仍优先打开 approval widget。
+- 没有 pending request 时仍展示 `# Self-Evolution Inbox`。
+- blocked/generated 候选的 review run 和 report path 仍由 engine 层 Markdown 渲染。
+- 本次不改变审批、promote、rollback、quarantine 或 trusted-auto 条件。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_drops_legacy_short_summary_formatter -q
+1 failed  # 实现前红灯：旧 formatter 仍存在
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_drops_legacy_short_summary_formatter -q
+1 passed
+```

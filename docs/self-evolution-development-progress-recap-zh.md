@@ -2969,3 +2969,46 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 把 Markdown inbox 接到更正式的 TUI 列表/详情入口。
 - 继续完善 approval inbox 的可浏览列表和详情入口。
+
+## 57. 最新推进记录：清理旧 TUI 短摘要 Formatter
+
+日期：2026-08-03
+
+本次清理 TUI 中已经被 Markdown inbox 取代的旧短摘要 formatter。此前 `MewCodeApp` 里还保留 `_format_self_evolution_inbox_message()` 和 `_format_self_evolution_source_part()`，但 `_run_self_evolution_review()` 已经改为直接展示 `EvolutionEngine.render_self_evolution_inbox()` 的完整 Markdown 输出。继续保留旧 formatter 会让后续维护者误以为还有两套 self-evolution inbox 展示路径。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_drops_legacy_short_summary_formatter`，要求 TUI 不再暴露旧短摘要 formatter。
+- 修改 `mewcode/app.py`：删除 `_format_self_evolution_inbox_message()` 和 `_format_self_evolution_source_part()`。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档清理原因、行为边界和验证记录。
+
+用户能看到什么：
+
+- TUI fallback 仍展示完整 `# Self-Evolution Inbox` Markdown 列表。
+- pending approval request 仍优先打开 approval widget。
+- blocked/generated 候选仍显示 review run 和 report path，但渲染来源统一在 engine 层。
+
+安全边界：
+
+- 未改变审批模式。
+- 未改变 trusted-auto 自动批准条件。
+- 未改变 promote、rollback、quarantine 行为。
+- 未新增用户命令；只是删除未使用的旧展示代码。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_drops_legacy_short_summary_formatter -q
+1 failed  # 初次红灯是导入 mcp 依赖缺失，修正测试夹具后继续验证目标失败
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_drops_legacy_short_summary_formatter -q
+1 failed  # 实现前红灯：MewCodeApp 仍有 _format_self_evolution_inbox_message
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_drops_legacy_short_summary_formatter -q
+1 passed
+```
+
+下一步计划：
+
+- 跑完整 `tests/test_evolution.py` 确认没有 self-evolution 回归。
+- 把 Markdown inbox 继续推进到更正式的 TUI 列表/详情入口。
