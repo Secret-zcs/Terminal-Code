@@ -1994,12 +1994,13 @@ class MewCodeApp(App):
                 )
             return
         if result.get("status") != "disabled":
-            inbox = EvolutionEngine(self.agent.work_dir).list_self_evolution_inbox()
+            engine = EvolutionEngine(self.agent.work_dir)
+            inbox = engine.list_self_evolution_inbox()
             pending = inbox.get("pending_requests", [])
             if pending:
                 self._show_self_evolution_approval(pending[0]["request_id"])
                 return
-            inbox_message = self._format_self_evolution_inbox_message(inbox)
+            inbox_message = engine.render_self_evolution_inbox()
             if inbox_message:
                 self._show_system_message(inbox_message)
                 return

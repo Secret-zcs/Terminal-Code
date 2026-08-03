@@ -2927,3 +2927,45 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_se
 
 - 把 Markdown inbox 接入 TUI fallback，替代当前短摘要提示。
 - 继续完善 approval inbox 的可浏览列表和详情入口。
+
+## 56. 最新推进记录：TUI Fallback 使用 Markdown Inbox
+
+日期：2026-08-03
+
+本次把 Markdown 版 self-evolution inbox 接入 TUI fallback。此前没有 pending approval request 时，TUI 只展示 blocked/generated 的短摘要；现在会直接展示 `render_self_evolution_inbox()` 生成的完整 Markdown 列表，用户可以一次看到 pending、blocked、generated 三类自进化状态。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：更新 blocked/generated TUI fallback 测试，要求消息包含 `# Self-Evolution Inbox` 和对应分组标题。
+- 修改 `mewcode/app.py`：`_run_self_evolution_review()` 在无 pending request 时调用 `EvolutionEngine.render_self_evolution_inbox()`。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 TUI fallback 切换行为和验证结果。
+
+用户能看到什么：
+
+- 完整 self-evolution inbox 标题。
+- pending approval request 分组。
+- blocked generated candidate 分组。
+- generated candidate 分组。
+- review run 和 report path。
+
+安全边界：
+
+- 已实现：pending request 仍优先打开 approval widget。
+- 已实现：Markdown inbox 只在没有 pending request 时展示。
+- 已实现：展示列表不创建 request、不 approve、不 promote。
+- 未实现：TUI 中点击打开 report；当前仍是文本路径。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+2 failed  # 实现前红灯：TUI fallback 仍展示短摘要，没有 Markdown inbox 标题
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+2 passed
+```
+
+下一步计划：
+
+- 把 Markdown inbox 接到更正式的 TUI 列表/详情入口。
+- 继续完善 approval inbox 的可浏览列表和详情入口。

@@ -2391,7 +2391,8 @@ class TestEvolutionEngine:
         app._run_self_evolution_review()
 
         assert opened == []
-        assert any("blocked generated candidate" in message for message in messages)
+        assert any("# Self-Evolution Inbox" in message for message in messages)
+        assert any("## Blocked Generated Candidates" in message for message in messages)
         assert any(proposal.id in message for message in messages)
         assert any(
             "review=review_blocked_source" in message
@@ -2462,7 +2463,8 @@ class TestEvolutionEngine:
         app._run_self_evolution_review()
 
         assert opened == []
-        assert any("generated candidate" in message for message in messages)
+        assert any("# Self-Evolution Inbox" in message for message in messages)
+        assert any("## Generated Candidates" in message for message in messages)
         assert any(proposal.id in message for message in messages)
         assert any("generated-review-loop" in message for message in messages)
         assert any(
