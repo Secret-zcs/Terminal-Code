@@ -2025,8 +2025,20 @@ class MewCodeApp(App):
                 review_run_id = str(item.get("review_run_id") or "").strip()
                 if review_run_id and review_run_id not in review_run_ids:
                     review_run_ids.append(review_run_id)
-        if len(review_run_ids) != 1:
+        if not review_run_ids:
             return ""
+        if len(review_run_ids) > 1:
+            joined_ids = ", ".join(
+                f"`{review_run_id}`" for review_run_id in review_run_ids
+            )
+            return "\n".join([
+                "## Review Report Details",
+                "",
+                (
+                    "Report details omitted because multiple review runs are "
+                    f"present: {joined_ids}"
+                ),
+            ])
         review_run_id = review_run_ids[0]
         ok, report = engine.read_self_evolution_review_report(review_run_id)
         lines = [

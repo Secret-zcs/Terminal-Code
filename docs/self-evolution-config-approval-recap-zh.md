@@ -1394,3 +1394,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_inlines_single_review_report tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_rejects_escaped_path -q
 2 passed
 ```
+
+## 多 Review Run 报告省略提示
+
+TUI self-evolution fallback 现在在多个 review run 同时出现时，会展示 `## Review Report Details`，但不会自动读取和展开多份 report。界面只列出相关 review run id，并说明报告内容因 `multiple review runs` 已省略。
+
+展示规则：
+
+- 一个 review run：读取并展示该 run 的 report Markdown。
+- 多个 review run：只列出 id，不读取 report 内容。
+- 没有 review run：不展示 report detail 区块。
+
+安全策略：
+
+- 避免多个候选时一次性刷出多份评测报告。
+- 避免 UI 消息过长影响用户判断。
+- 保持审批、promote、rollback、quarantine 和 trusted-auto 条件不变。
+- 不新增用户命令。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_omits_multiple_review_reports -q
+1 failed  # 实现前红灯：多 review run 时没有省略提示
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_omits_multiple_review_reports -q
+1 passed
+```

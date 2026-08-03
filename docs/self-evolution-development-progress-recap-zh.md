@@ -3095,3 +3095,43 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 给多个候选场景补一个明确的“只列出 report，不展开全部”的测试。
 - 继续把 inbox 从文本消息推进到可选择的 TUI widget。
+
+## 60. 最新推进记录：多 Review Run 不自动展开报告
+
+日期：2026-08-03
+
+本次补齐 TUI self-evolution inbox 的多候选安全提示。上一阶段只在“单个 review run”时内联展示报告；如果同时有多个 blocked/generated candidate，直接展开所有 report 会让界面很长，也可能把多份评测细节一次性刷出来。现在多个 review run 时，TUI 会展示 `## Review Report Details`，但只列出 review run id，并明确说明报告内容已省略。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_omits_multiple_review_reports`。
+- 修改 `mewcode/app.py`：`_format_self_evolution_review_report_detail()` 在多个 review run 时返回省略提示和 id 列表。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档多候选 report 展示边界。
+
+用户能看到什么：
+
+- 多个候选对应多个 review run 时，界面会说明 `multiple review runs`。
+- 用户能看到相关 review run id。
+- 多份 report 内容不会被自动展开。
+
+安全边界：
+
+- 不读取多个 report 文件。
+- 不改变单个 review run 的内联 report 展示。
+- 不改变审批、promote、rollback、quarantine 或 trusted-auto 条件。
+- 不新增用户命令。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_omits_multiple_review_reports -q
+1 failed  # 实现前红灯：多 review run 时没有 Review Report Details 提示
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_omits_multiple_review_reports -q
+1 passed
+```
+
+下一步计划：
+
+- 继续把 inbox 从文本消息推进到可选择的 TUI widget。
+- 给 report 缺失场景补 UI 层测试，确保错误提示可读。
