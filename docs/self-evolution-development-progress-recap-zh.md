@@ -3053,3 +3053,45 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_read_self
 
 - 把该只读 report 接口接入 TUI inbox 详情入口。
 - 增加 missing report / unknown review run 的展示测试。
+
+## 59. 最新推进记录：TUI Inbox 内联 Review Report 详情
+
+日期：2026-08-03
+
+本次把上一阶段新增的 `read_self_evolution_review_report()` 接入 TUI self-evolution fallback。此前 TUI 只能显示 `review=<id>` 和 `report=<path>`，用户需要自己去文件系统查报告。现在当 inbox 中只有一个可追踪 review run 时，TUI 会在 `# Self-Evolution Inbox` 后追加 `## Review Report Details`，直接展示该 fork reviewer 的 Markdown 报告内容。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_inlines_single_review_report`，覆盖单个 generated candidate 时内联 report 内容。
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_report_detail_rejects_escaped_path`，覆盖污染的 report path 不会泄露项目文件。
+- 修改 `mewcode/app.py`：新增 `_format_self_evolution_review_report_detail()`，并在 `_run_self_evolution_review()` 的 inbox fallback 中追加 report detail。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 TUI report detail 的展示行为和安全边界。
+
+用户能看到什么：
+
+- 单个 blocked/generated candidate 对应一个 review run 时，TUI 直接展示 `## Review Report Details`。
+- report 内容来自 `.mewcode/evolution/review_runs/<review_id>/report.md`。
+- 如果 report path 非法或报告缺失，TUI 展示安全错误，不展示项目其它文件内容。
+- 多个候选时仍先展示 inbox 列表，不自动展开多个报告，避免界面刷屏。
+
+安全边界：
+
+- 不新增用户命令。
+- 不改变审批、promote、rollback 或 quarantine 行为。
+- 不改变 trusted-auto 自动批准条件。
+- report 读取仍走 engine 层路径校验，只允许读取 review_runs 下的 `report.md`。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_inlines_single_review_report tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_rejects_escaped_path -q
+2 failed  # 实现前红灯：TUI inbox 没有 Review Report Details
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_inlines_single_review_report tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_rejects_escaped_path -q
+2 passed
+```
+
+下一步计划：
+
+- 给多个候选场景补一个明确的“只列出 report，不展开全部”的测试。
+- 继续把 inbox 从文本消息推进到可选择的 TUI widget。

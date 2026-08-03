@@ -2002,11 +2002,44 @@ class MewCodeApp(App):
                 return
             inbox_message = engine.render_self_evolution_inbox()
             if inbox_message:
+                report_detail = self._format_self_evolution_review_report_detail(
+                    engine,
+                    inbox,
+                )
+                if report_detail:
+                    inbox_message = f"{inbox_message.rstrip()}\n\n{report_detail}"
                 self._show_system_message(inbox_message)
                 return
         message = format_review_notification(result)
         if message:
             self._show_system_message(message)
+
+    @staticmethod
+    def _format_self_evolution_review_report_detail(
+        engine: EvolutionEngine,
+        inbox: dict,
+    ) -> str:
+        review_run_ids: list[str] = []
+        for group in ("blocked_candidates", "generated_candidates"):
+            for item in list(inbox.get(group, [])):
+                review_run_id = str(item.get("review_run_id") or "").strip()
+                if review_run_id and review_run_id not in review_run_ids:
+                    review_run_ids.append(review_run_id)
+        if len(review_run_ids) != 1:
+            return ""
+        review_run_id = review_run_ids[0]
+        ok, report = engine.read_self_evolution_review_report(review_run_id)
+        lines = [
+            "## Review Report Details",
+            "",
+            f"- Review run: `{review_run_id}`",
+            "",
+        ]
+        if ok:
+            lines.append(report.strip() or "(empty report)")
+        else:
+            lines.append(f"(report unavailable: {report})")
+        return "\n".join(lines)
 
     def _show_self_evolution_approval(self, request_id: str) -> None:
         if self.agent is None:

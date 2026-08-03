@@ -1366,3 +1366,31 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_read_self
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_read_self_evolution_review_report_returns_markdown tests/test_evolution.py::TestEvolutionEngine::test_read_self_evolution_review_report_rejects_escaped_report_path -q
 2 passed
 ```
+
+## TUI Inbox 内联 Review Report 详情
+
+TUI self-evolution fallback 现在会在单个可追踪 review run 的场景下内联展示 report 内容。这个能力只用于让用户直接看到 fork reviewer 的测试与复盘证据，不会创建 approval request，也不会 approve、promote、rollback 或 quarantine。
+
+展示规则：
+
+- inbox 中只有一个 review run id：追加 `## Review Report Details` 并展示 report Markdown。
+- inbox 中没有 review run id：只展示 inbox。
+- inbox 中有多个不同 review run id：只展示 inbox，不自动展开多个报告。
+- report 读取失败：展示安全错误，不泄露文件内容。
+
+安全策略：
+
+- TUI 不直接拼路径读文件，统一调用 `EvolutionEngine.read_self_evolution_review_report()`。
+- report path 仍必须留在 `.mewcode/evolution/review_runs/` 下。
+- 污染的 artifact path，例如 `README.md`，只会展示拒绝读取的错误。
+- 本次不新增用户命令，也不改变用户审批模式。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_inlines_single_review_report tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_rejects_escaped_path -q
+2 failed  # 实现前红灯：TUI 没有内联 Review Report Details
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_inlines_single_review_report tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_rejects_escaped_path -q
+2 passed
+```
