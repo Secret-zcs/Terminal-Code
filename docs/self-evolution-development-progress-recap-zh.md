@@ -3215,3 +3215,47 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 继续把 inbox 从文本消息推进到可选择的 TUI widget。
 - 将 report detail 错误脱敏规则提取成小 helper，减少后续分支堆叠。
+
+## 63. 最新推进记录：Review Report 错误脱敏 Helper
+
+日期：2026-08-04
+
+本次把 TUI self-evolution report detail 中的错误脱敏规则提取成 `_sanitize_self_evolution_review_report_error()`。此前缺失 report 和未知 review run 的脱敏逻辑直接写在 `_format_self_evolution_review_report_detail()` 里；随着错误分支增加，继续堆在展示函数里会让后续维护更容易遗漏边界。现在脱敏规则集中到一个小 helper，展示函数只负责拼接 Markdown。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_report_error_sanitizer`，覆盖缺失 report、未知 run 和普通安全错误三类文案。
+- 修改 `mewcode/app.py`：新增 `_sanitize_self_evolution_review_report_error()`，并让 `_format_self_evolution_review_report_detail()` 调用该 helper。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 helper 提取原因和验证结果。
+
+用户能看到什么：
+
+- 用户可见文案不变。
+- 缺失 report 仍显示 `report missing for <review_run_id>`。
+- 未知 run 仍显示 `review run unavailable: <review_run_id>`。
+- 路径逃逸等安全错误仍保留原安全拒绝原因。
+
+安全边界：
+
+- 只重构 TUI 展示层。
+- 不改变 engine 的读取、查询或路径校验。
+- 不改变审批、promote、rollback、quarantine 或 trusted-auto 条件。
+- 不新增用户命令。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_error_sanitizer -q
+1 failed  # 初次红灯是测试夹具未安装 fake MCP，修正后继续验证目标失败
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_error_sanitizer -q
+1 failed  # 实现前红灯：MewCodeApp 缺少 _sanitize_self_evolution_review_report_error()
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_error_sanitizer -q
+1 passed
+```
+
+下一步计划：
+
+- 继续把 inbox 从文本消息推进到可选择的 TUI widget。
+- 提取测试构造 helper，减少 TUI self-evolution 测试重复样板。

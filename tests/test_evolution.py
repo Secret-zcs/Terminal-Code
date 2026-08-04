@@ -2759,6 +2759,37 @@ class TestEvolutionEngine:
         assert "review run unavailable: review_unknown_source" in detail
         assert "review run review_unknown_source not found" not in detail
 
+    def test_tui_self_evolution_review_report_error_sanitizer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.app import MewCodeApp
+
+        assert (
+            MewCodeApp._sanitize_self_evolution_review_report_error(
+                "review_missing_source",
+                (
+                    "review report not found for review_missing_source: "
+                    "/tmp/private/report.md"
+                ),
+            )
+            == "report missing for review_missing_source"
+        )
+        assert (
+            MewCodeApp._sanitize_self_evolution_review_report_error(
+                "review_unknown_source",
+                "review run review_unknown_source not found",
+            )
+            == "review run unavailable: review_unknown_source"
+        )
+        assert (
+            MewCodeApp._sanitize_self_evolution_review_report_error(
+                "review_escaped_source",
+                "review report path escapes review_runs: README.md",
+            )
+            == "review report path escapes review_runs: README.md"
+        )
+
     def test_tui_self_evolution_review_omits_multiple_review_reports(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

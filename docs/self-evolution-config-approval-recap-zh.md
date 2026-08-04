@@ -1477,3 +1477,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_sanitizes_unknown_run -q
 1 passed
 ```
+
+## Review Report 错误脱敏 Helper
+
+TUI self-evolution report detail 的错误脱敏规则现在集中在 `_sanitize_self_evolution_review_report_error()`。此前缺失 report、未知 run、普通安全错误的处理分散在 Markdown 拼接逻辑里；现在 helper 负责把底层错误转成用户可读文案，展示函数只负责渲染。
+
+覆盖规则：
+
+- `review report not found for ...` -> `report missing for <review_run_id>`。
+- `review run ... not found` -> `review run unavailable: <review_run_id>`。
+- 其它错误保持原文，例如路径逃逸的安全拒绝原因。
+
+安全策略：
+
+- 只重构 TUI 展示层。
+- 不修改 engine 的查询、读取或路径校验。
+- 不改变 approval request、promote、rollback、quarantine 或 trusted-auto 行为。
+- 不新增用户命令。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_error_sanitizer -q
+1 failed  # 实现前红灯：helper 不存在
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_error_sanitizer -q
+1 passed
+```

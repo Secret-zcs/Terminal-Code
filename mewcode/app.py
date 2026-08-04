@@ -2050,15 +2050,23 @@ class MewCodeApp(App):
         if ok:
             lines.append(report.strip() or "(empty report)")
         else:
-            if report.startswith("review report not found for "):
-                report = f"report missing for {review_run_id}"
-            elif (
-                report.startswith("review run ")
-                and report.endswith(" not found")
-            ):
-                report = f"review run unavailable: {review_run_id}"
+            report = MewCodeApp._sanitize_self_evolution_review_report_error(
+                review_run_id,
+                report,
+            )
             lines.append(f"(report unavailable: {report})")
         return "\n".join(lines)
+
+    @staticmethod
+    def _sanitize_self_evolution_review_report_error(
+        review_run_id: str,
+        message: str,
+    ) -> str:
+        if message.startswith("review report not found for "):
+            return f"report missing for {review_run_id}"
+        if message.startswith("review run ") and message.endswith(" not found"):
+            return f"review run unavailable: {review_run_id}"
+        return message
 
     def _show_self_evolution_approval(self, request_id: str) -> None:
         if self.agent is None:
