@@ -3429,3 +3429,39 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 补真实挂载路径的输入框禁用/恢复测试。
 - 清理 self-evolution TUI fallback 测试的重复 app 构造代码。
+
+## 68. 最新推进记录：Inbox 挂载层输入框状态测试
+
+日期：2026-08-04
+
+本次补充 self-evolution inbox 真实挂载路径的回归测试。前几节已经验证 widget 本体、app fallback 接入、去重和挂载失败恢复；本次专门验证 `_mount_self_evolution_inbox()` 会在展示 widget 时禁用 `#chat-input`，并且 `on_inline_self_evolution_inbox_widget_responded()` 会在用户响应后移除 widget、恢复输入框并重新 focus。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_inbox_mount_disables_and_restores_input`。
+- 测试使用 fake chat/input/inline widget，不启动完整 Textual app，直接覆盖 app 挂载与响应路径。
+- 本次没有修改生产代码；测试确认现有实现符合预期。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档测试补强。
+
+用户能看到什么：
+
+- self-evolution inbox 展示期间输入框会被禁用，避免用户在待选择状态下继续输入造成状态混乱。
+- 用户选择 `View report details` 或 `Dismiss inbox` 后，输入框恢复可用并重新获得焦点。
+
+安全边界：
+
+- 不改变 candidate、review run、approval request 或 skill 状态。
+- 不新增用户命令。
+- 不改变 runtime 逻辑，只增加回归测试覆盖。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_mount_disables_and_restores_input -q
+1 passed
+```
+
+下一步计划：
+
+- 清理 self-evolution TUI fallback 测试的重复 app 构造代码。
+- 继续补充用户可见 inbox 状态的边界测试，例如没有 report detail 时只显示 dismiss 动作。

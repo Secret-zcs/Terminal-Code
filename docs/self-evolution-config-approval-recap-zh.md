@@ -1619,3 +1619,27 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails -q
 1 passed
 ```
+
+## Self-Evolution Inbox 输入框状态测试
+
+本次补充 TUI 挂载层回归测试，验证 `InlineSelfEvolutionInboxWidget` 被挂载时会禁用 `#chat-input`，用户响应后会移除 inline widget、恢复输入框并重新 focus。
+
+行为边界：
+
+- inbox 展示期间输入框禁用。
+- 用户 `View report details` 或 `Dismiss inbox` 后输入框恢复。
+- 测试使用 fake chat/input/inline widget，不启动完整 TUI。
+
+安全策略：
+
+- 不改变 approval、promote、rollback、quarantine 或 trusted-auto 逻辑。
+- 不修改 candidate 或 review run 存储。
+- 不新增用户命令。
+- 本次只补测试和文档，不修改生产代码。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_mount_disables_and_restores_input -q
+1 passed
+```

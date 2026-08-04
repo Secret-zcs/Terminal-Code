@@ -3024,6 +3024,88 @@ class TestEvolutionEngine:
             ("# Self-Evolution Inbox", "report"),
         ]
 
+    @pytest.mark.asyncio
+    async def test_tui_self_evolution_inbox_mount_disables_and_restores_input(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.app import MewCodeApp
+        from mewcode.config import ProviderConfig
+        from mewcode.self_evolution_dialog import (
+            InlineSelfEvolutionInboxWidget,
+            SelfEvolutionInboxChoice,
+        )
+
+        class FakeChat:
+            def __init__(self) -> None:
+                self.mounted: list[object] = []
+                self.scrolled = False
+
+            async def mount(self, widget: object) -> None:
+                self.mounted.append(widget)
+
+            def scroll_end(self, *, animate: bool = True) -> None:
+                self.scrolled = animate is False
+
+        class FakeInput:
+            def __init__(self) -> None:
+                self.disabled = False
+                self.focused = False
+
+            def focus(self) -> None:
+                self.focused = True
+
+        class FakeInline:
+            def __init__(self) -> None:
+                self.removed = False
+
+            def remove(self) -> None:
+                self.removed = True
+
+        app = MewCodeApp(
+            providers=[
+                ProviderConfig(
+                    name="test",
+                    protocol="openai",
+                    base_url="https://example.invalid",
+                    model="test-model",
+                )
+            ],
+        )
+        chat = FakeChat()
+        chat_input = FakeInput()
+        inline = FakeInline()
+
+        def fake_query_one(selector: str, *_args: object) -> object:
+            if selector == "#chat-area":
+                return chat
+            if selector == "#chat-input":
+                return chat_input
+            if selector == "#self-evolution-inbox-inline":
+                return inline
+            raise LookupError(selector)
+
+        app.query_one = fake_query_one  # type: ignore[method-assign]
+        app.call_after_refresh = (  # type: ignore[method-assign]
+            lambda callback, *args, **kwargs: callback(*args, **kwargs)
+        )
+
+        await app._mount_self_evolution_inbox("# Self-Evolution Inbox", "report")
+
+        assert isinstance(chat.mounted[0], InlineSelfEvolutionInboxWidget)
+        assert chat.scrolled is True
+        assert chat_input.disabled is True
+
+        app.on_inline_self_evolution_inbox_widget_responded(
+            InlineSelfEvolutionInboxWidget.Responded(
+                SelfEvolutionInboxChoice.DISMISS,
+            )
+        )
+
+        assert inline.removed is True
+        assert chat_input.disabled is False
+        assert chat_input.focused is True
+
     def test_tui_skill_approval_response_approves_and_reloads_skills(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
