@@ -2101,7 +2101,7 @@ class MewCodeApp(App):
         report_detail_markdown: str = "",
     ) -> None:
         inbox_key = (inbox_markdown.strip(), report_detail_markdown.strip())
-        if self._pending_self_evolution_inbox_key == inbox_key:
+        if self._pending_self_evolution_inbox_key is not None:
             return
         self._pending_self_evolution_inbox_key = inbox_key
         asyncio.ensure_future(

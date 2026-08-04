@@ -3504,3 +3504,42 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 补充 no report detail 场景下 inbox widget 只显示 `Dismiss inbox` 的边界测试。
 - 继续检查 self-evolution TUI 事件是否存在重复弹窗或状态泄露。
+
+## 70. 最新推进记录：Self-Evolution Inbox 单 Pending 限制
+
+日期：2026-08-04
+
+本次收紧 self-evolution TUI inbox 的展示边界。此前只会去重相同内容的 pending inbox；如果旧 inbox 还没被用户处理，又来了内容不同的新 inbox，TUI 仍可能继续挂载第二个 widget。现在只要存在一个待处理 self-evolution inbox，就不会再挂载新的 inbox，直到用户选择 `View report details` / `Dismiss inbox`，或挂载失败后 pending 状态被清理。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_inbox_allows_only_one_pending_widget`，覆盖不同内容 inbox 在旧 widget 未处理前不会重复挂载。
+- 修改 `mewcode/app.py`：`_show_self_evolution_inbox()` 从“同 key 去重”改为“pending key 非空即阻止新挂载”。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档单 pending 限制。
+
+用户能看到什么：
+
+- 同一时间聊天区最多出现一个 self-evolution inbox widget。
+- 用户处理当前 inbox 后，后续新 inbox 可以正常展示。
+- 挂载失败仍会清理 pending 状态并允许重试。
+
+安全边界：
+
+- 不改变 candidate、review run、approval request、promote、rollback、quarantine 或 trusted-auto 行为。
+- 不新增用户命令。
+- 只影响 TUI 展示层的 pending widget 串行化。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget -q
+1 failed  # 实现前红灯：不同内容 inbox 会继续挂载第二个 widget
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails -q
+3 passed
+```
+
+下一步计划：
+
+- 补充 no report detail 场景下 inbox widget 只显示 `Dismiss inbox` 的边界测试。
+- 继续检查 self-evolution TUI 事件是否存在状态泄露。

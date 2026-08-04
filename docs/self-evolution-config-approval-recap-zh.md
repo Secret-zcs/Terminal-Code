@@ -1670,3 +1670,30 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py 
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_approval_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_mount_disables_and_restores_input tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
 4 passed
 ```
+
+## Self-Evolution Inbox 单 Pending 限制
+
+self-evolution TUI fallback 现在同一时间只允许一个 inbox widget 处于 pending 状态。此前只去重相同内容；现在只要 `_pending_self_evolution_inbox_key` 非空，新 inbox 无论内容是否相同都不会继续挂载，直到用户响应或挂载失败恢复 pending 状态。
+
+行为边界：
+
+- 一个 pending inbox 未处理前，不再挂载第二个 inbox。
+- 用户响应后允许展示后续 inbox。
+- 挂载失败仍会清理 pending 状态，允许重试。
+
+安全策略：
+
+- 不改变 approval、promote、rollback、quarantine 或 trusted-auto 逻辑。
+- 不修改 candidate 或 review run 存储。
+- 不新增用户命令。
+- 只串行化 TUI inbox 展示。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget -q
+1 failed  # 实现前红灯：不同内容 inbox 会继续挂载
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails -q
+3 passed
+```

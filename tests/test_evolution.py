@@ -2909,6 +2909,43 @@ class TestEvolutionEngine:
         ]
 
     @pytest.mark.asyncio
+    async def test_tui_self_evolution_inbox_allows_only_one_pending_widget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.self_evolution_dialog import (
+            InlineSelfEvolutionInboxWidget,
+            SelfEvolutionInboxChoice,
+        )
+
+        app = _make_test_mewcode_app()
+        mounted: list[tuple[str, str]] = []
+
+        async def fake_mount(inbox: str, report: str = "") -> None:
+            mounted.append((inbox, report))
+
+        app._mount_self_evolution_inbox = fake_mount  # type: ignore[method-assign]
+
+        app._show_self_evolution_inbox("# Self-Evolution Inbox A", "report A")
+        app._show_self_evolution_inbox("# Self-Evolution Inbox B", "report B")
+        await asyncio.sleep(0)
+
+        assert mounted == [("# Self-Evolution Inbox A", "report A")]
+
+        app.on_inline_self_evolution_inbox_widget_responded(
+            InlineSelfEvolutionInboxWidget.Responded(
+                SelfEvolutionInboxChoice.DISMISS,
+            )
+        )
+        app._show_self_evolution_inbox("# Self-Evolution Inbox B", "report B")
+        await asyncio.sleep(0)
+
+        assert mounted == [
+            ("# Self-Evolution Inbox A", "report A"),
+            ("# Self-Evolution Inbox B", "report B"),
+        ]
+
+    @pytest.mark.asyncio
     async def test_tui_self_evolution_inbox_clears_pending_when_mount_fails(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
