@@ -1504,3 +1504,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_error_sanitizer -q
 1 passed
 ```
+
+## Self-Evolution Inbox 可选择 Widget 基础
+
+`InlineSelfEvolutionInboxWidget` 现在提供 self-evolution inbox 的可选择 TUI 基础组件。它可以显示 inbox Markdown，并提供 `View report details` 与 `Dismiss inbox` 两个动作。当前 app fallback 仍沿用系统消息展示；该 widget 是下一步替换系统消息路径的基础。
+
+行为边界：
+
+- widget 只接收已准备好的 Markdown 字符串。
+- widget 不读取 report 文件。
+- widget 不创建 approval request。
+- widget 不 approve、promote、rollback 或 quarantine。
+
+安全策略：
+
+- report detail 仍由 engine/app 现有安全读取与脱敏路径准备。
+- widget 的 `VIEW_REPORT` 只返回传入的 report Markdown。
+- widget 的 `DISMISS` 只关闭/忽略 inbox，后续接入 app 时不应改变候选状态。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_shows_inbox_and_actions tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_emits_view_report_and_dismiss -q
+1 error  # 实现前红灯：widget 尚不存在
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_shows_inbox_and_actions tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_emits_view_report_and_dismiss -q
+2 passed
+```

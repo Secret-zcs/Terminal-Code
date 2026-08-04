@@ -14,6 +14,11 @@ class SkillApprovalChoice(str, Enum):
     REJECT = "reject"
 
 
+class SelfEvolutionInboxChoice(str, Enum):
+    VIEW_REPORT = "view_report"
+    DISMISS = "dismiss"
+
+
 _OPTIONS = [
     ("Approve and enable skill", SkillApprovalChoice.APPROVE),
     ("Reject candidate", SkillApprovalChoice.REJECT),
@@ -126,3 +131,98 @@ class InlineSkillApprovalWidget(Vertical, can_focus=True):
             self._reason += key
             self._refresh()
             event.stop()
+
+
+class InlineSelfEvolutionInboxWidget(Vertical, can_focus=True):
+    """Inline review widget for the self-evolution inbox."""
+
+    BINDINGS = [
+        Binding("up", "cursor_up", "Up", priority=True),
+        Binding("down", "cursor_down", "Down", priority=True),
+        Binding("enter", "select", "Select", priority=True),
+        Binding("escape", "dismiss", "Dismiss", priority=True),
+    ]
+
+    class Responded(Message):
+        def __init__(
+            self,
+            choice: SelfEvolutionInboxChoice,
+            report_markdown: str = "",
+        ) -> None:
+            super().__init__()
+            self.choice = choice
+            self.report_markdown = report_markdown
+
+    def __init__(
+        self,
+        inbox_markdown: str,
+        report_detail_markdown: str = "",
+        **kwargs,
+    ) -> None:
+        super().__init__(id="self-evolution-inbox-inline", **kwargs)
+        self._inbox_markdown = inbox_markdown
+        self._report_detail_markdown = report_detail_markdown
+        self._cursor = 0
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._build_content(), id="self-evolution-inbox-content")
+
+    def on_mount(self) -> None:
+        self.focus()
+
+    def _build_content(self) -> str:
+        lines = [
+            "",
+            "[bold yellow]Self-evolution inbox[/bold yellow]",
+            "",
+            self._inbox_markdown.strip(),
+            "",
+            "Choose next action:",
+            "",
+        ]
+        for index, (label, _choice) in enumerate(self._options()):
+            if index == self._cursor:
+                lines.append(f" > {index + 1}. [bold]{label}[/bold]")
+            else:
+                lines.append(f"   {index + 1}. [dim]{label}[/dim]")
+        return "\n".join(lines)
+
+    def _options(self) -> list[tuple[str, SelfEvolutionInboxChoice]]:
+        options: list[tuple[str, SelfEvolutionInboxChoice]] = []
+        if self._report_detail_markdown.strip():
+            options.append((
+                "View report details",
+                SelfEvolutionInboxChoice.VIEW_REPORT,
+            ))
+        options.append(("Dismiss inbox", SelfEvolutionInboxChoice.DISMISS))
+        return options
+
+    def _refresh(self) -> None:
+        try:
+            self.query_one("#self-evolution-inbox-content", Static).update(
+                self._build_content()
+            )
+        except Exception:
+            return
+
+    def action_cursor_up(self) -> None:
+        if self._cursor > 0:
+            self._cursor -= 1
+            self._refresh()
+
+    def action_cursor_down(self) -> None:
+        if self._cursor < len(self._options()) - 1:
+            self._cursor += 1
+            self._refresh()
+
+    def action_select(self) -> None:
+        _label, choice = self._options()[self._cursor]
+        report = (
+            self._report_detail_markdown
+            if choice == SelfEvolutionInboxChoice.VIEW_REPORT
+            else ""
+        )
+        self.post_message(self.Responded(choice, report))
+
+    def action_dismiss(self) -> None:
+        self.post_message(self.Responded(SelfEvolutionInboxChoice.DISMISS))

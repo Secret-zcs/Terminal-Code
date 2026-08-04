@@ -3259,3 +3259,44 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 继续把 inbox 从文本消息推进到可选择的 TUI widget。
 - 提取测试构造 helper，减少 TUI self-evolution 测试重复样板。
+
+## 64. 最新推进记录：Self-Evolution Inbox 可选择 Widget 基础
+
+日期：2026-08-04
+
+本次新增 `InlineSelfEvolutionInboxWidget`，作为把 self-evolution inbox 从纯文本系统消息推进到可选择 TUI 入口的基础。当前 app fallback 仍使用原来的系统消息路径；本次先把 widget 本体、选项渲染和选择事件做成可测试组件，避免一次性替换现有 TUI 路径造成大范围回归。
+
+修改内容：
+
+- 修改 `tests/test_self_evolution_dialog.py`：新增 inbox widget 渲染测试，覆盖 inbox 内容、查看报告和关闭动作。
+- 修改 `tests/test_self_evolution_dialog.py`：新增 inbox widget 事件测试，覆盖 `VIEW_REPORT` 和 `DISMISS` 两个选择事件。
+- 修改 `mewcode/self_evolution_dialog.py`：新增 `SelfEvolutionInboxChoice` 和 `InlineSelfEvolutionInboxWidget`。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 widget 基础能力和未接入边界。
+
+用户能看到什么：
+
+- 当前用户可见 TUI fallback 行为不变。
+- 新 widget 已具备显示 inbox Markdown、查看 report detail、关闭 inbox 的基础交互。
+- 下一步可以把 app fallback 从系统消息切到该 widget。
+
+安全边界：
+
+- 不改变审批、promote、rollback、quarantine 或 trusted-auto 条件。
+- 不新增用户命令。
+- 不读取 report 文件；widget 只接收已经准备好的 Markdown 字符串。
+- 不替换现有 fallback 展示路径，本次只增加组件基础。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_shows_inbox_and_actions tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_emits_view_report_and_dismiss -q
+1 error  # 实现前红灯：InlineSelfEvolutionInboxWidget 尚不存在
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_shows_inbox_and_actions tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_emits_view_report_and_dismiss -q
+2 passed
+```
+
+下一步计划：
+
+- 把 app fallback 中的 self-evolution inbox 系统消息切到 `InlineSelfEvolutionInboxWidget`。
+- 处理 widget 的 `VIEW_REPORT` 事件，让用户按需查看 report detail，而不是自动展开。
