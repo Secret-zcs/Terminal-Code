@@ -2050,6 +2050,8 @@ class MewCodeApp(App):
         if ok:
             lines.append(report.strip() or "(empty report)")
         else:
+            if report.startswith("review report not found for "):
+                report = f"report missing for {review_run_id}"
             lines.append(f"(report unavailable: {report})")
         return "\n".join(lines)
 

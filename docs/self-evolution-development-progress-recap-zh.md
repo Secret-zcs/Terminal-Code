@@ -3135,3 +3135,43 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 继续把 inbox 从文本消息推进到可选择的 TUI widget。
 - 给 report 缺失场景补 UI 层测试，确保错误提示可读。
+
+## 61. 最新推进记录：缺失 Review Report 的 UI 脱敏提示
+
+日期：2026-08-04
+
+本次补齐 TUI self-evolution inbox 的缺失报告展示。此前单个 review run 的 report 不存在时，底层读取接口会返回包含本机绝对路径的诊断信息；这对开发调试有用，但不适合直接展示给用户。现在 TUI 会把这类错误脱敏成 `report missing for <review_run_id>`，用户能知道哪个 review run 缺报告，但看不到本机临时目录路径。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_report_detail_sanitizes_missing_report`。
+- 修改 `mewcode/app.py`：`_format_self_evolution_review_report_detail()` 对 `review report not found` 错误做 UI 层脱敏。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档缺失报告提示和路径脱敏边界。
+
+用户能看到什么：
+
+- 单个 review run 缺失 report 时，仍显示 `## Review Report Details`。
+- 错误提示变成 `report unavailable: report missing for <review_run_id>`。
+- 不再向 UI 暴露 `/tmp/...` 这类本机绝对路径。
+
+安全边界：
+
+- 只改变 UI 展示文本。
+- 不改变 engine 的底层读取诊断。
+- 不改变审批、promote、rollback、quarantine 或 trusted-auto 条件。
+- 不新增用户命令。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_sanitizes_missing_report -q
+1 failed  # 实现前红灯：UI 没有脱敏缺失 report 的绝对路径
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_sanitizes_missing_report -q
+1 passed
+```
+
+下一步计划：
+
+- 继续把 inbox 从文本消息推进到可选择的 TUI widget。
+- 给 unknown review run 的 UI 提示补测试。

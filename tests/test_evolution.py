@@ -2675,6 +2675,70 @@ class TestEvolutionEngine:
         )
         assert not any("project secret" in message for message in messages)
 
+    def test_tui_self_evolution_review_report_detail_sanitizes_missing_report(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.app import MewCodeApp
+        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+        from mewcode.evolution.models import SelfEvolutionReviewRun
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="generated-review-loop",
+            description="等待 eval/approval gate 的候选 skill",
+            body="# 任务\n\n记录复盘步骤，并保留验证证据。\n",
+        )
+        engine.store.save_self_evolution_review_run(
+            SelfEvolutionReviewRun(
+                id="review_missing_source",
+                mode="fork_reviewer",
+                status="generated",
+                approval_mode="manual",
+                artifacts={
+                    "report": (
+                        ".mewcode/evolution/review_runs/"
+                        "review_missing_source/report.md"
+                    )
+                },
+                summary={"generated_candidates": [proposal.id]},
+                completed_at=1.0,
+            )
+        )
+        monkeypatch.setattr(
+            app_module,
+            "review_ready_skill_candidates",
+            lambda *_args, **_kwargs: {"status": "idle", "requests": []},
+        )
+        app = MewCodeApp(
+            providers=[
+                ProviderConfig(
+                    name="test",
+                    protocol="openai",
+                    base_url="https://example.invalid",
+                    model="test-model",
+                )
+            ],
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        app._show_self_evolution_approval = lambda _request_id: None  # type: ignore[method-assign]
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+
+        assert any("## Review Report Details" in message for message in messages)
+        assert any(
+            "report missing for review_missing_source" in message
+            for message in messages
+        )
+        assert not any(str(tmp_path) in message for message in messages)
+
     def test_tui_self_evolution_review_omits_multiple_review_reports(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

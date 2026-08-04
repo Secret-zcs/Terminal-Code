@@ -1421,3 +1421,31 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_omits_multiple_review_reports -q
 1 passed
 ```
+
+## 缺失 Review Report 的 UI 脱敏提示
+
+TUI self-evolution fallback 现在会把缺失 report 的底层错误脱敏后展示。底层 `EvolutionEngine.read_self_evolution_review_report()` 仍保留完整诊断；TUI 只展示用户需要的 review run id，避免把本机临时目录路径暴露到界面。
+
+展示规则：
+
+- report 存在：展示 report Markdown。
+- report 缺失：展示 `report missing for <review_run_id>`。
+- report path 逃逸：继续展示安全拒绝原因。
+- 多个 review run：仍只列 id，不读取 report 内容。
+
+安全策略：
+
+- 脱敏只发生在 TUI 展示层。
+- 不修改 report 读取的路径校验。
+- 不改变 approval request、promote、rollback、quarantine 或 trusted-auto 行为。
+- 不新增用户命令。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_sanitizes_missing_report -q
+1 failed  # 实现前红灯：UI 泄露缺失 report 的绝对路径
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_sanitizes_missing_report -q
+1 passed
+```
