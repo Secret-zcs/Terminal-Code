@@ -1449,3 +1449,31 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_sanitizes_missing_report -q
 1 passed
 ```
+
+## 未知 Review Run 的 UI 脱敏提示
+
+TUI self-evolution report detail 现在会把未知 review run 的底层错误脱敏成稳定的用户提示。这个能力用于未来可选择 inbox/detail 入口，防止过期或损坏的 `review_run_id` 直接暴露底层 store 查询文案。
+
+展示规则：
+
+- review run 存在且 report 存在：展示 report Markdown。
+- review run 存在但 report 缺失：展示 `report missing for <review_run_id>`。
+- review run 不存在：展示 `review run unavailable: <review_run_id>`。
+- 多个 review run：仍只列 id，不读取 report 内容。
+
+安全策略：
+
+- 脱敏只发生在 TUI 展示层。
+- 不修改 engine 的查询和路径校验。
+- 不改变 approval request、promote、rollback、quarantine 或 trusted-auto 行为。
+- 不新增用户命令。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_sanitizes_unknown_run -q
+1 failed  # 实现前红灯：UI 直接展示底层 unknown run 文案
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_sanitizes_unknown_run -q
+1 passed
+```

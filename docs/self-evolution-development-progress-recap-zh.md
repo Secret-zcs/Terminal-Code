@@ -3175,3 +3175,43 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 继续把 inbox 从文本消息推进到可选择的 TUI widget。
 - 给 unknown review run 的 UI 提示补测试。
+
+## 62. 最新推进记录：未知 Review Run 的 UI 脱敏提示
+
+日期：2026-08-04
+
+本次补齐 TUI self-evolution report detail 的未知 review run 提示。未来如果 TUI 详情入口拿到过期、损坏或已清理的 `review_run_id`，底层 engine 会返回 `review run <id> not found`。这个文案对内部诊断足够，但对用户不够稳定。现在 TUI 展示层会把它改成 `review run unavailable: <review_run_id>`。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_report_detail_sanitizes_unknown_run`。
+- 修改 `mewcode/app.py`：`_format_self_evolution_review_report_detail()` 对 unknown review run 错误做 UI 层脱敏。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 unknown review run 的展示规则。
+
+用户能看到什么：
+
+- 详情入口拿到未知 review run id 时，仍显示 `## Review Report Details`。
+- 错误提示变成 `report unavailable: review run unavailable: <review_run_id>`。
+- 不直接暴露底层 store 查询失败文案。
+
+安全边界：
+
+- 只改变 UI 展示文本。
+- 不改变 engine 的底层读取诊断。
+- 不改变审批、promote、rollback、quarantine 或 trusted-auto 条件。
+- 不新增用户命令。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_sanitizes_unknown_run -q
+1 failed  # 实现前红灯：UI 直接展示 review run <id> not found
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_report_detail_sanitizes_unknown_run -q
+1 passed
+```
+
+下一步计划：
+
+- 继续把 inbox 从文本消息推进到可选择的 TUI widget。
+- 将 report detail 错误脱敏规则提取成小 helper，减少后续分支堆叠。

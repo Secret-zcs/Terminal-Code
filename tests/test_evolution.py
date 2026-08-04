@@ -2739,6 +2739,26 @@ class TestEvolutionEngine:
         )
         assert not any(str(tmp_path) in message for message in messages)
 
+    def test_tui_self_evolution_review_report_detail_sanitizes_unknown_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.app import MewCodeApp
+
+        detail = MewCodeApp._format_self_evolution_review_report_detail(
+            EvolutionEngine(tmp_path),
+            {
+                "blocked_candidates": [],
+                "generated_candidates": [{
+                    "review_run_id": "review_unknown_source",
+                }],
+            },
+        )
+
+        assert "## Review Report Details" in detail
+        assert "review run unavailable: review_unknown_source" in detail
+        assert "review run review_unknown_source not found" not in detail
+
     def test_tui_self_evolution_review_omits_multiple_review_reports(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

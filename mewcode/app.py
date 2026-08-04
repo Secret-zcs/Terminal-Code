@@ -2052,6 +2052,11 @@ class MewCodeApp(App):
         else:
             if report.startswith("review report not found for "):
                 report = f"report missing for {review_run_id}"
+            elif (
+                report.startswith("review run ")
+                and report.endswith(" not found")
+            ):
+                report = f"review run unavailable: {review_run_id}"
             lines.append(f"(report unavailable: {report})")
         return "\n".join(lines)
 
