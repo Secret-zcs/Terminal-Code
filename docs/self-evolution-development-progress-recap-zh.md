@@ -3390,3 +3390,42 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 补 `_mount_self_evolution_inbox()` 挂载层测试，确认输入框禁用与恢复行为。
 - 继续减少 TUI self-evolution fallback 测试样板。
+
+## 67. 最新推进记录：Inbox 挂载失败恢复 Pending 状态
+
+日期：2026-08-04
+
+本次补齐上一节去重逻辑的异常恢复路径。去重依赖 `_pending_self_evolution_inbox_key`，如果异步挂载 widget 时发生异常但 pending key 没清理，后续同一个 inbox 会被误判为“已经展示”，从而不再出现。现在 `_show_self_evolution_inbox()` 会通过 guarded coroutine 调用 `_mount_self_evolution_inbox()`；如果挂载失败，会消费异常并在 key 仍匹配时清理 pending 状态，允许后续 review tick 重新展示。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_inbox_clears_pending_when_mount_fails`，覆盖挂载失败后 pending key 清理和后续重试。
+- 修改 `mewcode/app.py`：新增 `_mount_self_evolution_inbox_guarded()`，封装 inbox widget 异步挂载。
+- 修改 `mewcode/app.py`：`_show_self_evolution_inbox()` 改为调度 guarded coroutine。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档异常恢复路径。
+
+用户能看到什么：
+
+- 如果某次 TUI widget 挂载失败，同一个 self-evolution inbox 后续仍能重新展示。
+- 不会因为一次 UI 异常导致 self-evolution inbox 永久沉默。
+
+安全边界：
+
+- 不改变 candidate、review run、approval request 或 skill 状态。
+- 不新增用户命令。
+- 只处理 TUI 挂载失败后的 pending 展示状态。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails -q
+1 failed  # 实现前红灯：挂载失败后 pending key 没清理，且任务异常未被消费
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails -q
+1 passed
+```
+
+下一步计划：
+
+- 补真实挂载路径的输入框禁用/恢复测试。
+- 清理 self-evolution TUI fallback 测试的重复 app 构造代码。

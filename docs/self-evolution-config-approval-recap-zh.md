@@ -1593,3 +1593,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display -q
 1 passed
 ```
+
+## Self-Evolution Inbox 挂载失败恢复
+
+inbox 去重依赖 pending key。为了避免一次 TUI 挂载异常把同一个 inbox 永久卡住，`_show_self_evolution_inbox()` 现在通过 guarded coroutine 挂载 widget；如果挂载失败，会在 key 仍匹配时清理 pending 状态，后续 review tick 可以重新展示。
+
+行为边界：
+
+- 挂载成功时 pending key 继续保留，直到用户响应。
+- 挂载失败时只清理当前匹配的 pending key。
+- 后续相同 inbox 可以重新尝试展示。
+
+安全策略：
+
+- 不改变 approval、promote、rollback、quarantine 或 trusted-auto 逻辑。
+- 不修改 candidate 或 review run 存储。
+- 只恢复 TUI 展示层状态。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails -q
+1 failed  # 实现前红灯：挂载失败后 pending key 没清理
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails -q
+1 passed
+```

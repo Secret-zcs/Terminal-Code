@@ -2105,11 +2105,27 @@ class MewCodeApp(App):
             return
         self._pending_self_evolution_inbox_key = inbox_key
         asyncio.ensure_future(
-            self._mount_self_evolution_inbox(
+            self._mount_self_evolution_inbox_guarded(
+                inbox_markdown,
+                report_detail_markdown,
+                inbox_key,
+            )
+        )
+
+    async def _mount_self_evolution_inbox_guarded(
+        self,
+        inbox_markdown: str,
+        report_detail_markdown: str,
+        inbox_key: tuple[str, str],
+    ) -> None:
+        try:
+            await self._mount_self_evolution_inbox(
                 inbox_markdown,
                 report_detail_markdown,
             )
-        )
+        except Exception:
+            if self._pending_self_evolution_inbox_key == inbox_key:
+                self._pending_self_evolution_inbox_key = None
 
     async def _mount_self_evolution_inbox(
         self,

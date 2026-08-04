@@ -2985,6 +2985,45 @@ class TestEvolutionEngine:
             ("# Self-Evolution Inbox", "report"),
         ]
 
+    @pytest.mark.asyncio
+    async def test_tui_self_evolution_inbox_clears_pending_when_mount_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.app import MewCodeApp
+        from mewcode.config import ProviderConfig
+
+        app = MewCodeApp(
+            providers=[
+                ProviderConfig(
+                    name="test",
+                    protocol="openai",
+                    base_url="https://example.invalid",
+                    model="test-model",
+                )
+            ],
+        )
+        attempts: list[tuple[str, str]] = []
+
+        async def failing_mount(inbox: str, report: str = "") -> None:
+            attempts.append((inbox, report))
+            raise RuntimeError("mount failed")
+
+        app._mount_self_evolution_inbox = failing_mount  # type: ignore[method-assign]
+
+        app._show_self_evolution_inbox("# Self-Evolution Inbox", "report")
+        await asyncio.sleep(0)
+
+        assert app._pending_self_evolution_inbox_key is None
+
+        app._show_self_evolution_inbox("# Self-Evolution Inbox", "report")
+        await asyncio.sleep(0)
+
+        assert attempts == [
+            ("# Self-Evolution Inbox", "report"),
+            ("# Self-Evolution Inbox", "report"),
+        ]
+
     def test_tui_skill_approval_response_approves_and_reloads_skills(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
