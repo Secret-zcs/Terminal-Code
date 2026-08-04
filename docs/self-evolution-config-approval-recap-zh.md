@@ -1531,3 +1531,37 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_inb
 PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_shows_inbox_and_actions tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_emits_view_report_and_dismiss -q
 2 passed
 ```
+
+## TUI Fallback 接入可选择 Inbox Widget
+
+self-evolution TUI fallback 现在使用 `InlineSelfEvolutionInboxWidget` 展示 inbox。没有 pending approval request 时，用户先看到 inbox 列表；report detail 不再自动展开，而是通过 `View report details` 按需查看。
+
+行为边界：
+
+- pending approval request 仍优先打开 approval widget。
+- 没有 pending request 时打开 inbox widget。
+- `View report details` 只显示传入的 report Markdown。
+- `Dismiss inbox` 只关闭/忽略当前展示，不修改候选状态。
+
+安全策略：
+
+- 不创建 approval request。
+- 不 approve、reject、promote、rollback 或 quarantine。
+- 不新增用户命令。
+- report 仍由 engine/app 读取与脱敏后再传入 widget。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_inlines_single_review_report -q
+2 failed  # 实现前红灯：app 仍使用系统消息展示 inbox
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_inlines_single_review_report -q
+2 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_response_views_report_or_dismisses -q
+1 failed  # 实现前红灯：缺少 VIEW_REPORT/DISMISS 响应处理器
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_response_views_report_or_dismisses -q
+1 passed
+```

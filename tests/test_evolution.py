@@ -2447,25 +2447,26 @@ class TestEvolutionEngine:
         )
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
         opened: list[str] = []
-        messages: list[str] = []
+        inboxes: list[tuple[str, str]] = []
         app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
-        app._show_system_message = messages.append  # type: ignore[method-assign]
+        app._show_self_evolution_inbox = (  # type: ignore[method-assign]
+            lambda inbox, report: inboxes.append((inbox, report))
+        )
 
         app._run_self_evolution_review()
 
         assert opened == []
-        assert any("# Self-Evolution Inbox" in message for message in messages)
-        assert any("## Blocked Generated Candidates" in message for message in messages)
-        assert any(proposal.id in message for message in messages)
-        assert any(
-            "review=review_blocked_source" in message
-            for message in messages
-        )
-        assert any(
+        assert len(inboxes) == 1
+        inbox_markdown, report_detail = inboxes[0]
+        assert "# Self-Evolution Inbox" in inbox_markdown
+        assert "## Blocked Generated Candidates" in inbox_markdown
+        assert proposal.id in inbox_markdown
+        assert "review=review_blocked_source" in inbox_markdown
+        assert (
             "report=.mewcode/evolution/review_runs/"
-            "review_blocked_source/report.md" in message
-            for message in messages
+            "review_blocked_source/report.md" in inbox_markdown
         )
+        assert "review_blocked_source" in report_detail
 
     def test_tui_self_evolution_review_shows_existing_generated_candidate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2519,26 +2520,27 @@ class TestEvolutionEngine:
         )
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
         opened: list[str] = []
-        messages: list[str] = []
+        inboxes: list[tuple[str, str]] = []
         app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
-        app._show_system_message = messages.append  # type: ignore[method-assign]
+        app._show_self_evolution_inbox = (  # type: ignore[method-assign]
+            lambda inbox, report: inboxes.append((inbox, report))
+        )
 
         app._run_self_evolution_review()
 
         assert opened == []
-        assert any("# Self-Evolution Inbox" in message for message in messages)
-        assert any("## Generated Candidates" in message for message in messages)
-        assert any(proposal.id in message for message in messages)
-        assert any("generated-review-loop" in message for message in messages)
-        assert any(
-            "review=review_generated_source" in message
-            for message in messages
-        )
-        assert any(
+        assert len(inboxes) == 1
+        inbox_markdown, report_detail = inboxes[0]
+        assert "# Self-Evolution Inbox" in inbox_markdown
+        assert "## Generated Candidates" in inbox_markdown
+        assert proposal.id in inbox_markdown
+        assert "generated-review-loop" in inbox_markdown
+        assert "review=review_generated_source" in inbox_markdown
+        assert (
             "report=.mewcode/evolution/review_runs/"
-            "review_generated_source/report.md" in message
-            for message in messages
+            "review_generated_source/report.md" in inbox_markdown
         )
+        assert "review_generated_source" in report_detail
 
     def test_tui_self_evolution_review_inlines_single_review_report(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2604,16 +2606,20 @@ class TestEvolutionEngine:
             ),
         )
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
-        messages: list[str] = []
+        inboxes: list[tuple[str, str]] = []
         app._show_self_evolution_approval = lambda _request_id: None  # type: ignore[method-assign]
-        app._show_system_message = messages.append  # type: ignore[method-assign]
+        app._show_self_evolution_inbox = (  # type: ignore[method-assign]
+            lambda inbox, report: inboxes.append((inbox, report))
+        )
 
         app._run_self_evolution_review()
 
-        assert any("## Review Report Details" in message for message in messages)
-        assert any("review_detail_source" in message for message in messages)
-        assert any("# Fork Reviewer Report" in message for message in messages)
-        assert any("候选 skill 通过了沙盒评测" in message for message in messages)
+        assert len(inboxes) == 1
+        inbox_markdown, report_detail = inboxes[0]
+        assert "## Review Report Details" not in inbox_markdown
+        assert "review_detail_source" in report_detail
+        assert "# Fork Reviewer Report" in report_detail
+        assert "候选 skill 通过了沙盒评测" in report_detail
 
     def test_tui_self_evolution_review_report_detail_rejects_escaped_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2662,18 +2668,19 @@ class TestEvolutionEngine:
             ),
         )
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
-        messages: list[str] = []
+        inboxes: list[tuple[str, str]] = []
         app._show_self_evolution_approval = lambda _request_id: None  # type: ignore[method-assign]
-        app._show_system_message = messages.append  # type: ignore[method-assign]
+        app._show_self_evolution_inbox = (  # type: ignore[method-assign]
+            lambda inbox, report: inboxes.append((inbox, report))
+        )
 
         app._run_self_evolution_review()
 
-        assert any("## Review Report Details" in message for message in messages)
-        assert any(
-            "review report path escapes review_runs" in message
-            for message in messages
-        )
-        assert not any("project secret" in message for message in messages)
+        assert len(inboxes) == 1
+        _inbox_markdown, report_detail = inboxes[0]
+        assert "## Review Report Details" in report_detail
+        assert "review report path escapes review_runs" in report_detail
+        assert "project secret" not in report_detail
 
     def test_tui_self_evolution_review_report_detail_sanitizes_missing_report(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2726,18 +2733,19 @@ class TestEvolutionEngine:
             ),
         )
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
-        messages: list[str] = []
+        inboxes: list[tuple[str, str]] = []
         app._show_self_evolution_approval = lambda _request_id: None  # type: ignore[method-assign]
-        app._show_system_message = messages.append  # type: ignore[method-assign]
+        app._show_self_evolution_inbox = (  # type: ignore[method-assign]
+            lambda inbox, report: inboxes.append((inbox, report))
+        )
 
         app._run_self_evolution_review()
 
-        assert any("## Review Report Details" in message for message in messages)
-        assert any(
-            "report missing for review_missing_source" in message
-            for message in messages
-        )
-        assert not any(str(tmp_path) in message for message in messages)
+        assert len(inboxes) == 1
+        _inbox_markdown, report_detail = inboxes[0]
+        assert "## Review Report Details" in report_detail
+        assert "report missing for review_missing_source" in report_detail
+        assert str(tmp_path) not in report_detail
 
     def test_tui_self_evolution_review_report_detail_sanitizes_unknown_run(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2860,18 +2868,22 @@ class TestEvolutionEngine:
             ),
         )
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
-        messages: list[str] = []
+        inboxes: list[tuple[str, str]] = []
         app._show_self_evolution_approval = lambda _request_id: None  # type: ignore[method-assign]
-        app._show_system_message = messages.append  # type: ignore[method-assign]
+        app._show_self_evolution_inbox = (  # type: ignore[method-assign]
+            lambda inbox, report: inboxes.append((inbox, report))
+        )
 
         app._run_self_evolution_review()
 
-        assert any("## Review Report Details" in message for message in messages)
-        assert any("multiple review runs" in message for message in messages)
-        assert any("review_first_source" in message for message in messages)
-        assert any("review_second_source" in message for message in messages)
-        assert not any("first report secret" in message for message in messages)
-        assert not any("second report secret" in message for message in messages)
+        assert len(inboxes) == 1
+        _inbox_markdown, report_detail = inboxes[0]
+        assert "## Review Report Details" in report_detail
+        assert "multiple review runs" in report_detail
+        assert "review_first_source" in report_detail
+        assert "review_second_source" in report_detail
+        assert "first report secret" not in report_detail
+        assert "second report secret" not in report_detail
 
     def test_tui_self_evolution_review_drops_legacy_short_summary_formatter(
         self, monkeypatch: pytest.MonkeyPatch
@@ -2881,6 +2893,48 @@ class TestEvolutionEngine:
 
         assert not hasattr(MewCodeApp, "_format_self_evolution_inbox_message")
         assert not hasattr(MewCodeApp, "_format_self_evolution_source_part")
+
+    def test_tui_self_evolution_inbox_response_views_report_or_dismisses(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.app import MewCodeApp
+        from mewcode.config import ProviderConfig
+        from mewcode.self_evolution_dialog import (
+            InlineSelfEvolutionInboxWidget,
+            SelfEvolutionInboxChoice,
+        )
+
+        app = MewCodeApp(
+            providers=[
+                ProviderConfig(
+                    name="test",
+                    protocol="openai",
+                    base_url="https://example.invalid",
+                    model="test-model",
+                )
+            ],
+        )
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        app.on_inline_self_evolution_inbox_widget_responded(
+            InlineSelfEvolutionInboxWidget.Responded(
+                SelfEvolutionInboxChoice.VIEW_REPORT,
+                "# Review Report Details\n\ncanary passed",
+            )
+        )
+
+        assert messages == ["# Review Report Details\n\ncanary passed"]
+
+        messages.clear()
+        app.on_inline_self_evolution_inbox_widget_responded(
+            InlineSelfEvolutionInboxWidget.Responded(
+                SelfEvolutionInboxChoice.DISMISS,
+            )
+        )
+
+        assert messages == []
 
     def test_tui_skill_approval_response_approves_and_reloads_skills(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

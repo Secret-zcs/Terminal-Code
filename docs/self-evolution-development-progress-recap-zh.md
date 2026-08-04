@@ -3300,3 +3300,52 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_inb
 
 - 把 app fallback 中的 self-evolution inbox 系统消息切到 `InlineSelfEvolutionInboxWidget`。
 - 处理 widget 的 `VIEW_REPORT` 事件，让用户按需查看 report detail，而不是自动展开。
+
+## 65. 最新推进记录：TUI Fallback 接入可选择 Inbox Widget
+
+日期：2026-08-04
+
+本次把 self-evolution TUI fallback 从系统消息切到 `InlineSelfEvolutionInboxWidget`。此前没有 pending approval request 时，TUI 会直接把完整 inbox 和 report detail 作为系统消息展示；现在 app 会把 inbox Markdown 和 report detail Markdown 分开传入 widget，用户先看到 inbox 列表，只有选择 `View report details` 时才显示报告内容。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：更新 blocked/generated/inbox report 相关 fallback 测试，要求 app 调用 `_show_self_evolution_inbox(inbox_markdown, report_detail_markdown)`。
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_inbox_response_views_report_or_dismisses`，覆盖 `VIEW_REPORT` 显示报告、`DISMISS` 不改变状态也不显示报告。
+- 修改 `mewcode/app.py`：`_run_self_evolution_review()` 改为调用 `_show_self_evolution_inbox()`。
+- 修改 `mewcode/app.py`：新增 `_mount_self_evolution_inbox()` 和 `on_inline_self_evolution_inbox_widget_responded()`。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 widget 接入、按需查看报告和安全边界。
+
+用户能看到什么：
+
+- 没有 pending approval request 时，TUI 显示可选择的 self-evolution inbox widget。
+- inbox 列表不再自动混入 report detail。
+- 选择 `View report details` 后才显示 report Markdown。
+- 选择 `Dismiss inbox` 只关闭/忽略当前展示，不修改候选状态。
+
+安全边界：
+
+- 不改变 approval request、promote、rollback、quarantine 或 trusted-auto 行为。
+- 不新增用户命令。
+- report 仍由 engine/app 读取和脱敏后传给 widget。
+- dismiss 不 approve、不 reject、不 quarantine。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_inlines_single_review_report -q
+2 failed  # 实现前红灯：app 仍走 _show_system_message()
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_inlines_single_review_report -q
+2 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_response_views_report_or_dismisses -q
+1 failed  # 实现前红灯：app 缺少 inbox widget 响应处理器
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_response_views_report_or_dismisses -q
+1 passed
+```
+
+下一步计划：
+
+- 给 `_mount_self_evolution_inbox()` 补挂载层测试，确认输入框禁用/恢复行为。
+- 清理 TUI fallback 测试重复样板。

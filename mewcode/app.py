@@ -1646,6 +1646,33 @@ class MewCodeApp(App):
             self._reload_skill_catalog_after_self_evolution()
         self._show_system_message(f"Self-evolution approval {message}")
 
+    def on_inline_self_evolution_inbox_widget_responded(
+        self, event: "InlineSelfEvolutionInboxWidget.Responded"
+    ) -> None:
+        from mewcode.self_evolution_dialog import (
+            InlineSelfEvolutionInboxWidget,
+            SelfEvolutionInboxChoice,
+        )
+
+        try:
+            self.query_one(
+                "#self-evolution-inbox-inline",
+                InlineSelfEvolutionInboxWidget,
+            ).remove()
+        except Exception:
+            pass
+        try:
+            self.query_one("#chat-input").disabled = False
+            self.query_one("#chat-input").focus()
+        except Exception:
+            pass
+
+        if (
+            event.choice == SelfEvolutionInboxChoice.VIEW_REPORT
+            and event.report_markdown.strip()
+        ):
+            self._show_system_message(event.report_markdown)
+
     def _reload_skill_catalog_after_self_evolution(self) -> None:
         if self.skill_loader is None:
             return
@@ -2006,9 +2033,7 @@ class MewCodeApp(App):
                     engine,
                     inbox,
                 )
-                if report_detail:
-                    inbox_message = f"{inbox_message.rstrip()}\n\n{report_detail}"
-                self._show_system_message(inbox_message)
+                self._show_self_evolution_inbox(inbox_message, report_detail)
                 return
         message = format_review_notification(result)
         if message:
@@ -2067,6 +2092,37 @@ class MewCodeApp(App):
         if message.startswith("review run ") and message.endswith(" not found"):
             return f"review run unavailable: {review_run_id}"
         return message
+
+    def _show_self_evolution_inbox(
+        self,
+        inbox_markdown: str,
+        report_detail_markdown: str = "",
+    ) -> None:
+        asyncio.ensure_future(
+            self._mount_self_evolution_inbox(
+                inbox_markdown,
+                report_detail_markdown,
+            )
+        )
+
+    async def _mount_self_evolution_inbox(
+        self,
+        inbox_markdown: str,
+        report_detail_markdown: str = "",
+    ) -> None:
+        from mewcode.self_evolution_dialog import InlineSelfEvolutionInboxWidget
+
+        chat = self.query_one("#chat-area", VerticalScroll)
+        widget = InlineSelfEvolutionInboxWidget(
+            inbox_markdown,
+            report_detail_markdown,
+        )
+        await chat.mount(widget)
+        self.call_after_refresh(chat.scroll_end, animate=False)
+        try:
+            self.query_one("#chat-input").disabled = True
+        except Exception:
+            pass
 
     def _show_self_evolution_approval(self, request_id: str) -> None:
         if self.agent is None:
