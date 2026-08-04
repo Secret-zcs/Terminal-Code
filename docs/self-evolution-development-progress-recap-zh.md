@@ -3465,3 +3465,42 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 清理 self-evolution TUI fallback 测试的重复 app 构造代码。
 - 继续补充用户可见 inbox 状态的边界测试，例如没有 report detail 时只显示 dismiss 动作。
+
+## 69. 最新推进记录：Self-Evolution TUI 测试 App 构造 Helper
+
+日期：2026-08-04
+
+本次清理 `tests/test_evolution.py` 中 self-evolution TUI fallback 测试的重复 app 构造代码。此前每个测试都手写 `MewCodeApp(providers=[ProviderConfig(...)])`，导致新增 inbox/approval 测试时需要复制十几行样板，后续修改测试 provider 配置也容易漏改。现在新增 `_make_test_mewcode_app()` helper，统一生成测试用 app；需要配置 self-evolution approval mode 的测试仍通过参数传入。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `_make_test_mewcode_app(**kwargs)`。
+- 修改 `tests/test_evolution.py`：将 self-evolution approval、fallback inbox、report detail、pending 去重、挂载失败、输入框状态和 skill approval 响应测试切到 helper。
+- 保留直接使用 `MewCodeApp` 静态方法的测试，不强行抽象。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档测试结构清理。
+
+用户能看到什么：
+
+- 运行时行为不变。
+- 后续新增 self-evolution TUI 测试更短、更集中，减少重复 provider 配置。
+
+安全边界：
+
+- 不修改生产代码。
+- 不改变 candidate、review run、approval request、promote、rollback、quarantine 或 trusted-auto 行为。
+- 只清理测试结构。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py -q
+110 passed  # 重构前基线
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_approval_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_mount_disables_and_restores_input tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+4 passed
+```
+
+下一步计划：
+
+- 补充 no report detail 场景下 inbox widget 只显示 `Dismiss inbox` 的边界测试。
+- 继续检查 self-evolution TUI 事件是否存在重复弹窗或状态泄露。

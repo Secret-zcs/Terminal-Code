@@ -1643,3 +1643,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_mount_disables_and_restores_input -q
 1 passed
 ```
+
+## Self-Evolution TUI 测试 App 构造 Helper
+
+本次清理 `tests/test_evolution.py` 中 self-evolution TUI fallback 测试的重复 app 构造代码，新增 `_make_test_mewcode_app(**kwargs)` 统一创建测试用 `MewCodeApp`。需要开启 manual approval 的测试继续通过 `self_evolution_config` 参数传入。
+
+行为边界：
+
+- 只改测试结构。
+- 运行时 self-evolution 行为不变。
+- 直接测试 `MewCodeApp` 静态 helper 的用例仍保留直接导入。
+
+安全策略：
+
+- 不改变 approval、promote、rollback、quarantine 或 trusted-auto 逻辑。
+- 不修改 candidate 或 review run 存储。
+- 不新增用户命令。
+- 不修改生产代码。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py -q
+110 passed  # 重构前基线
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_approval_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_mount_disables_and_restores_input tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+4 passed
+```

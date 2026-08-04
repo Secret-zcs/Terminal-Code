@@ -84,6 +84,23 @@ def _install_fake_mcp(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _make_test_mewcode_app(**kwargs):
+    from mewcode.app import MewCodeApp
+    from mewcode.config import ProviderConfig
+
+    return MewCodeApp(
+        providers=[
+            ProviderConfig(
+                name="test",
+                protocol="openai",
+                base_url="https://example.invalid",
+                model="test-model",
+            )
+        ],
+        **kwargs,
+    )
+
+
 def _add_debug_eval_case(engine: EvolutionEngine, proposal_id: str) -> str:
     return engine.add_eval_case(
         proposal_id,
@@ -2324,20 +2341,11 @@ class TestEvolutionEngine:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _install_fake_mcp(monkeypatch)
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+        from mewcode.config import SelfEvolutionConfig
 
         engine = EvolutionEngine(tmp_path)
         _make_ready_skill_candidate(engine)
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
+        app = _make_test_mewcode_app(
             self_evolution_config=SelfEvolutionConfig(
                 enabled=True,
                 skill_approval_mode="manual",
@@ -2358,21 +2366,12 @@ class TestEvolutionEngine:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _install_fake_mcp(monkeypatch)
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+        from mewcode.config import SelfEvolutionConfig
 
         engine = EvolutionEngine(tmp_path)
         proposal = _make_ready_skill_candidate(engine)
         request = engine.submit_skill_approval_request(proposal.id)
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
+        app = _make_test_mewcode_app(
             self_evolution_config=SelfEvolutionConfig(
                 enabled=True,
                 skill_approval_mode="manual",
@@ -2392,8 +2391,7 @@ class TestEvolutionEngine:
     ) -> None:
         _install_fake_mcp(monkeypatch)
         import mewcode.app as app_module
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+        from mewcode.config import SelfEvolutionConfig
         from mewcode.evolution.models import SelfEvolutionReviewRun
 
         engine = EvolutionEngine(tmp_path)
@@ -2432,15 +2430,7 @@ class TestEvolutionEngine:
             "review_ready_skill_candidates",
             lambda *_args, **_kwargs: {"status": "idle", "requests": []},
         )
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
+        app = _make_test_mewcode_app(
             self_evolution_config=SelfEvolutionConfig(
                 enabled=True,
                 skill_approval_mode="manual",
@@ -2474,8 +2464,7 @@ class TestEvolutionEngine:
     ) -> None:
         _install_fake_mcp(monkeypatch)
         import mewcode.app as app_module
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+        from mewcode.config import SelfEvolutionConfig
         from mewcode.evolution.models import SelfEvolutionReviewRun
 
         engine = EvolutionEngine(tmp_path)
@@ -2505,15 +2494,7 @@ class TestEvolutionEngine:
             "review_ready_skill_candidates",
             lambda *_args, **_kwargs: {"status": "idle", "requests": []},
         )
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
+        app = _make_test_mewcode_app(
             self_evolution_config=SelfEvolutionConfig(
                 enabled=True,
                 skill_approval_mode="manual",
@@ -2548,8 +2529,7 @@ class TestEvolutionEngine:
     ) -> None:
         _install_fake_mcp(monkeypatch)
         import mewcode.app as app_module
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+        from mewcode.config import SelfEvolutionConfig
         from mewcode.evolution.models import SelfEvolutionReviewRun
 
         engine = EvolutionEngine(tmp_path)
@@ -2592,15 +2572,7 @@ class TestEvolutionEngine:
             "review_ready_skill_candidates",
             lambda *_args, **_kwargs: {"status": "idle", "requests": []},
         )
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
+        app = _make_test_mewcode_app(
             self_evolution_config=SelfEvolutionConfig(
                 enabled=True,
                 skill_approval_mode="manual",
@@ -2627,8 +2599,7 @@ class TestEvolutionEngine:
     ) -> None:
         _install_fake_mcp(monkeypatch)
         import mewcode.app as app_module
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+        from mewcode.config import SelfEvolutionConfig
         from mewcode.evolution.models import SelfEvolutionReviewRun
 
         engine = EvolutionEngine(tmp_path)
@@ -2654,15 +2625,7 @@ class TestEvolutionEngine:
             "review_ready_skill_candidates",
             lambda *_args, **_kwargs: {"status": "idle", "requests": []},
         )
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
+        app = _make_test_mewcode_app(
             self_evolution_config=SelfEvolutionConfig(
                 enabled=True,
                 skill_approval_mode="manual",
@@ -2688,8 +2651,7 @@ class TestEvolutionEngine:
     ) -> None:
         _install_fake_mcp(monkeypatch)
         import mewcode.app as app_module
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+        from mewcode.config import SelfEvolutionConfig
         from mewcode.evolution.models import SelfEvolutionReviewRun
 
         engine = EvolutionEngine(tmp_path)
@@ -2719,15 +2681,7 @@ class TestEvolutionEngine:
             "review_ready_skill_candidates",
             lambda *_args, **_kwargs: {"status": "idle", "requests": []},
         )
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
+        app = _make_test_mewcode_app(
             self_evolution_config=SelfEvolutionConfig(
                 enabled=True,
                 skill_approval_mode="manual",
@@ -2804,8 +2758,7 @@ class TestEvolutionEngine:
     ) -> None:
         _install_fake_mcp(monkeypatch)
         import mewcode.app as app_module
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig, SelfEvolutionConfig
+        from mewcode.config import SelfEvolutionConfig
         from mewcode.evolution.models import SelfEvolutionReviewRun
 
         engine = EvolutionEngine(tmp_path)
@@ -2854,15 +2807,7 @@ class TestEvolutionEngine:
             "review_ready_skill_candidates",
             lambda *_args, **_kwargs: {"status": "idle", "requests": []},
         )
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
+        app = _make_test_mewcode_app(
             self_evolution_config=SelfEvolutionConfig(
                 enabled=True,
                 skill_approval_mode="manual",
@@ -2899,23 +2844,12 @@ class TestEvolutionEngine:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _install_fake_mcp(monkeypatch)
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig
         from mewcode.self_evolution_dialog import (
             InlineSelfEvolutionInboxWidget,
             SelfEvolutionInboxChoice,
         )
 
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
-        )
+        app = _make_test_mewcode_app()
         messages: list[str] = []
         app._show_system_message = messages.append  # type: ignore[method-assign]
 
@@ -2942,23 +2876,12 @@ class TestEvolutionEngine:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _install_fake_mcp(monkeypatch)
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig
         from mewcode.self_evolution_dialog import (
             InlineSelfEvolutionInboxWidget,
             SelfEvolutionInboxChoice,
         )
 
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
-        )
+        app = _make_test_mewcode_app()
         mounted: list[tuple[str, str]] = []
 
         async def fake_mount(inbox: str, report: str = "") -> None:
@@ -2990,19 +2913,8 @@ class TestEvolutionEngine:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _install_fake_mcp(monkeypatch)
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig
 
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
-        )
+        app = _make_test_mewcode_app()
         attempts: list[tuple[str, str]] = []
 
         async def failing_mount(inbox: str, report: str = "") -> None:
@@ -3029,8 +2941,6 @@ class TestEvolutionEngine:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _install_fake_mcp(monkeypatch)
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig
         from mewcode.self_evolution_dialog import (
             InlineSelfEvolutionInboxWidget,
             SelfEvolutionInboxChoice,
@@ -3062,16 +2972,7 @@ class TestEvolutionEngine:
             def remove(self) -> None:
                 self.removed = True
 
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
-        )
+        app = _make_test_mewcode_app()
         chat = FakeChat()
         chat_input = FakeInput()
         inline = FakeInline()
@@ -3110,8 +3011,6 @@ class TestEvolutionEngine:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _install_fake_mcp(monkeypatch)
-        from mewcode.app import MewCodeApp
-        from mewcode.config import ProviderConfig
         from mewcode.self_evolution_dialog import (
             InlineSkillApprovalWidget,
             SkillApprovalChoice,
@@ -3120,16 +3019,7 @@ class TestEvolutionEngine:
         engine = EvolutionEngine(tmp_path)
         proposal = _make_ready_skill_candidate(engine)
         request = engine.submit_skill_approval_request(proposal.id)
-        app = MewCodeApp(
-            providers=[
-                ProviderConfig(
-                    name="test",
-                    protocol="openai",
-                    base_url="https://example.invalid",
-                    model="test-model",
-                )
-            ],
-        )
+        app = _make_test_mewcode_app()
         app.agent = SimpleNamespace(work_dir=str(tmp_path), set_skill_catalog=MagicMock())
         app.skill_loader = SimpleNamespace(
             reload=MagicMock(),
