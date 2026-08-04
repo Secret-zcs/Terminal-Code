@@ -3349,3 +3349,44 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 给 `_mount_self_evolution_inbox()` 补挂载层测试，确认输入框禁用/恢复行为。
 - 清理 TUI fallback 测试重复样板。
+
+## 66. 最新推进记录：Self-Evolution Inbox 去重展示
+
+日期：2026-08-04
+
+本次修复 TUI fallback 的重复 inbox 展示问题。此前如果同一个 generated/blocked candidate 在多轮 assistant 响应后仍未被处理，`_run_self_evolution_review()` 会再次渲染同一个 inbox，导致聊天区出现重复 widget，并可能让用户误以为产生了新的候选项。现在 app 会记录当前待处理 inbox 的内容 key；同内容未响应前只展示一次，用户选择 `View report details` 或 `Dismiss inbox` 后才允许下一次展示。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_inbox_deduplicates_pending_display`，覆盖同一 inbox 未处理前不会重复挂载、响应后可再次展示。
+- 修改 `mewcode/app.py`：新增 `_pending_self_evolution_inbox_key` 状态字段。
+- 修改 `mewcode/app.py`：`_show_self_evolution_inbox()` 对同一 `inbox_markdown + report_detail_markdown` 做 pending 去重。
+- 修改 `mewcode/app.py`：`on_inline_self_evolution_inbox_widget_responded()` 在用户响应后清理 pending key。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档本次去重策略、行为边界和验证结果。
+
+用户能看到什么：
+
+- 同一个 self-evolution inbox 不会在多轮响应后重复刷屏。
+- 用户处理当前 inbox 后，后续仍可以再次展示新的或同一个 inbox。
+- `View report details` 和 `Dismiss inbox` 仍不改变 candidate 状态。
+
+安全边界：
+
+- 不改变 candidate 生成、评测、审批、promote、rollback、quarantine 或 trusted-auto 行为。
+- 不新增用户命令。
+- 只影响 TUI 展示去重，不影响 engine 存储状态。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display -q
+1 failed  # 实现前红灯：同一 inbox 被挂载两次
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display -q
+1 passed
+```
+
+下一步计划：
+
+- 补 `_mount_self_evolution_inbox()` 挂载层测试，确认输入框禁用与恢复行为。
+- 继续减少 TUI self-evolution fallback 测试样板。

@@ -639,6 +639,7 @@ class MewCodeApp(App):
         self._mcp_connecting: bool = False
         self._teammate_tree: TeammateTree | None = None
         self._teammate_timer = None
+        self._pending_self_evolution_inbox_key: tuple[str, str] | None = None
 
     @staticmethod
     def _make_banner(model: str = "", work_dir: str = "") -> RichText:
@@ -1666,6 +1667,7 @@ class MewCodeApp(App):
             self.query_one("#chat-input").focus()
         except Exception:
             pass
+        self._pending_self_evolution_inbox_key = None
 
         if (
             event.choice == SelfEvolutionInboxChoice.VIEW_REPORT
@@ -2098,6 +2100,10 @@ class MewCodeApp(App):
         inbox_markdown: str,
         report_detail_markdown: str = "",
     ) -> None:
+        inbox_key = (inbox_markdown.strip(), report_detail_markdown.strip())
+        if self._pending_self_evolution_inbox_key == inbox_key:
+            return
+        self._pending_self_evolution_inbox_key = inbox_key
         asyncio.ensure_future(
             self._mount_self_evolution_inbox(
                 inbox_markdown,

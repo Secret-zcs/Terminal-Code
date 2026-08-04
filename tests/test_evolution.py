@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import sys
@@ -2935,6 +2936,54 @@ class TestEvolutionEngine:
         )
 
         assert messages == []
+
+    @pytest.mark.asyncio
+    async def test_tui_self_evolution_inbox_deduplicates_pending_display(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.app import MewCodeApp
+        from mewcode.config import ProviderConfig
+        from mewcode.self_evolution_dialog import (
+            InlineSelfEvolutionInboxWidget,
+            SelfEvolutionInboxChoice,
+        )
+
+        app = MewCodeApp(
+            providers=[
+                ProviderConfig(
+                    name="test",
+                    protocol="openai",
+                    base_url="https://example.invalid",
+                    model="test-model",
+                )
+            ],
+        )
+        mounted: list[tuple[str, str]] = []
+
+        async def fake_mount(inbox: str, report: str = "") -> None:
+            mounted.append((inbox, report))
+
+        app._mount_self_evolution_inbox = fake_mount  # type: ignore[method-assign]
+
+        app._show_self_evolution_inbox("# Self-Evolution Inbox", "report")
+        app._show_self_evolution_inbox("# Self-Evolution Inbox", "report")
+        await asyncio.sleep(0)
+
+        assert mounted == [("# Self-Evolution Inbox", "report")]
+
+        app.on_inline_self_evolution_inbox_widget_responded(
+            InlineSelfEvolutionInboxWidget.Responded(
+                SelfEvolutionInboxChoice.DISMISS,
+            )
+        )
+        app._show_self_evolution_inbox("# Self-Evolution Inbox", "report")
+        await asyncio.sleep(0)
+
+        assert mounted == [
+            ("# Self-Evolution Inbox", "report"),
+            ("# Self-Evolution Inbox", "report"),
+        ]
 
     def test_tui_skill_approval_response_approves_and_reloads_skills(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

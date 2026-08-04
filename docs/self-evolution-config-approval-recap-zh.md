@@ -1565,3 +1565,31 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_response_views_report_or_dismisses -q
 1 passed
 ```
+
+## Self-Evolution Inbox 去重展示
+
+self-evolution TUI fallback 现在会避免重复展示同一个待处理 inbox。如果同一份 `inbox_markdown` 和 `report_detail_markdown` 已经挂载且用户还没有响应，后续 review tick 不会再次插入相同 widget。用户选择 `View report details` 或 `Dismiss inbox` 后，pending key 会被清理，后续可以再次展示。
+
+行为边界：
+
+- 只去重同内容的 pending inbox。
+- 新内容仍可展示。
+- 用户响应后允许再次展示。
+- `Dismiss inbox` 不改变候选状态。
+
+安全策略：
+
+- 不 approve、reject、promote、rollback 或 quarantine。
+- 不新增用户命令。
+- 不改变 engine 存储和 review run 记录。
+- 只影响 TUI 展示层，避免重复刷屏。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display -q
+1 failed  # 实现前红灯：同一 inbox 会重复挂载
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display -q
+1 passed
+```
