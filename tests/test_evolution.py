@@ -1217,6 +1217,31 @@ class TestEvolutionEngine:
         assert top.id in markdown
         assert hidden.id not in markdown
 
+    def test_render_skill_candidate_task_match_audit_shows_all_matches(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        first = engine.propose_skill(
+            name="review-loop",
+            description="自进化复盘审批报告整理流程",
+            body="# 任务\n\n整理自进化复盘审批报告，记录测试结果和修改理由。\n",
+        )
+        second = engine.propose_skill(
+            name="recap-loop",
+            description="自进化复盘整理流程",
+            body="# 任务\n\n整理自进化复盘。\n",
+        )
+
+        markdown = engine.render_skill_candidate_task_match_audit(
+            "继续整理自进化复盘审批报告，并说明测试结果。"
+        )
+
+        assert "# Self-Evolution Candidate Skill Match Audit" in markdown
+        assert "Total matches: `2`" in markdown
+        assert first.id in markdown
+        assert second.id in markdown
+        assert "Runtime: not auto-activated" in markdown
+
     def test_read_self_evolution_review_report_returns_markdown(
         self, tmp_path: Path
     ) -> None:

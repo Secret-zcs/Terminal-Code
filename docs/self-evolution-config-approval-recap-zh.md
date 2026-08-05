@@ -2143,3 +2143,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_summarizes_hidden_matches tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_only_top_self_evolution_candidate_match tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
 3 passed
 ```
+
+## Self-Evolution 匹配完整审计报告
+
+本次新增完整匹配审计报告 API：`render_skill_candidate_task_match_audit(task)`。它展示所有达到阈值的候选 skill，而不是只展示主对话 Top 1。
+
+审批影响：
+
+- audit report 不会审批候选。
+- audit report 不会启用候选。
+- audit report 只帮助用户查看被 Top 1 折叠掉的候选详情。
+
+安全策略：
+
+- 每个候选仍显示 eval、execution eval、approval 和 `Runtime: not auto-activated`。
+- 不修改 candidate manifest 或 approval request。
+- 不改变主对话 Top 1 展示策略。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_match_audit_shows_all_matches -q
+1 failed  # 实现前红灯：缺少 render_skill_candidate_task_match_audit API
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_match_audit_shows_all_matches tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_summarizes_hidden_matches -q
+2 passed
+```

@@ -4206,3 +4206,41 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 
 - 给隐藏候选提供单独审计报告入口，而不是只显示数量。
 - 继续完善匹配报告与审批入口之间的跳转能力。
+
+## 88. 最新推进记录：候选 Skill 匹配完整审计报告 API
+
+日期：2026-08-05
+
+本次为 Top 1 匹配提示补上完整审计入口。上一轮报告已经显示 `Hidden matches`，但用户还没有办法查看被隐藏候选的完整列表。现在新增 `render_skill_candidate_task_match_audit()`，它会展示所有达到阈值的候选 skill，包括分数、匹配词、eval/execution/approval gate、approval request、candidate path 和 next action。该 API 只读，不接入主对话自动展示。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_render_skill_candidate_task_match_audit_shows_all_matches`，覆盖 audit report 展示全部匹配候选。
+- 修改 `mewcode/evolution/engine.py`：新增 `render_skill_candidate_task_match_audit()`。
+
+用户能看到什么：
+
+- 主对话仍只显示 Top 1。
+- 完整审计报告可以展示所有匹配候选，解决“隐藏候选只有数量，没有详情”的问题。
+- 每个候选仍显示 `Runtime: not auto-activated`。
+
+安全边界：
+
+- audit report 只读，不修改状态。
+- 不自动 approve、promote、activate 或 reject。
+- 不改变 TUI 主对话展示策略。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_match_audit_shows_all_matches -q
+1 failed  # 实现前红灯：缺少 render_skill_candidate_task_match_audit API
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_match_audit_shows_all_matches tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_summarizes_hidden_matches -q
+2 passed
+```
+
+下一步计划：
+
+- 把 audit report 接到一个非自动触发的 self-evolution 面板或报告详情中。
+- 继续减少重复渲染代码，把 match item 的 Markdown 渲染抽成 helper。

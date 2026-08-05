@@ -1346,6 +1346,51 @@ class EvolutionEngine:
             ])
         return "\n".join(lines).rstrip() + "\n"
 
+    def render_skill_candidate_task_match_audit(
+        self,
+        task: str,
+        *,
+        minimum_score: int = 2,
+    ) -> str:
+        matches = self.match_skill_candidates_for_task(
+            task,
+            limit=10_000,
+            minimum_score=minimum_score,
+        )
+        if not matches:
+            return ""
+        lines = [
+            "# Self-Evolution Candidate Skill Match Audit",
+            "",
+            f"- Task: {task.strip()}",
+            f"- Total matches: `{len(matches)}`",
+            "- Safety: audit is read-only; candidates are not auto-activated.",
+            "",
+            "## Matches",
+            "",
+        ]
+        for match in matches:
+            terms = ", ".join(match.get("matched_terms", [])) or "(none)"
+            approval = str(match.get("approval_status") or "(none)")
+            approval_request_id = str(match.get("approval_request_id") or "").strip()
+            next_action = self._skill_candidate_match_next_action(match)
+            lines.extend([
+                f"### {match.get('skill_name')}",
+                "",
+                f"- Proposal: `{match.get('proposal_id')}`",
+                f"- Score: `{match.get('score')}`",
+                f"- Matched terms: {terms}",
+                f"- Eval: `{match.get('eval_status')}`",
+                f"- Execution eval: `{match.get('execution_eval_status')}`",
+                f"- Approval: `{approval}`",
+                f"- Approval request: `{approval_request_id or '(none)'}`",
+                f"- Candidate: `{match.get('candidate_skill')}`",
+                f"- Next action: {next_action}",
+                "- Runtime: not auto-activated",
+                "",
+            ])
+        return "\n".join(lines).rstrip() + "\n"
+
     @staticmethod
     def _skill_candidate_match_next_action(match: dict) -> str:
         approval = str(match.get("approval_status") or "").strip()
