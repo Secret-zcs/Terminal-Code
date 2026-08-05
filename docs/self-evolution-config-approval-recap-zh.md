@@ -2290,3 +2290,35 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 python3 -m py_compile mewcode/app.py
 passed
 ```
+
+## 自进化卡片选项渲染重构
+
+本次把 self-evolution 卡片的选项渲染和光标边界逻辑抽成 `_render_choice_lines()` 与 `_move_choice_cursor()`，供 approval、inbox 和 match card 复用。
+
+审批影响：
+
+- 审批模式和审批 gate 没有变化。
+- `Approve`、`Reject`、`Open pending approval`、`View all matches`、`Dismiss` 的行为保持不变。
+- 该改动只减少 TUI 重复代码，不改变 candidate 状态流转。
+
+安全策略：
+
+- 统一光标 clamp，避免不同卡片在边界行为上出现分叉。
+- 统一选项渲染，避免后续新增自进化卡片时遗漏选中态或弱化态展示。
+- 不触碰 eval、execution eval、approval store、candidate manifest 或 project skill 文件。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_render_choice_lines_marks_selected_option tests/test_self_evolution_dialog.py::test_move_choice_cursor_clamps_to_option_bounds -q
+1 error  # 修复前 helper 不存在
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_render_choice_lines_marks_selected_option tests/test_self_evolution_dialog.py::test_move_choice_cursor_clamps_to_option_bounds -q
+2 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py -q
+10 passed
+
+python3 -m py_compile mewcode/self_evolution_dialog.py
+passed
+```

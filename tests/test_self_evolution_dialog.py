@@ -9,6 +9,8 @@ from mewcode.self_evolution_dialog import (
     SelfEvolutionInboxChoice,
     SelfEvolutionMatchChoice,
     SkillApprovalChoice,
+    _move_choice_cursor,
+    _render_choice_lines,
 )
 
 
@@ -47,6 +49,25 @@ def test_skill_approval_widget_emits_approve_and_reject_choices() -> None:
 
     assert captured[-1].choice == SkillApprovalChoice.REJECT
     assert captured[-1].reason == "ri"
+
+
+def test_render_choice_lines_marks_selected_option() -> None:
+    lines = _render_choice_lines([
+        ("First action", object()),
+        ("Second action", object()),
+    ], cursor=1)
+
+    assert lines == [
+        "   1. [dim]First action[/dim]",
+        " > 2. [bold]Second action[/bold]",
+    ]
+
+
+def test_move_choice_cursor_clamps_to_option_bounds() -> None:
+    assert _move_choice_cursor(cursor=0, delta=-1, option_count=2) == 0
+    assert _move_choice_cursor(cursor=0, delta=1, option_count=2) == 1
+    assert _move_choice_cursor(cursor=1, delta=1, option_count=2) == 1
+    assert _move_choice_cursor(cursor=0, delta=1, option_count=0) == 0
 
 
 def test_self_evolution_inbox_widget_shows_inbox_and_actions() -> None:

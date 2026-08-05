@@ -4424,3 +4424,49 @@ passed
 
 - 抽出 inbox/match card 共用的选项渲染和光标移动逻辑，降低后续新增自进化卡片时的重复代码。
 - 给 `_show_self_evolution_approval()` 的返回值语义补更直接的单元测试，覆盖 duplicate pending request 和 agent 缺失场景。
+
+## 93. 最新推进记录：抽取自进化卡片选项渲染与光标边界逻辑
+
+日期：2026-08-05
+
+本次把 self-evolution TUI 卡片里重复的选项渲染和上下键光标边界逻辑抽成私有 helper。`InlineSkillApprovalWidget`、`InlineSelfEvolutionInboxWidget` 和 `InlineSelfEvolutionMatchWidget` 现在复用同一套 `_render_choice_lines()` 与 `_move_choice_cursor()`，减少后续继续增加自进化卡片时复制粘贴造成的状态不一致风险。
+
+修改内容：
+
+- 修改 `tests/test_self_evolution_dialog.py`：新增 `test_render_choice_lines_marks_selected_option`，覆盖选中项 bold、非选中项 dim 的统一渲染格式。
+- 修改 `tests/test_self_evolution_dialog.py`：新增 `test_move_choice_cursor_clamps_to_option_bounds`，覆盖上下移动不越界，以及空选项时返回 0。
+- 修改 `mewcode/self_evolution_dialog.py`：新增 `_render_choice_lines()`，统一输出 `> 1. [bold]...` 和 `1. [dim]...` 选项行。
+- 修改 `mewcode/self_evolution_dialog.py`：新增 `_move_choice_cursor()`，统一处理上移、下移和边界 clamp。
+- 修改 `mewcode/self_evolution_dialog.py`：approval、inbox、match 三类卡片都改为复用 helper，保留原有用户可见文案和事件行为。
+
+用户能看到什么：
+
+- UI 文案和交互保持不变。
+- 后续新增审批、审计或候选提示卡片时，更容易保持同样的选项格式和键盘行为。
+
+安全边界：
+
+- 不改变 self-evolution 审批策略。
+- 不改变候选 skill 的生成、评估、审批、promote 或 quarantine 流程。
+- 这是 TUI 内部重构，只减少重复代码。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_render_choice_lines_marks_selected_option tests/test_self_evolution_dialog.py::test_move_choice_cursor_clamps_to_option_bounds -q
+1 error  # 实现前红灯：缺少 _move_choice_cursor / _render_choice_lines
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_render_choice_lines_marks_selected_option tests/test_self_evolution_dialog.py::test_move_choice_cursor_clamps_to_option_bounds -q
+2 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py -q
+10 passed
+
+python3 -m py_compile mewcode/self_evolution_dialog.py
+passed
+```
+
+下一步计划：
+
+- 给 `_show_self_evolution_approval()` 的返回值语义补直接测试，覆盖 duplicate pending request 和 agent 缺失场景。
+- 继续检查自进化 review/inbox/match 三条 UI 流是否还有状态去重或失败恢复缺口。

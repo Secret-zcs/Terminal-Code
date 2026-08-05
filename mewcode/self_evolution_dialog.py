@@ -31,6 +31,22 @@ _OPTIONS = [
 ]
 
 
+def _render_choice_lines(options: list[tuple[str, object]], cursor: int) -> list[str]:
+    lines: list[str] = []
+    for index, (label, _choice) in enumerate(options):
+        if index == cursor:
+            lines.append(f" > {index + 1}. [bold]{label}[/bold]")
+        else:
+            lines.append(f"   {index + 1}. [dim]{label}[/dim]")
+    return lines
+
+
+def _move_choice_cursor(cursor: int, delta: int, option_count: int) -> int:
+    if option_count <= 0:
+        return 0
+    return max(0, min(cursor + delta, option_count - 1))
+
+
 class InlineSkillApprovalWidget(Vertical, can_focus=True):
     """Inline approval widget for self-evolution skill candidates."""
 
@@ -82,11 +98,7 @@ class InlineSkillApprovalWidget(Vertical, can_focus=True):
             "Do you want to apply this skill?",
             "",
         ]
-        for index, (label, _choice) in enumerate(_OPTIONS):
-            if index == self._cursor:
-                lines.append(f" > {index + 1}. [bold]{label}[/bold]")
-            else:
-                lines.append(f"   {index + 1}. [dim]{label}[/dim]")
+        lines.extend(_render_choice_lines(_OPTIONS, self._cursor))
 
         if self._cursor == 1:
             display = self._reason if self._reason else "[dim]Optional rejection reason...[/dim]"
@@ -101,13 +113,15 @@ class InlineSkillApprovalWidget(Vertical, can_focus=True):
             return
 
     def action_cursor_up(self) -> None:
-        if self._cursor > 0:
-            self._cursor -= 1
+        next_cursor = _move_choice_cursor(self._cursor, -1, len(_OPTIONS))
+        if next_cursor != self._cursor:
+            self._cursor = next_cursor
             self._refresh()
 
     def action_cursor_down(self) -> None:
-        if self._cursor < len(_OPTIONS) - 1:
-            self._cursor += 1
+        next_cursor = _move_choice_cursor(self._cursor, 1, len(_OPTIONS))
+        if next_cursor != self._cursor:
+            self._cursor = next_cursor
             self._refresh()
 
     def action_select(self) -> None:
@@ -186,11 +200,7 @@ class InlineSelfEvolutionInboxWidget(Vertical, can_focus=True):
             "Choose next action:",
             "",
         ]
-        for index, (label, _choice) in enumerate(self._options()):
-            if index == self._cursor:
-                lines.append(f" > {index + 1}. [bold]{label}[/bold]")
-            else:
-                lines.append(f"   {index + 1}. [dim]{label}[/dim]")
+        lines.extend(_render_choice_lines(self._options(), self._cursor))
         return "\n".join(lines)
 
     def _options(self) -> list[tuple[str, SelfEvolutionInboxChoice]]:
@@ -212,13 +222,15 @@ class InlineSelfEvolutionInboxWidget(Vertical, can_focus=True):
             return
 
     def action_cursor_up(self) -> None:
-        if self._cursor > 0:
-            self._cursor -= 1
+        next_cursor = _move_choice_cursor(self._cursor, -1, len(self._options()))
+        if next_cursor != self._cursor:
+            self._cursor = next_cursor
             self._refresh()
 
     def action_cursor_down(self) -> None:
-        if self._cursor < len(self._options()) - 1:
-            self._cursor += 1
+        next_cursor = _move_choice_cursor(self._cursor, 1, len(self._options()))
+        if next_cursor != self._cursor:
+            self._cursor = next_cursor
             self._refresh()
 
     def action_select(self) -> None:
@@ -285,11 +297,7 @@ class InlineSelfEvolutionMatchWidget(Vertical, can_focus=True):
             "Choose next action:",
             "",
         ]
-        for index, (label, _choice) in enumerate(self._options()):
-            if index == self._cursor:
-                lines.append(f" > {index + 1}. [bold]{label}[/bold]")
-            else:
-                lines.append(f"   {index + 1}. [dim]{label}[/dim]")
+        lines.extend(_render_choice_lines(self._options(), self._cursor))
         return "\n".join(lines)
 
     def _options(self) -> list[tuple[str, SelfEvolutionMatchChoice]]:
@@ -313,13 +321,15 @@ class InlineSelfEvolutionMatchWidget(Vertical, can_focus=True):
             return
 
     def action_cursor_up(self) -> None:
-        if self._cursor > 0:
-            self._cursor -= 1
+        next_cursor = _move_choice_cursor(self._cursor, -1, len(self._options()))
+        if next_cursor != self._cursor:
+            self._cursor = next_cursor
             self._refresh()
 
     def action_cursor_down(self) -> None:
-        if self._cursor < len(self._options()) - 1:
-            self._cursor += 1
+        next_cursor = _move_choice_cursor(self._cursor, 1, len(self._options()))
+        if next_cursor != self._cursor:
+            self._cursor = next_cursor
             self._refresh()
 
     def action_select(self) -> None:
