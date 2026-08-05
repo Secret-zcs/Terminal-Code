@@ -3655,3 +3655,40 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_dupli
 
 - 抽取 TUI self-evolution fake widget/test fixture，减少测试样板。
 - 继续检查 approval reject path 的状态清理和用户反馈文案。
+
+## 74. 最新推进记录：Self-Evolution TUI Fake Fixture 抽取
+
+日期：2026-08-05
+
+本次清理 self-evolution TUI 状态测试中的重复 fake widget 样板。此前 inbox mount、approval mount、pending inbox query 的 fake 逻辑分散在多个测试里，后续每补一个状态边界都要复制同样的 async fake mount 和 removable inbox。现在抽出三个测试 helper，后续新增状态测试可以直接复用。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `_capture_self_evolution_inbox_mount(app)`，统一捕获 inbox widget 挂载参数。
+- 修改 `tests/test_evolution.py`：新增 `_capture_self_evolution_approval_mount(app)`，统一捕获 approval widget 挂载参数。
+- 修改 `tests/test_evolution.py`：新增 `_install_fake_pending_inbox_query(app)`，统一模拟可移除的 pending inbox widget。
+- 修改相关 self-evolution TUI 测试，移除重复 fake class 和 async fake mount。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档测试 fixture 抽取。
+
+用户能看到什么：
+
+- 运行时行为不变。
+- 后续继续补 self-evolution TUI 边界测试会更快，样板更少。
+
+安全边界：
+
+- 不修改生产代码。
+- 不改变 candidate、review run、approval request、promote、rollback、quarantine 或 trusted-auto 行为。
+- 只清理测试结构。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox -q
+4 passed
+```
+
+下一步计划：
+
+- 继续检查 approval reject path 的状态清理和用户反馈文案。
+- 把输入框 fake chat/input 也抽成 helper，进一步减少 TUI 测试样板。

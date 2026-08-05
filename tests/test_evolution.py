@@ -101,6 +101,42 @@ def _make_test_mewcode_app(**kwargs):
     )
 
 
+def _capture_self_evolution_inbox_mount(app) -> list[tuple[str, str]]:
+    mounted: list[tuple[str, str]] = []
+
+    async def fake_mount(inbox: str, report: str = "") -> None:
+        mounted.append((inbox, report))
+
+    app._mount_self_evolution_inbox = fake_mount  # type: ignore[method-assign]
+    return mounted
+
+
+def _capture_self_evolution_approval_mount(app) -> list[tuple[str, str]]:
+    mounted: list[tuple[str, str]] = []
+
+    async def fake_mount(request_id: str, review_markdown: str) -> None:
+        mounted.append((request_id, review_markdown))
+
+    app._mount_self_evolution_approval = fake_mount  # type: ignore[method-assign]
+    return mounted
+
+
+def _install_fake_pending_inbox_query(app) -> list[str]:
+    removed: list[str] = []
+
+    class FakeInbox:
+        def remove(self) -> None:
+            removed.append("inbox")
+
+    def fake_query_one(selector: str, *_args: object) -> object:
+        if selector == "#self-evolution-inbox-inline":
+            return FakeInbox()
+        raise LookupError(selector)
+
+    app.query_one = fake_query_one  # type: ignore[method-assign]
+    return removed
+
+
 def _add_debug_eval_case(engine: EvolutionEngine, proposal_id: str) -> str:
     return engine.add_eval_case(
         proposal_id,
@@ -2882,12 +2918,7 @@ class TestEvolutionEngine:
         )
 
         app = _make_test_mewcode_app()
-        mounted: list[tuple[str, str]] = []
-
-        async def fake_mount(inbox: str, report: str = "") -> None:
-            mounted.append((inbox, report))
-
-        app._mount_self_evolution_inbox = fake_mount  # type: ignore[method-assign]
+        mounted = _capture_self_evolution_inbox_mount(app)
 
         app._show_self_evolution_inbox("# Self-Evolution Inbox", "report")
         app._show_self_evolution_inbox("# Self-Evolution Inbox", "report")
@@ -2919,12 +2950,7 @@ class TestEvolutionEngine:
         )
 
         app = _make_test_mewcode_app()
-        mounted: list[tuple[str, str]] = []
-
-        async def fake_mount(inbox: str, report: str = "") -> None:
-            mounted.append((inbox, report))
-
-        app._mount_self_evolution_inbox = fake_mount  # type: ignore[method-assign]
+        mounted = _capture_self_evolution_inbox_mount(app)
 
         app._show_self_evolution_inbox("# Self-Evolution Inbox A", "report A")
         app._show_self_evolution_inbox("# Self-Evolution Inbox B", "report B")
@@ -3094,23 +3120,8 @@ class TestEvolutionEngine:
         app = _make_test_mewcode_app()
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
         app._pending_self_evolution_inbox_key = ("# Self-Evolution Inbox", "report")
-        removed: list[str] = []
-        mounted: list[tuple[str, str]] = []
-
-        class FakeInbox:
-            def remove(self) -> None:
-                removed.append("inbox")
-
-        def fake_query_one(selector: str, *_args: object) -> object:
-            if selector == "#self-evolution-inbox-inline":
-                return FakeInbox()
-            raise LookupError(selector)
-
-        async def fake_mount(request_id: str, review_markdown: str) -> None:
-            mounted.append((request_id, review_markdown))
-
-        app.query_one = fake_query_one  # type: ignore[method-assign]
-        app._mount_self_evolution_approval = fake_mount  # type: ignore[method-assign]
+        removed = _install_fake_pending_inbox_query(app)
+        mounted = _capture_self_evolution_approval_mount(app)
 
         app._show_self_evolution_approval(request.id)
         await asyncio.sleep(0)
@@ -3132,23 +3143,8 @@ class TestEvolutionEngine:
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
         app._pending_skill_approval_request_id = request.id
         app._pending_self_evolution_inbox_key = ("# Self-Evolution Inbox", "report")
-        removed: list[str] = []
-        mounted: list[tuple[str, str]] = []
-
-        class FakeInbox:
-            def remove(self) -> None:
-                removed.append("inbox")
-
-        def fake_query_one(selector: str, *_args: object) -> object:
-            if selector == "#self-evolution-inbox-inline":
-                return FakeInbox()
-            raise LookupError(selector)
-
-        async def fake_mount(request_id: str, review_markdown: str) -> None:
-            mounted.append((request_id, review_markdown))
-
-        app.query_one = fake_query_one  # type: ignore[method-assign]
-        app._mount_self_evolution_approval = fake_mount  # type: ignore[method-assign]
+        removed = _install_fake_pending_inbox_query(app)
+        mounted = _capture_self_evolution_approval_mount(app)
 
         app._show_self_evolution_approval(request.id)
         await asyncio.sleep(0)

@@ -1772,3 +1772,27 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox -q
 2 passed
 ```
+
+## Self-Evolution TUI Fake Fixture 抽取
+
+本次清理 self-evolution TUI 状态测试样板，新增三个测试 helper：`_capture_self_evolution_inbox_mount(app)`、`_capture_self_evolution_approval_mount(app)` 和 `_install_fake_pending_inbox_query(app)`。
+
+行为边界：
+
+- 只改测试结构。
+- inbox/approval mount 捕获语义不变。
+- pending inbox remove 语义不变。
+
+安全策略：
+
+- 不修改生产代码。
+- 不改变 approval、promote、rollback、quarantine 或 trusted-auto 逻辑。
+- 不修改 candidate 或 review run 存储。
+- 不新增用户命令。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox -q
+4 passed
+```
