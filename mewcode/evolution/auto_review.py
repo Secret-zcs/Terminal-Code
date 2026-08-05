@@ -502,6 +502,23 @@ def _render_fork_reviewer_report(run: SelfEvolutionReviewRun) -> str:
                 f"path=`{item.get('path')}` "
                 f"reason={item.get('reason')}"
             )
+    generated_eval_cases = summary.get("generated_eval_cases", [])
+    if generated_eval_cases:
+        lines.extend(["", "## Generated Eval Cases", ""])
+        for item in generated_eval_cases:
+            case_ids = [
+                str(case_id).strip()
+                for case_id in item.get("case_ids", [])
+                if str(case_id).strip()
+            ]
+            cases = ", ".join(f"`{case_id}`" for case_id in case_ids)
+            lines.append(
+                "- "
+                f"proposal=`{item.get('proposal_id')}` "
+                f"skill=`{item.get('skill_name')}` "
+                f"eval_cases=`{len(case_ids)}` "
+                f"cases={cases}"
+            )
     generated_execution_evals = summary.get("generated_execution_evals", [])
     if generated_execution_evals:
         lines.extend(["", "## Generated Execution Evals", ""])

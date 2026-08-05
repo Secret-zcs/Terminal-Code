@@ -2725,3 +2725,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_without_agent_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox -q
 3 passed
 ```
+
+## Fork Reviewer 报告展示 Eval Case 覆盖
+
+本次增强 self-evolution approval 的审计材料。fork reviewer 报告新增 `Generated Eval Cases` 小节，列出自动生成候选 skill 时 materialized 的 eval case 数量和 case id。
+
+审批影响：
+
+- 不改变审批模式。
+- 不改变 eval、execution eval 或 promote gate。
+- 不改变 approval request 状态流转。
+- 只让审批人看到更完整的测试覆盖证据。
+
+安全策略：
+
+- 候选 skill 仍必须先通过 deterministic eval 和 execution eval。
+- 生成的 eval case 只是报告展示，不会降低通过门槛。
+- 用户或 trusted-auto policy 审批前，可以从报告看到 `eval_cases` 数量和执行轮次。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_generated_canary_summary -q
+1 failed  # 修复前 report 缺少 Generated Eval Cases 和 eval_cases 数量
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_generated_canary_summary tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_blocks_failed_generated_candidate_in_report -q
+2 passed
+```

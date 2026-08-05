@@ -5034,3 +5034,41 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 继续检查 match/inbox 响应链路是否存在“失败后输入框或 pending 状态不恢复”的边界。
 - 将重复的 no-agent approval 恢复逻辑收敛为小 helper，前提是测试覆盖保持清晰。
+
+## 108. 最新推进记录：Fork Reviewer 报告展示生成 Eval Case 明细
+
+日期：2026-08-05
+
+本次增强 fork reviewer 报告的可审计性。此前报告会展示 generated execution eval 的 runner、rounds 和 canary 注入数量，但没有直接展示本轮为候选 skill 生成了多少条 eval case。用户在审批 skill 时只能看到“执行评测通过”，不能快速判断测试覆盖是否足够。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_self_evolution_review_report_includes_generated_canary_summary`，要求 review report 包含 `## Generated Eval Cases` 和 `eval_cases=3`。
+- 修改 `mewcode/evolution/auto_review.py`：`_render_fork_reviewer_report()` 新增 `Generated Eval Cases` 小节，展示 proposal、skill、eval case 数量和 case id 列表。
+
+用户能看到什么：
+
+- 自进化 review report 现在同时显示 eval case 覆盖和 execution eval 结果。
+- 审批候选 skill 时，可以直接看到候选至少经过几条任务用例验证，而不是只看到最终通过/失败。
+
+安全边界：
+
+- 不改变 eval case 生成逻辑。
+- 不改变 execution eval、approval request 或 promote gate。
+- 不自动 approve/reject。
+- 只增强 fork reviewer 报告内容。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_generated_canary_summary -q
+1 failed  # 实现前红灯：review report 缺少 Generated Eval Cases 小节
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_generated_canary_summary tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_blocks_failed_generated_candidate_in_report -q
+2 passed
+```
+
+下一步计划：
+
+- 将 approval request 详情页也补充候选测试覆盖摘要，让用户无需打开 report 文件即可看到测试效果。
+- 继续推进更接近 Hermes 的自动提取链路，但保持“测试通过后再申请应用”的 gate。

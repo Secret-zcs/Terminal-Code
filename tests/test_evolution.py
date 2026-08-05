@@ -2504,6 +2504,8 @@ class TestEvolutionEngine:
         report = (tmp_path / result["review_run"].artifacts["report"]).read_text(
             encoding="utf-8"
         )
+        assert "## Generated Eval Cases" in report
+        assert "eval_cases=`3`" in report
         assert "## Generated Execution Evals" in report
         assert "runner=`fork_agent_sandbox_deterministic`" in report
         assert "rounds=`3/3`" in report
