@@ -121,6 +121,16 @@ def _capture_self_evolution_approval_mount(app) -> list[tuple[str, str]]:
     return mounted
 
 
+def _capture_self_evolution_match_mount(app) -> list[tuple[str, str]]:
+    mounted: list[tuple[str, str]] = []
+
+    async def fake_mount(match: str, audit: str = "") -> None:
+        mounted.append((match, audit))
+
+    app._mount_self_evolution_match = fake_mount  # type: ignore[method-assign]
+    return mounted
+
+
 def _install_fake_pending_inbox_query(app) -> list[str]:
     removed: list[str] = []
 
@@ -2790,6 +2800,7 @@ class TestEvolutionEngine:
         messages: list[str] = []
         sent: list[str] = []
         app._show_system_message = messages.append  # type: ignore[method-assign]
+        mounted = _capture_self_evolution_match_mount(app)
 
         async def fake_send(text: str) -> None:
             sent.append(text)
@@ -2801,11 +2812,14 @@ class TestEvolutionEngine:
             await app._agent_task
 
         assert sent == ["继续整理自进化复盘文档，并说明测试结果。"]
-        assert len(messages) == 1
-        assert "# Self-Evolution Candidate Skill Matches" in messages[0]
-        assert "review-loop" in messages[0]
-        assert proposal.id in messages[0]
-        assert "not auto-activated" in messages[0]
+        assert messages == []
+        assert len(mounted) == 1
+        match_markdown, audit_markdown = mounted[0]
+        assert "# Self-Evolution Candidate Skill Matches" in match_markdown
+        assert "review-loop" in match_markdown
+        assert proposal.id in match_markdown
+        assert "not auto-activated" in match_markdown
+        assert audit_markdown == ""
 
     @pytest.mark.asyncio
     async def test_tui_user_message_shows_only_top_self_evolution_candidate_match(
@@ -2831,6 +2845,7 @@ class TestEvolutionEngine:
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
         messages: list[str] = []
         app._show_system_message = messages.append  # type: ignore[method-assign]
+        mounted = _capture_self_evolution_match_mount(app)
 
         async def fake_send(_text: str) -> None:
             pass
@@ -2841,10 +2856,110 @@ class TestEvolutionEngine:
         if app._agent_task is not None:
             await app._agent_task
 
-        assert len(messages) == 1
-        assert "Matches: `1`" in messages[0]
-        assert top.id in messages[0]
-        assert lower.id not in messages[0]
+        assert messages == []
+        assert len(mounted) == 1
+        match_markdown, _audit_markdown = mounted[0]
+        assert "Matches: `1`" in match_markdown
+        assert top.id in match_markdown
+        assert lower.id not in match_markdown
+
+    @pytest.mark.asyncio
+    async def test_tui_user_message_mounts_self_evolution_match_audit_widget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.config import SelfEvolutionConfig
+
+        engine = EvolutionEngine(tmp_path)
+        top = engine.propose_skill(
+            name="review-loop",
+            description="自进化复盘审批报告整理流程",
+            body="# 任务\n\n整理自进化复盘审批报告，记录测试结果和修改理由。\n",
+        )
+        hidden = engine.propose_skill(
+            name="recap-loop",
+            description="自进化复盘整理流程",
+            body="# 任务\n\n整理自进化复盘。\n",
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(enabled=True),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        sent: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+        mounted = _capture_self_evolution_match_mount(app)
+
+        async def fake_send(text: str) -> None:
+            sent.append(text)
+
+        app._send_message = fake_send  # type: ignore[method-assign]
+
+        await app._dispatch_command("继续整理自进化复盘审批报告，并说明测试结果。")
+        if app._agent_task is not None:
+            await app._agent_task
+
+        assert sent == ["继续整理自进化复盘审批报告，并说明测试结果。"]
+        assert messages == []
+        assert len(mounted) == 1
+        match_markdown, audit_markdown = mounted[0]
+        assert top.id in match_markdown
+        assert hidden.id not in match_markdown
+        assert "Hidden matches: `1`" in match_markdown
+        assert top.id in audit_markdown
+        assert hidden.id in audit_markdown
+
+    def test_tui_self_evolution_match_response_views_audit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.self_evolution_dialog import (
+            InlineSelfEvolutionMatchWidget,
+            SelfEvolutionMatchChoice,
+        )
+
+        app = _make_test_mewcode_app()
+        messages: list[str] = []
+        removed: list[str] = []
+        focused: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+        app._pending_self_evolution_match_key = ("match", "audit")
+
+        class FakeMatch:
+            def remove(self) -> None:
+                removed.append("match")
+
+        class FakeInput:
+            disabled = True
+
+            def focus(self) -> None:
+                focused.append("input")
+
+        fake_input = FakeInput()
+
+        def fake_query_one(selector: str, *_args: object) -> object:
+            if selector == "#self-evolution-match-inline":
+                return FakeMatch()
+            if selector == "#chat-input":
+                return fake_input
+            raise LookupError(selector)
+
+        app.query_one = fake_query_one  # type: ignore[method-assign]
+
+        app.on_inline_self_evolution_match_widget_responded(
+            InlineSelfEvolutionMatchWidget.Responded(
+                SelfEvolutionMatchChoice.VIEW_AUDIT,
+                "# Self-Evolution Candidate Skill Match Audit\n\n- all candidates",
+            )
+        )
+
+        assert removed == ["match"]
+        assert fake_input.disabled is False
+        assert focused == ["input"]
+        assert app._pending_self_evolution_match_key is None
+        assert messages == [
+            "# Self-Evolution Candidate Skill Match Audit\n\n- all candidates"
+        ]
 
     def test_tui_self_evolution_review_shows_existing_blocked_candidate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

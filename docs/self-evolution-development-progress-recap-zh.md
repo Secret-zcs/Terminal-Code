@@ -4244,3 +4244,53 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 
 - 把 audit report 接到一个非自动触发的 self-evolution 面板或报告详情中。
 - 继续减少重复渲染代码，把 match item 的 Markdown 渲染抽成 helper。
+
+## 89. 最新推进记录：候选 Skill 匹配审计接入 TUI Match Card
+
+日期：2026-08-05
+
+本次把完整匹配审计从 engine API 接到 TUI，但不新增 slash command，也不自动启用候选。普通用户消息命中候选 skill 时，TUI 现在挂载 `InlineSelfEvolutionMatchWidget`：主卡片仍只展示 Top 1 候选；如果存在隐藏候选，则卡片提供 `View all matches`，用户选择后才显示完整 `Self-Evolution Candidate Skill Match Audit`。
+
+修改内容：
+
+- 修改 `tests/test_self_evolution_dialog.py`：新增 match widget 展示和响应测试，覆盖 `View all matches` 与 `Dismiss match hint`。
+- 修改 `mewcode/self_evolution_dialog.py`：新增 `SelfEvolutionMatchChoice` 和 `InlineSelfEvolutionMatchWidget`。
+- 修改 `tests/test_evolution.py`：新增 `_capture_self_evolution_match_mount(app)` 测试 helper。
+- 修改 `tests/test_evolution.py`：新增 `test_tui_user_message_mounts_self_evolution_match_audit_widget`，覆盖 TUI 传入 Top 1 匹配和完整 audit。
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_match_response_views_audit`，覆盖用户选择查看完整匹配审计后显示 audit report。
+- 修改 `mewcode/app.py`：新增 match widget pending key、响应处理、清理逻辑和 guarded mount。
+- 修改 `mewcode/app.py`：`_show_self_evolution_task_matches()` 从系统消息改为 match card；隐藏候选数为 0 时不传 audit detail。
+
+用户能看到什么：
+
+- 主对话仍只显示 1 个最高置信候选，不刷屏。
+- 如果报告显示有隐藏候选，用户可以在卡片里选择 `View all matches` 查看完整审计。
+- 完整审计仍明确显示 `Runtime: not auto-activated`。
+
+安全边界：
+
+- 不新增用户命令。
+- 不自动调用 `LoadSkill`。
+- 不自动 approve、promote、reject 或 quarantine。
+- 只读展示候选匹配结果和 audit report。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_shows_match_and_audit_action -q
+1 error  # 实现前红灯：InlineSelfEvolutionMatchWidget 不存在
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_mounts_self_evolution_match_audit_widget -q
+1 failed  # 实现前红灯：TUI 仍用系统消息展示匹配报告，没有挂载 match widget
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_shows_match_and_audit_action tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_emits_view_audit_and_dismiss tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_mounts_self_evolution_match_audit_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_views_audit -q
+4 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py -q
+133 passed
+```
+
+下一步计划：
+
+- 减少 match/inbox widget 重复逻辑，把共同的选项渲染模式抽成 helper 或轻量基类。
+- 继续补 match card 失败挂载时 pending key 清理和去重测试。

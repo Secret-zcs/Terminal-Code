@@ -3,9 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from mewcode.self_evolution_dialog import (
+    InlineSelfEvolutionMatchWidget,
     InlineSelfEvolutionInboxWidget,
     InlineSkillApprovalWidget,
     SelfEvolutionInboxChoice,
+    SelfEvolutionMatchChoice,
     SkillApprovalChoice,
 )
 
@@ -100,3 +102,39 @@ def test_self_evolution_inbox_widget_hides_report_action_without_detail() -> Non
 
     assert captured[-1].choice == SelfEvolutionInboxChoice.DISMISS
     assert captured[-1].report_markdown == ""
+
+
+def test_self_evolution_match_widget_shows_match_and_audit_action() -> None:
+    widget = InlineSelfEvolutionMatchWidget(
+        match_markdown="# Self-Evolution Candidate Skill Matches\n\n- top candidate",
+        audit_markdown="# Self-Evolution Candidate Skill Match Audit\n\n- all candidates",
+    )
+
+    content = widget._build_content()
+
+    assert "Self-evolution candidate skill match" in content
+    assert "top candidate" in content
+    assert "View all matches" in content
+    assert "Dismiss match hint" in content
+
+
+def test_self_evolution_match_widget_emits_view_audit_and_dismiss() -> None:
+    captured = []
+    widget = InlineSelfEvolutionMatchWidget(
+        match_markdown="# Self-Evolution Candidate Skill Matches",
+        audit_markdown="# Self-Evolution Candidate Skill Match Audit\n\n- all candidates",
+    )
+    widget.post_message = captured.append  # type: ignore[method-assign]
+
+    widget.action_select()
+
+    assert captured[-1].choice == SelfEvolutionMatchChoice.VIEW_AUDIT
+    assert captured[-1].audit_markdown == (
+        "# Self-Evolution Candidate Skill Match Audit\n\n- all candidates"
+    )
+
+    widget.action_cursor_down()
+    widget.action_select()
+
+    assert captured[-1].choice == SelfEvolutionMatchChoice.DISMISS
+    assert captured[-1].audit_markdown == ""

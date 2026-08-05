@@ -2169,3 +2169,36 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_match_audit_shows_all_matches tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_summarizes_hidden_matches -q
 2 passed
 ```
+
+## Self-Evolution 匹配审计接入 TUI
+
+本次新增 `InlineSelfEvolutionMatchWidget`，把候选 skill 匹配报告从普通系统消息升级为 TUI match card。主卡片只展示 Top 1 候选；如果存在隐藏候选，用户可选择 `View all matches` 查看完整匹配审计报告。
+
+审批影响：
+
+- match card 不是审批卡，不会 approve 或 reject。
+- `View all matches` 只显示完整 audit，不启用候选。
+- pending approval request 仍由原 approval widget 处理。
+
+安全策略：
+
+- 不新增 slash command。
+- 不调用 `LoadSkill`。
+- 不修改 candidate manifest、approval request 或 project skill。
+- audit report 继续显示 `Runtime: not auto-activated`。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_shows_match_and_audit_action -q
+1 error  # 实现前红灯：InlineSelfEvolutionMatchWidget 不存在
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_mounts_self_evolution_match_audit_widget -q
+1 failed  # 实现前红灯：TUI 仍用系统消息展示匹配报告，没有挂载 match widget
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_shows_match_and_audit_action tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_emits_view_audit_and_dismiss tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_mounts_self_evolution_match_audit_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_views_audit -q
+4 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py -q
+133 passed
+```

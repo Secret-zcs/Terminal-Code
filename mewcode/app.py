@@ -640,6 +640,7 @@ class MewCodeApp(App):
         self._teammate_tree: TeammateTree | None = None
         self._teammate_timer = None
         self._pending_self_evolution_inbox_key: tuple[str, str] | None = None
+        self._pending_self_evolution_match_key: tuple[str, str] | None = None
 
     @staticmethod
     def _make_banner(model: str = "", work_dir: str = "") -> RichText:
@@ -1076,14 +1077,63 @@ class MewCodeApp(App):
         if self.agent is None:
             return
         try:
-            markdown = EvolutionEngine(
-                self.agent.work_dir
-            ).render_skill_candidate_task_matches(text, limit=1)
+            engine = EvolutionEngine(self.agent.work_dir)
+            markdown = engine.render_skill_candidate_task_matches(text, limit=1)
+            audit_markdown = (
+                engine.render_skill_candidate_task_match_audit(text)
+                if markdown and "- Hidden matches: `0`" not in markdown
+                else ""
+            )
         except Exception as exc:
             log.debug("Self-evolution candidate matching failed: %s", exc)
             return
         if markdown:
-            self._show_system_message(markdown)
+            self._show_self_evolution_match(markdown, audit_markdown)
+
+    def _show_self_evolution_match(
+        self,
+        match_markdown: str,
+        audit_markdown: str = "",
+    ) -> None:
+        match_key = (match_markdown.strip(), audit_markdown.strip())
+        if self._pending_self_evolution_match_key is not None:
+            return
+        self._pending_self_evolution_match_key = match_key
+        asyncio.ensure_future(
+            self._mount_self_evolution_match_guarded(
+                match_markdown,
+                audit_markdown,
+                match_key,
+            )
+        )
+
+    async def _mount_self_evolution_match_guarded(
+        self,
+        match_markdown: str,
+        audit_markdown: str,
+        match_key: tuple[str, str],
+    ) -> None:
+        try:
+            await self._mount_self_evolution_match(match_markdown, audit_markdown)
+        except Exception:
+            if self._pending_self_evolution_match_key == match_key:
+                self._pending_self_evolution_match_key = None
+
+    async def _mount_self_evolution_match(
+        self,
+        match_markdown: str,
+        audit_markdown: str = "",
+    ) -> None:
+        from mewcode.self_evolution_dialog import InlineSelfEvolutionMatchWidget
+
+        chat = self.query_one("#chat-area", VerticalScroll)
+        widget = InlineSelfEvolutionMatchWidget(match_markdown, audit_markdown)
+        await chat.mount(widget)
+        self.call_after_refresh(chat.scroll_end, animate=False)
+        try:
+            self.query_one("#chat-input").disabled = True
+        except Exception:
+            pass
 
     # -----------------------------------------------------------------
     # 输入处理
@@ -1680,6 +1730,36 @@ class MewCodeApp(App):
             and event.report_markdown.strip()
         ):
             self._show_system_message(event.report_markdown)
+
+    def on_inline_self_evolution_match_widget_responded(
+        self, event: "InlineSelfEvolutionMatchWidget.Responded"
+    ) -> None:
+        from mewcode.self_evolution_dialog import SelfEvolutionMatchChoice
+
+        self._clear_pending_self_evolution_match()
+        try:
+            self.query_one("#chat-input").disabled = False
+            self.query_one("#chat-input").focus()
+        except Exception:
+            pass
+
+        if (
+            event.choice == SelfEvolutionMatchChoice.VIEW_AUDIT
+            and event.audit_markdown.strip()
+        ):
+            self._show_system_message(event.audit_markdown)
+
+    def _clear_pending_self_evolution_match(self) -> None:
+        from mewcode.self_evolution_dialog import InlineSelfEvolutionMatchWidget
+
+        try:
+            self.query_one(
+                "#self-evolution-match-inline",
+                InlineSelfEvolutionMatchWidget,
+            ).remove()
+        except Exception:
+            pass
+        self._pending_self_evolution_match_key = None
 
     def _clear_pending_self_evolution_inbox(self) -> None:
         from mewcode.self_evolution_dialog import InlineSelfEvolutionInboxWidget
