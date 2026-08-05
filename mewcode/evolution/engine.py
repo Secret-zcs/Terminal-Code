@@ -1449,7 +1449,8 @@ class EvolutionEngine:
             f"- {item.get('proposal_id')} / {item.get('skill_name')} "
             f"eval_cases={item.get('eval_case_count', 0)} "
             f"rounds={item.get('execution_eval_rounds', '0/0')} "
-            f"reason={item.get('blocked_reason')}{source}"
+            f"reason={item.get('blocked_reason')} "
+            f"next_action={item.get('next_action', '')}{source}"
         )
 
     @staticmethod
@@ -1461,6 +1462,7 @@ class EvolutionEngine:
             f"execution={item.get('execution_eval_status') or 'pending'}"
             f" eval_cases={item.get('eval_case_count', 0)} "
             f"rounds={item.get('execution_eval_rounds', '0/0')}"
+            f" next_action={item.get('next_action', '')}"
             f"{source}"
         )
 
@@ -1508,9 +1510,27 @@ class EvolutionEngine:
             ),
             "eval_case_count": self._candidate_eval_case_count(manifest),
             "execution_eval_rounds": self._candidate_execution_rounds(manifest),
+            "next_action": self._candidate_inbox_next_action(manifest),
         }
         item.update(self._candidate_source_review_run_item(proposal.id))
         return item
+
+    @staticmethod
+    def _candidate_inbox_next_action(manifest: dict) -> str:
+        approval = str(manifest.get("approval_status") or "").strip()
+        eval_status = str(manifest.get("eval_status") or "pending").strip()
+        execution_status = str(
+            manifest.get("execution_eval_status") or "pending"
+        ).strip()
+        if approval == "blocked":
+            return "inspect blocked candidate report before revising or rejecting"
+        if approval == "pending":
+            return "review pending approval request"
+        if eval_status != "passed":
+            return "complete eval before approval"
+        if execution_status != "passed":
+            return "complete execution eval before approval"
+        return "submit approval request before use"
 
     @staticmethod
     def _candidate_eval_case_count(manifest: dict) -> int:

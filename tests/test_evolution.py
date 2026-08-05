@@ -1132,11 +1132,13 @@ class TestEvolutionEngine:
         assert blocked_proposal.id in markdown
         assert "eval_cases=0" in markdown
         assert "rounds=0/0" in markdown
+        assert "next_action=inspect blocked candidate report" in markdown
         assert "review_inbox_blocked" in markdown
         assert ".mewcode/evolution/review_runs/review_inbox_blocked/report.md" in markdown
         assert "## Generated Candidates" in markdown
         assert generated_proposal.id in markdown
         assert "eval_cases=0" in markdown
+        assert "next_action=complete eval before approval" in markdown
         assert "review_inbox_generated" in markdown
         assert ".mewcode/evolution/review_runs/review_inbox_generated/report.md" in markdown
 

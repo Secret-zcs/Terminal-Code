@@ -5187,3 +5187,42 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 
 - 继续结构化 blocked/generated 候选的 gate reason，减少用户读长报告的成本。
 - 评估是否将 match coverage 信息折叠到更短的一行，避免 TUI 卡片过长。
+
+## 112. 最新推进记录：Self-Evolution Inbox 展示候选下一步动作
+
+日期：2026-08-05
+
+本次把 blocked/generated 候选的 gate reason 转成更直接的下一步动作。此前 inbox 会展示 blocked reason、eval 状态、execution 状态和覆盖摘要，但用户仍需要自己判断下一步应该补 eval、补 execution eval、查看 blocked report，还是提交 approval request。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_render_self_evolution_inbox_summarizes_all_candidate_groups`，要求 blocked/generated 候选行显示 `next_action`。
+- 修改 `mewcode/evolution/engine.py`：新增 `_candidate_inbox_next_action()`，从 approval/eval/execution 状态派生短动作文案，并在 blocked/generated inbox 行渲染。
+
+用户能看到什么：
+
+- blocked 候选会显示 `next_action=inspect blocked candidate report before revising or rejecting`。
+- generated 候选会显示类似 `next_action=complete eval before approval`。
+- 用户在 inbox 总览中能直接判断下一步，而不是只看到状态码。
+
+安全边界：
+
+- 不改变候选状态机。
+- 不改变 eval、execution eval、approval 或 promote gate。
+- 不自动执行下一步动作。
+- 只增强只读 inbox 展示。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups -q
+1 failed  # 实现前红灯：inbox 候选行缺少 next_action
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated -q
+2 passed
+```
+
+下一步计划：
+
+- 继续评估是否把 match card 的 coverage 行压缩，避免提示过长。
+- 后续可推进真正后台 fork reviewer，但需要先明确当前同步 review 的边界和测试入口。

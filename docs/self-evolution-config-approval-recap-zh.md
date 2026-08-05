@@ -2833,3 +2833,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_pending_approval_request tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_summarizes_hidden_matches tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_mounts_self_evolution_match_audit_widget -q
 3 passed
 ```
+
+## Self-Evolution Inbox 展示 Next Action
+
+本次让 blocked/generated candidate 行直接展示下一步动作。它把 approval/eval/execution 状态转换成用户可执行的短文案，减少用户从状态字段反推流程的成本。
+
+审批影响：
+
+- 不改变审批模式。
+- 不改变 candidate gate 或 promote gate。
+- 不自动执行 eval、approval 或 reject。
+- 只增强 inbox 的只读解释层。
+
+安全策略：
+
+- next action 由 manifest 中已有状态派生。
+- 不写 approval store、candidate manifest、eval report 或 project skill。
+- blocked 候选仍需要人工查看 blocked report 后再决定是否修订。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups -q
+1 failed  # 修复前 inbox 候选行没有 next_action
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated -q
+2 passed
+```
