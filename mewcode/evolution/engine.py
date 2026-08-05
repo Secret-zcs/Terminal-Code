@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import threading
 import time
@@ -1213,6 +1214,84 @@ class EvolutionEngine:
             lines.append("- None")
         lines.append("")
         return "\n".join(lines)
+
+    def match_skill_candidates_for_task(
+        self,
+        task: str,
+        *,
+        limit: int = 5,
+        minimum_score: int = 2,
+    ) -> list[dict]:
+        clean_task = task.strip()
+        if not clean_task:
+            return []
+        task_tokens = self._skill_match_tokens(clean_task)
+        if not task_tokens:
+            return []
+
+        matches: list[dict] = []
+        for manifest in self._load_candidate_manifest_items():
+            proposal_id = str(manifest.get("proposal_id", "")).strip()
+            if not proposal_id:
+                continue
+            proposal = self.store.get_proposal(proposal_id)
+            if proposal is None or proposal.target != "skill":
+                continue
+            if proposal.status != "proposed":
+                continue
+            try:
+                payload = self._decode_skill_change(proposal.change)
+            except ValueError:
+                continue
+            skill_name = str(payload.get("name", "")).strip()
+            candidate_text = "\n".join([
+                skill_name,
+                str(payload.get("description", "")),
+                str(payload.get("body", "")),
+            ])
+            candidate_tokens = self._skill_match_tokens(candidate_text)
+            matched_terms = sorted(task_tokens & candidate_tokens)
+            score = len(matched_terms)
+            if skill_name and skill_name.lower() in clean_task.lower():
+                score += 4
+                if skill_name not in matched_terms:
+                    matched_terms.append(skill_name)
+            if score < max(1, minimum_score):
+                continue
+            matches.append({
+                "proposal_id": proposal.id,
+                "skill_name": skill_name,
+                "score": score,
+                "matched_terms": matched_terms,
+                "proposal_status": proposal.status,
+                "approval_status": str(manifest.get("approval_status", "")),
+                "eval_status": str(manifest.get("eval_status", "pending")),
+                "execution_eval_status": str(
+                    manifest.get("execution_eval_status", "pending")
+                ),
+                "candidate_skill": str(manifest.get("candidate_skill", "")),
+                "created_at": float(manifest.get("created_at", proposal.created_at) or 0.0),
+            })
+
+        matches.sort(key=lambda item: (-int(item["score"]), -float(item["created_at"])))
+        return matches[: max(1, limit)]
+
+    @staticmethod
+    def _skill_match_tokens(text: str) -> set[str]:
+        lowered = text.lower()
+        tokens = {
+            token
+            for token in re.findall(r"[a-z0-9][a-z0-9_-]{1,}", lowered)
+            if token not in {"skill", "task", "todo"}
+        }
+        for run in re.findall(r"[\u4e00-\u9fff]{2,}", lowered):
+            if len(run) <= 4:
+                tokens.add(run)
+            for index in range(len(run) - 1):
+                token = run[index : index + 2]
+                if token not in {"任务", "流程", "需要", "进行", "说明"}:
+                    tokens.add(token)
+        return tokens
 
     @staticmethod
     def _render_pending_inbox_line(item: dict) -> str:

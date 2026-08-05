@@ -1906,3 +1906,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_recovered_stale_message tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
 3 passed
 ```
+
+## Self-Evolution 候选 Skill 任务匹配
+
+本次新增只读匹配能力：`EvolutionEngine.match_skill_candidates_for_task(task)` 会扫描仍处于 `proposed` 状态的候选 skill，根据当前任务文本与候选 skill 的 name、description、body 做确定性词面匹配，返回 score、matched_terms、proposal_id、skill_name 和候选评测状态。
+
+审批影响：
+
+- 匹配结果不能直接激活候选 skill。
+- 未通过 eval/execution eval/approval 的候选仍不能被 promote。
+- matched_terms 用于解释相关性，帮助用户审批时理解“为什么系统认为这个候选相关”。
+
+安全策略：
+
+- 不使用不可复现的模型语义判断。
+- 不修改候选 skill、approval request 或 project skill。
+- 只读取 proposed skill candidates，不复活 rejected/applied proposal。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ranks_relevant_candidate -q
+1 failed  # 实现前红灯：EvolutionEngine 没有 match_skill_candidates_for_task API
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ranks_relevant_candidate -q
+1 passed
+```

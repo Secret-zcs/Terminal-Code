@@ -3857,3 +3857,41 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 开始补多轮对话 candidate-skill 匹配：当前任务如何匹配历史生成的候选 skill。
 - 优先从可测试的规则层做起，不引入不透明模型判断。
+
+## 79. 最新推进记录：候选 Skill 与当前任务的确定性匹配 API
+
+日期：2026-08-05
+
+本次补多轮对话 self-evolution 的基础能力：当前任务如何判断是否匹配之前生成的候选 skill。新增 `EvolutionEngine.match_skill_candidates_for_task()`，给定任务文本后扫描 `.mewcode/evolution/candidates/**/manifest.json` 中仍处于 `proposed` 的 skill 候选，基于候选 skill 的 name、description、body 与任务文本做确定性词面匹配，返回分数、匹配词、候选状态和候选文件路径。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_match_skill_candidates_for_task_ranks_relevant_candidate`，覆盖“复盘文档/测试结果”任务能匹配复盘类候选 skill，并排除无关部署类候选。
+- 修改 `mewcode/evolution/engine.py`：新增 `match_skill_candidates_for_task()` 只读 API。
+- 修改 `mewcode/evolution/engine.py`：新增 `_skill_match_tokens()`，英文按词匹配，中文按连续汉字 bigram 匹配，并过滤少量泛化词如 `任务`、`流程`。
+
+用户能看到什么：
+
+- 未来跨对话时，可以先调用该 API 判断当前任务是否与历史候选 skill 相关。
+- 匹配结果包含 `matched_terms`，能解释“为什么这个候选 skill 被认为相关”。
+
+安全边界：
+
+- 该 API 只读，不会自动 approve、promote、activate 或修改 skill。
+- 不使用模型判断，避免不可复现的候选匹配结果。
+- 只匹配 `proposed` 状态的 skill proposal，不把已 rejected/applied 的候选重新拿来用。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ranks_relevant_candidate -q
+1 failed  # 实现前红灯：EvolutionEngine 没有 match_skill_candidates_for_task API
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ranks_relevant_candidate -q
+1 passed
+```
+
+下一步计划：
+
+- 将匹配 API 接到 review report 或 TUI inbox，让用户能看到“当前任务匹配到了哪些候选 skill”。
+- 后续再考虑自动激活，但必须先经过审批策略和测试门槛，不能直接启用未批准候选。

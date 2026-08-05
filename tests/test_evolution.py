@@ -1108,6 +1108,31 @@ class TestEvolutionEngine:
         assert "review_inbox_generated" in markdown
         assert ".mewcode/evolution/review_runs/review_inbox_generated/report.md" in markdown
 
+    def test_match_skill_candidates_for_task_ranks_relevant_candidate(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        review_proposal = engine.propose_skill(
+            name="review-loop",
+            description="自进化复盘文档和测试结果整理流程",
+            body="# 任务\n\n整理复盘文档，记录测试结果和修改理由。\n",
+        )
+        deploy_proposal = engine.propose_skill(
+            name="deploy-loop",
+            description="部署发布检查流程",
+            body="# 任务\n\n检查发布配置和部署步骤。\n",
+        )
+
+        matches = engine.match_skill_candidates_for_task(
+            "继续整理自进化复盘文档，并说明测试结果。"
+        )
+
+        assert matches[0]["proposal_id"] == review_proposal.id
+        assert matches[0]["skill_name"] == "review-loop"
+        assert matches[0]["score"] > 0
+        assert "复盘" in matches[0]["matched_terms"]
+        assert all(match["proposal_id"] != deploy_proposal.id for match in matches)
+
     def test_read_self_evolution_review_report_returns_markdown(
         self, tmp_path: Path
     ) -> None:
