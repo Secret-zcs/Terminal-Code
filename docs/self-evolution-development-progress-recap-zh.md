@@ -4167,3 +4167,42 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 
 - 继续把匹配提示从“系统消息”打磨成更明确的 self-evolution review card。
 - 后续考虑集中管理中文低信号词，避免散落在引擎代码中。
+
+## 87. 最新推进记录：Top 1 匹配报告保留隐藏候选计数
+
+日期：2026-08-05
+
+本次补上候选 skill 匹配的审计线索。TUI 现在只展示 Top 1，降低了主对话噪音，但如果还有其他达到阈值的候选，用户此前看不到“有候选被隐藏”。现在 `render_skill_candidate_task_matches()` 会先计算全部匹配，再按 `limit` 展示，并在摘要中显示 `Shown matches`、`Total matches` 和 `Hidden matches`。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_render_skill_candidate_task_matches_summarizes_hidden_matches`，覆盖 `limit=1` 时报告展示隐藏候选数量。
+- 修改 `mewcode/evolution/engine.py`：`render_skill_candidate_task_matches()` 先获取完整匹配列表，再按 limit 切片展示。
+- 修改 `mewcode/evolution/engine.py`：报告摘要增加 `Shown matches`、`Total matches`、`Hidden matches`。
+
+用户能看到什么：
+
+- 主对话仍只展示 Top 1 候选。
+- 如果还有其他候选达到匹配阈值，报告会明确显示隐藏数量。
+- 被隐藏候选不会在主对话刷屏，但也不会完全无审计线索。
+
+安全边界：
+
+- 不自动展示隐藏候选详情。
+- 不自动启用、审批或拒绝隐藏候选。
+- 只增加报告摘要计数。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_summarizes_hidden_matches -q
+1 failed  # 实现前红灯：报告没有隐藏候选摘要
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_summarizes_hidden_matches tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_only_top_self_evolution_candidate_match tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+3 passed
+```
+
+下一步计划：
+
+- 给隐藏候选提供单独审计报告入口，而不是只显示数量。
+- 继续完善匹配报告与审批入口之间的跳转能力。

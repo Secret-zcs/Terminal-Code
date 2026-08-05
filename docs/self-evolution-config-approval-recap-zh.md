@@ -2117,3 +2117,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ignores_generic_chinese_overlap tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ranks_relevant_candidate -q
 3 passed
 ```
+
+## Self-Evolution 隐藏候选计数
+
+本次在候选 skill 匹配报告中加入隐藏候选计数。TUI 仍只展示 Top 1，但报告会显示 `Shown matches`、`Total matches`、`Hidden matches`，让用户知道是否还有其他达到阈值的候选被折叠。
+
+审批影响：
+
+- 隐藏候选不会被自动审批。
+- 隐藏候选不会被自动启用。
+- 计数只用于审计提示，不改变候选状态。
+
+安全策略：
+
+- 主对话只展示 Top 1，降低干扰。
+- 报告保留隐藏数量，避免完全不可见。
+- 所有候选仍受 eval、execution eval 和 approval gate 约束。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_summarizes_hidden_matches -q
+1 failed  # 实现前红灯：报告没有隐藏候选摘要
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_summarizes_hidden_matches tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_only_top_self_evolution_candidate_match tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+3 passed
+```

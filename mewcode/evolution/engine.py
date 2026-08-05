@@ -1302,18 +1302,23 @@ class EvolutionEngine:
         limit: int = 5,
         minimum_score: int = 2,
     ) -> str:
-        matches = self.match_skill_candidates_for_task(
+        all_matches = self.match_skill_candidates_for_task(
             task,
-            limit=limit,
+            limit=10_000,
             minimum_score=minimum_score,
         )
+        matches = all_matches[: max(1, limit)]
         if not matches:
             return ""
+        hidden_count = max(0, len(all_matches) - len(matches))
         lines = [
             "# Self-Evolution Candidate Skill Matches",
             "",
             f"- Task: {task.strip()}",
             f"- Matches: `{len(matches)}`",
+            f"- Shown matches: `{len(matches)}`",
+            f"- Total matches: `{len(all_matches)}`",
+            f"- Hidden matches: `{hidden_count}`",
             "- Safety: candidates are not auto-activated; eval, execution eval, and approval gates still apply.",
             "",
             "## Matches",
