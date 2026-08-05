@@ -1158,6 +1158,21 @@ class TestEvolutionEngine:
         assert "Next action: complete eval before approval" in markdown
         assert "not auto-activated" in markdown
 
+    def test_render_skill_candidate_task_matches_shows_pending_approval_request(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        request = engine.submit_skill_approval_request(proposal.id)
+
+        markdown = engine.render_skill_candidate_task_matches(
+            "修复复杂回归 bug 时先复现失败并写回归测试。"
+        )
+
+        assert request.id in markdown
+        assert "Approval: `pending`" in markdown
+        assert "Next action: review pending approval request" in markdown
+
     def test_read_self_evolution_review_report_returns_markdown(
         self, tmp_path: Path
     ) -> None:

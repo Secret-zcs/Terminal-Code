@@ -1264,6 +1264,7 @@ class EvolutionEngine:
                 "score": score,
                 "matched_terms": matched_terms,
                 "proposal_status": proposal.status,
+                "approval_request_id": str(manifest.get("approval_request_id", "")),
                 "approval_status": str(manifest.get("approval_status", "")),
                 "eval_status": str(manifest.get("eval_status", "pending")),
                 "execution_eval_status": str(
@@ -1303,6 +1304,7 @@ class EvolutionEngine:
         for match in matches:
             terms = ", ".join(match.get("matched_terms", [])) or "(none)"
             approval = str(match.get("approval_status") or "(none)")
+            approval_request_id = str(match.get("approval_request_id") or "").strip()
             next_action = self._skill_candidate_match_next_action(match)
             lines.extend([
                 f"### {match.get('skill_name')}",
@@ -1313,6 +1315,7 @@ class EvolutionEngine:
                 f"- Eval: `{match.get('eval_status')}`",
                 f"- Execution eval: `{match.get('execution_eval_status')}`",
                 f"- Approval: `{approval}`",
+                f"- Approval request: `{approval_request_id or '(none)'}`",
                 f"- Candidate: `{match.get('candidate_skill')}`",
                 f"- Next action: {next_action}",
                 "- Runtime: not auto-activated",
@@ -1330,7 +1333,7 @@ class EvolutionEngine:
         if approval == "blocked":
             return "inspect the blocked candidate report before revising or rejecting"
         if approval == "pending":
-            return "review the pending approval request before using this skill"
+            return "review pending approval request before using this skill"
         if eval_status != "passed":
             return "complete eval before approval"
         if execution_status != "passed":

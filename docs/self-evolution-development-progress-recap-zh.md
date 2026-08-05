@@ -4016,3 +4016,42 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 
 - 继续降低误匹配风险：增加最低分、匹配原因和候选状态过滤测试。
 - 后续可将 match report 与 approval review report 合并，减少用户来回查看。
+
+## 83. 最新推进记录：匹配报告展示 Pending Approval Request
+
+日期：2026-08-05
+
+本次让候选 skill 匹配报告能直接定位审批项。此前如果匹配到的候选已经进入 pending approval，报告只显示 `Approval: pending`，但没有 approval request id，用户还需要去 inbox 或日志里找具体审批请求。现在 match result 和 Markdown 报告都会包含 `approval_request_id`，并在 `Next action` 中提示先处理 pending approval request。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_render_skill_candidate_task_matches_shows_pending_approval_request`，覆盖匹配报告显示 pending approval request id。
+- 修改 `mewcode/evolution/engine.py`：`match_skill_candidates_for_task()` 返回 `approval_request_id`。
+- 修改 `mewcode/evolution/engine.py`：`render_skill_candidate_task_matches()` 输出 `Approval request` 行。
+- 修改 `mewcode/evolution/engine.py`：pending approval 的 next action 文案调整为 `review pending approval request before using this skill`。
+
+用户能看到什么：
+
+- 匹配到 pending approval 候选时，报告里直接显示 `approval_xxx`。
+- 用户可以用这个 id 对照 self-evolution approval/inbox，而不是只看到候选 skill 名。
+
+安全边界：
+
+- 仍不自动批准或启用候选 skill。
+- 只读取 manifest 中已有的 `approval_request_id`。
+- 不改变 approval request 生命周期。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_pending_approval_request -q
+1 failed  # 实现前红灯：匹配报告没有 approval request id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_pending_approval_request tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+2 passed
+```
+
+下一步计划：
+
+- 将 approval request id 与 TUI approval 打开动作更紧密地衔接，但仍不自动审批。
+- 继续补误匹配抑制和候选状态过滤测试。

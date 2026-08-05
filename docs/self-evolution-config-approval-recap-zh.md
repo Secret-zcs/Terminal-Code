@@ -2013,3 +2013,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_self_evolution_candidate_matches -q
 2 passed
 ```
+
+## Self-Evolution 匹配报告展示 Approval Request
+
+本次在候选 skill 匹配报告中加入 `Approval request`。当候选已经进入 pending approval，报告会显示对应的 `approval_xxx`，并提示 `Next action: review pending approval request before using this skill`。
+
+审批影响：
+
+- 用户可以从匹配报告直接定位 pending approval request。
+- 报告不会自动打开或批准 request。
+- 候选仍必须经过用户或配置策略允许的审批流程。
+
+安全策略：
+
+- 只读取 candidate manifest 里已有的 `approval_request_id`。
+- 不修改 request 状态。
+- 不绕过 `manual`、`deferred`、`trusted-auto` 的原有规则。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_pending_approval_request -q
+1 failed  # 实现前红灯：匹配报告没有 approval request id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_pending_approval_request tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+2 passed
+```
