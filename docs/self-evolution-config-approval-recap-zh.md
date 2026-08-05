@@ -2291,6 +2291,35 @@ python3 -m py_compile mewcode/app.py
 passed
 ```
 
+## Review Ready 通知展示 Request ID
+
+本次让 `format_review_notification()` 的 ready request 行展示 approval request id，格式变为 `approval_id / proposal_id / skill_name ...`。
+
+审批影响：
+
+- 不改变审批模式或审批状态。
+- 不自动处理 request。
+- 只让用户更容易定位要处理的 approval request。
+
+安全策略：
+
+- 只增加 request id 文本。
+- 不展示 eval report 内容，只保留原有 report path。
+- 不修改 candidate manifest、approval store 或 project skill。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_when_new_approval_open_fails -q
+2 failed  # 修复前通知缺少 approval request id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_when_new_approval_open_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_approval_widget -q
+3 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+passed
+```
+
 ## Review 流审批打开失败的降级展示
 
 本次让 `_run_self_evolution_review()` 尊重 `_show_self_evolution_approval()` 的 bool 返回值：新审批请求打不开时显示 ready notification；已有 pending request 打不开时继续展示 self-evolution inbox。

@@ -4598,3 +4598,44 @@ passed
 
 - 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
 - 继续梳理 review notification 中 request id / proposal id 的展示粒度，避免用户无法定位具体审批请求。
+
+## 97. 最新推进记录：Review Ready 通知展示 Approval Request ID
+
+日期：2026-08-05
+
+本次改进 self-evolution review notification 的可定位性。此前 `format_review_notification()` 只展示 proposal id、skill name、approval mode 和 report path；如果 approval card 打不开或用户只看到 fallback 文本，不容易定位具体 approval request。现在每条 ready request 会以 `approval_id / proposal_id / skill_name` 的形式展示。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：增强 `test_self_evolution_review_submits_ready_candidates_once`，断言 ready notification 包含 `SkillApprovalRequest.id`。
+- 修改 `tests/test_evolution.py`：增强 `test_tui_self_evolution_review_falls_back_when_new_approval_open_fails`，断言 fallback notification 包含打开失败的 approval request id。
+- 修改 `mewcode/evolution/auto_review.py`：`format_review_notification()` 在 request 行前增加 approval request id；如果对象缺少 id，则保持兼容并省略前缀。
+
+用户能看到什么：
+
+- ready notification 现在能直接显示 approval request id。
+- approval card 打不开时，fallback 通知也能告诉用户具体是哪一个审批请求需要处理。
+
+安全边界：
+
+- 不改变审批状态。
+- 不自动 approve、reject、promote 或 quarantine。
+- 只增加通知文本中的 request id，不暴露额外文件内容。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_when_new_approval_open_fails -q
+2 failed  # 实现前红灯：ready notification 和 fallback notification 都缺少 approval request id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_when_new_approval_open_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_approval_widget -q
+3 passed
+
+python3 -m py_compile mewcode/evolution/auto_review.py
+passed
+```
+
+下一步计划：
+
+- 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
+- 检查 blocked/generated candidate notification 是否也需要展示 candidate source review id 的更稳定格式。

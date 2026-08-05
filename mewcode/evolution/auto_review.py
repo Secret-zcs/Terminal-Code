@@ -45,8 +45,10 @@ def format_review_notification(result: dict) -> str:
             lines.append("")
         lines.append("Self-evolution approval request(s) ready:")
         for request in requests:
+            request_id = str(getattr(request, "id", "") or "").strip()
+            request_prefix = f"{request_id} / " if request_id else ""
             lines.append(
-                f"- {request.proposal_id} / {request.skill_name} "
+                f"- {request_prefix}{request.proposal_id} / {request.skill_name} "
                 f"mode={request.approval_mode} report={request.eval_report_markdown}"
             )
     if blocked:

@@ -1559,6 +1559,7 @@ class TestEvolutionEngine:
         assert result["requests"][0].approval_mode == "deferred"
         message = format_review_notification(result)
         assert "Self-evolution approval request" in message
+        assert result["requests"][0].id in message
         assert proposal.id in message
         assert "deferred" in message
 
@@ -2699,7 +2700,7 @@ class TestEvolutionEngine:
         assert opened == ["approval_failed_open"]
         assert len(messages) == 1
         assert "Self-evolution approval request(s) ready" in messages[0]
-        assert "approval_failed_open" not in messages[0]
+        assert "approval_failed_open" in messages[0]
         assert "proposal_ready" in messages[0]
 
     def test_tui_self_evolution_review_opens_existing_pending_request(
