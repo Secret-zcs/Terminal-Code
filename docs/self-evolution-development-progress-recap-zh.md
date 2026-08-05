@@ -4381,3 +4381,46 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_mat
 
 - 继续抽出 inbox/match card 共用的选项渲染和光标移动逻辑。
 - 给 approval 打开失败路径补测试，确保 request id 失效时 pending 状态和输入框状态可恢复。
+
+## 92. 最新推进记录：审批请求失效时恢复 Match Card 输入状态
+
+日期：2026-08-05
+
+本次补齐 `Open pending approval` 的失败路径：如果 match card 携带的 approval request id 已不存在或无法渲染审批详情，TUI 会显示失败消息，并把 chat input 恢复为可输入状态，避免用户卡在“match card 已消失、approval card 又没有打开”的中间态。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_match_response_restores_input_when_approval_missing`，覆盖失效 request id 的恢复逻辑。
+- 修改 `tests/test_evolution.py`：同步成功路径 mock，让 `_show_self_evolution_approval()` 返回 `True`，匹配新的返回值语义。
+- 修改 `mewcode/app.py`：新增 `_restore_chat_input_after_self_evolution_card()`，统一恢复 chat input 和 focus。
+- 修改 `mewcode/app.py`：`_show_self_evolution_approval()` 返回 `bool`，表示 approval card 是否已打开或已存在。
+- 修改 `mewcode/app.py`：`OPEN_APPROVAL` 分支仅在审批打开失败时恢复输入框；成功时保持审批态禁用。
+
+用户能看到什么：
+
+- 待审批请求仍存在时，点击 `Open pending approval` 后直接进入审批卡片，输入框保持禁用。
+- 待审批请求已失效时，界面显示 `Self-evolution approval failed...`，并恢复输入框，用户可以继续对话或触发新的自进化审计。
+
+安全边界：
+
+- 不自动审批、不自动启用、不自动生成新候选。
+- 失败恢复只影响 TUI 输入状态，不修改 candidate、approval request 或 skill 文件。
+- 失效 request id 不会被静默忽略，会展示失败原因。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_restores_input_when_approval_missing -q
+1 failed  # 实现前红灯：approval request 缺失时输入框仍保持 disabled=True
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_restores_input_when_approval_missing tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_views_audit tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_response_views_report_or_dismisses -q
+4 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
+下一步计划：
+
+- 抽出 inbox/match card 共用的选项渲染和光标移动逻辑，降低后续新增自进化卡片时的重复代码。
+- 给 `_show_self_evolution_approval()` 的返回值语义补更直接的单元测试，覆盖 duplicate pending request 和 agent 缺失场景。

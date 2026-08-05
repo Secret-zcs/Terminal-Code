@@ -1747,11 +1747,7 @@ class MewCodeApp(App):
         from mewcode.self_evolution_dialog import SelfEvolutionInboxChoice
 
         self._clear_pending_self_evolution_inbox()
-        try:
-            self.query_one("#chat-input").disabled = False
-            self.query_one("#chat-input").focus()
-        except Exception:
-            pass
+        self._restore_chat_input_after_self_evolution_card()
 
         if (
             event.choice == SelfEvolutionInboxChoice.VIEW_REPORT
@@ -1769,14 +1765,12 @@ class MewCodeApp(App):
             event.choice == SelfEvolutionMatchChoice.OPEN_APPROVAL
             and event.approval_request_id.strip()
         ):
-            self._show_self_evolution_approval(event.approval_request_id)
+            opened = self._show_self_evolution_approval(event.approval_request_id)
+            if not opened:
+                self._restore_chat_input_after_self_evolution_card()
             return
 
-        try:
-            self.query_one("#chat-input").disabled = False
-            self.query_one("#chat-input").focus()
-        except Exception:
-            pass
+        self._restore_chat_input_after_self_evolution_card()
 
         if (
             event.choice == SelfEvolutionMatchChoice.VIEW_AUDIT
@@ -1807,6 +1801,14 @@ class MewCodeApp(App):
         except Exception:
             pass
         self._pending_self_evolution_inbox_key = None
+
+    def _restore_chat_input_after_self_evolution_card(self) -> None:
+        try:
+            chat_input = self.query_one("#chat-input")
+            chat_input.disabled = False
+            chat_input.focus()
+        except Exception:
+            pass
 
     def _reload_skill_catalog_after_self_evolution(self) -> None:
         if self.skill_loader is None:
@@ -2296,21 +2298,22 @@ class MewCodeApp(App):
         except Exception:
             pass
 
-    def _show_self_evolution_approval(self, request_id: str) -> None:
+    def _show_self_evolution_approval(self, request_id: str) -> bool:
         if self.agent is None:
-            return
+            return False
         self._clear_pending_self_evolution_inbox()
         if getattr(self, "_pending_skill_approval_request_id", "") == request_id:
-            return
+            return True
         engine = EvolutionEngine(self.agent.work_dir)
         ok, review = engine.render_skill_approval_request(request_id)
         if not ok:
             self._show_system_message(f"Self-evolution approval failed: {review}")
-            return
+            return False
         self._pending_skill_approval_request_id = request_id
         asyncio.ensure_future(
             self._mount_self_evolution_approval(request_id, review)
         )
+        return True
 
     async def _mount_self_evolution_approval(
         self,

@@ -3011,7 +3011,12 @@ class TestEvolutionEngine:
         opened: list[str] = []
         focused: list[str] = []
         app._pending_self_evolution_match_key = ("match", "audit", "approval_123")
-        app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
+
+        def fake_show_approval(request_id: str) -> bool:
+            opened.append(request_id)
+            return True
+
+        app._show_self_evolution_approval = fake_show_approval  # type: ignore[method-assign]
 
         class FakeMatch:
             def remove(self) -> None:
@@ -3046,6 +3051,60 @@ class TestEvolutionEngine:
         assert focused == []
         assert app._pending_self_evolution_match_key is None
         assert opened == ["approval_123"]
+
+    def test_tui_self_evolution_match_response_restores_input_when_approval_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.self_evolution_dialog import (
+            InlineSelfEvolutionMatchWidget,
+            SelfEvolutionMatchChoice,
+        )
+
+        app = _make_test_mewcode_app()
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        removed: list[str] = []
+        focused: list[str] = []
+        app._pending_self_evolution_match_key = ("match", "audit", "missing_approval")
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        class FakeMatch:
+            def remove(self) -> None:
+                removed.append("match")
+
+        class FakeInput:
+            disabled = True
+
+            def focus(self) -> None:
+                focused.append("input")
+
+        fake_input = FakeInput()
+
+        def fake_query_one(selector: str, *_args: object) -> object:
+            if selector == "#self-evolution-match-inline":
+                return FakeMatch()
+            if selector == "#chat-input":
+                return fake_input
+            raise LookupError(selector)
+
+        app.query_one = fake_query_one  # type: ignore[method-assign]
+
+        app.on_inline_self_evolution_match_widget_responded(
+            InlineSelfEvolutionMatchWidget.Responded(
+                SelfEvolutionMatchChoice.OPEN_APPROVAL,
+                approval_request_id="missing_approval",
+            )
+        )
+
+        assert removed == ["match"]
+        assert fake_input.disabled is False
+        assert focused == ["input"]
+        assert app._pending_self_evolution_match_key is None
+        assert getattr(app, "_pending_skill_approval_request_id", "") == ""
+        assert messages == [
+            "Self-evolution approval failed: approval request missing_approval not found"
+        ]
 
     def test_tui_self_evolution_review_shows_existing_blocked_candidate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

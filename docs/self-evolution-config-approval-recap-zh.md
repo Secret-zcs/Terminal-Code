@@ -2261,3 +2261,32 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_shows_pending_approval_action tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_emits_view_audit_and_dismiss tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_views_audit -q
 3 passed
 ```
+
+## Approval Request 失效时的恢复策略
+
+本次为 `Open pending approval` 增加失败恢复：当 approval request id 已失效或无法渲染时，TUI 会恢复 chat input，并显示失败原因。
+
+审批影响：
+
+- 不改变 `manual`、`deferred`、`trusted-auto` 的审批语义。
+- 失效 request 不会被自动重建或自动批准。
+- 成功打开审批时仍保持输入框禁用，等待用户或审批策略处理。
+
+安全策略：
+
+- `_show_self_evolution_approval()` 返回 `True/False`，调用方可以区分“审批卡片已打开”和“打开失败”。
+- 打开失败只恢复 UI，不修改 manifest、approval store 或 project skill。
+- 错误会通过系统消息暴露，避免审批请求丢失时静默失败。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_restores_input_when_approval_missing -q
+1 failed  # 修复前输入框无法恢复
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_restores_input_when_approval_missing tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_views_audit tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_response_views_report_or_dismisses -q
+4 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
