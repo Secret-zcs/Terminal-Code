@@ -1048,6 +1048,8 @@ class TestEvolutionEngine:
             blocked_proposal.id
         ]
         assert inbox["blocked_candidates"][0]["approval_status"] == "blocked"
+        assert inbox["blocked_candidates"][0]["eval_case_count"] == 1
+        assert inbox["blocked_candidates"][0]["execution_eval_rounds"] == "0/1"
         assert inbox["blocked_candidates"][0]["blocked_reason"].startswith(
             "canary execution eval failed"
         )
@@ -1128,10 +1130,13 @@ class TestEvolutionEngine:
         assert "debug-regression-loop" in markdown
         assert "## Blocked Generated Candidates" in markdown
         assert blocked_proposal.id in markdown
+        assert "eval_cases=0" in markdown
+        assert "rounds=0/0" in markdown
         assert "review_inbox_blocked" in markdown
         assert ".mewcode/evolution/review_runs/review_inbox_blocked/report.md" in markdown
         assert "## Generated Candidates" in markdown
         assert generated_proposal.id in markdown
+        assert "eval_cases=0" in markdown
         assert "review_inbox_generated" in markdown
         assert ".mewcode/evolution/review_runs/review_inbox_generated/report.md" in markdown
 

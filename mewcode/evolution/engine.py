@@ -1441,6 +1441,8 @@ class EvolutionEngine:
         source = EvolutionEngine._render_candidate_source_suffix(item)
         return (
             f"- {item.get('proposal_id')} / {item.get('skill_name')} "
+            f"eval_cases={item.get('eval_case_count', 0)} "
+            f"rounds={item.get('execution_eval_rounds', '0/0')} "
             f"reason={item.get('blocked_reason')}{source}"
         )
 
@@ -1451,6 +1453,8 @@ class EvolutionEngine:
             f"- {item.get('proposal_id')} / {item.get('skill_name')} "
             f"eval={item.get('eval_status') or 'pending'} "
             f"execution={item.get('execution_eval_status') or 'pending'}"
+            f" eval_cases={item.get('eval_case_count', 0)} "
+            f"rounds={item.get('execution_eval_rounds', '0/0')}"
             f"{source}"
         )
 
@@ -1496,9 +1500,24 @@ class EvolutionEngine:
             "execution_eval_status": str(
                 manifest.get("execution_eval_status", "pending")
             ),
+            "eval_case_count": self._candidate_eval_case_count(manifest),
+            "execution_eval_rounds": self._candidate_execution_rounds(manifest),
         }
         item.update(self._candidate_source_review_run_item(proposal.id))
         return item
+
+    @staticmethod
+    def _candidate_eval_case_count(manifest: dict) -> int:
+        case_results = manifest.get("eval_case_results", [])
+        return len(case_results) if isinstance(case_results, list) else 0
+
+    @staticmethod
+    def _candidate_execution_rounds(manifest: dict) -> str:
+        rounds = manifest.get("execution_eval_rounds", [])
+        if not isinstance(rounds, list) or not rounds:
+            return "0/0"
+        passed = sum(1 for round_ in rounds if round_.get("status") == "passed")
+        return f"{passed}/{len(rounds)}"
 
     def _candidate_source_review_run_item(self, proposal_id: str) -> dict:
         matching_runs = []

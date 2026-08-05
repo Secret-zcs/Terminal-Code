@@ -5110,3 +5110,42 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 
 - 继续把“候选 skill 何时可进入审批”的 gate 原因展示得更具体。
 - 检查 blocked/generated inbox 是否也需要直接显示 eval case 覆盖摘要。
+
+## 110. 最新推进记录：Self-Evolution Inbox 展示候选 Eval 覆盖摘要
+
+日期：2026-08-05
+
+本次把 eval 覆盖摘要补到 self-evolution inbox 的 blocked/generated 候选列表。此前 approval 详情页已经能展示 eval case 覆盖，但用户在 inbox 总览中仍只能看到候选状态、review 来源和 report 路径，无法快速判断一个 blocked/generated 候选到底有没有经过任务用例验证。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_list_self_evolution_inbox_groups_pending_blocked_and_generated`，要求 blocked candidate item 暴露 `eval_case_count` 和 `execution_eval_rounds`。
+- 修改 `tests/test_evolution.py`：扩展 `test_render_self_evolution_inbox_summarizes_all_candidate_groups`，要求 blocked/generated inbox markdown 展示 `eval_cases` 和 `rounds`。
+- 修改 `mewcode/evolution/engine.py`：`_candidate_inbox_item()` 从 candidate manifest 派生 eval case 数量和 execution eval 通过轮次，并在 blocked/generated 行中渲染。
+
+用户能看到什么：
+
+- self-evolution inbox 总览中，blocked/generated 候选现在会显示 `eval_cases=<n>` 和 `rounds=<passed>/<total>`。
+- 用户不用进入 approval 详情或 review report，也能先判断候选 skill 的测试覆盖程度。
+
+安全边界：
+
+- 不新增候选状态，不改变 approval gate。
+- 不修改 manifest 写入格式，只读取已有 `eval_case_results` 和 `execution_eval_rounds`。
+- 不自动 approve/reject/promote。
+- 只增强 inbox 展示和只读结构化 item。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups -q
+2 failed  # 实现前红灯：item 缺少 eval_case_count，markdown 缺少 eval_cases/rounds
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups -q
+2 passed
+```
+
+下一步计划：
+
+- 继续把 blocked/generated 候选的 gate 原因做成更结构化的用户可读信息。
+- 评估是否需要在 candidate match card 中同步展示 eval coverage，避免用户只看到“匹配”但看不到候选可靠性。

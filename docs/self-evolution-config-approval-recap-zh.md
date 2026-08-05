@@ -2779,3 +2779,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_canary_execution_summary tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_review_materials tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_fork_reviewer_evidence -q
 3 passed
 ```
+
+## Self-Evolution Inbox 展示 Eval 覆盖
+
+本次把 eval coverage 摘要展示到 self-evolution inbox 的 blocked/generated 候选行。用户在进入审批详情前，就能看到候选 skill 的 eval case 数量和 execution eval 轮次。
+
+审批影响：
+
+- 不改变 `manual`、`deferred`、`trusted-auto` 审批模式。
+- 不改变候选进入审批、阻断或 promote 的条件。
+- 不改变 approval request 状态流转。
+- 只增强 inbox 总览的信息透明度。
+
+安全策略：
+
+- 只读取 candidate manifest 中已有的 `eval_case_results` 和 `execution_eval_rounds`。
+- 不写 approval store、candidate manifest、eval report 或 project skill。
+- 候选 skill 仍必须通过 eval 和 execution eval gate 后才能进入审批。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups -q
+2 failed  # 修复前 inbox item 和 markdown 都没有 eval coverage 摘要
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups -q
+2 passed
+```
