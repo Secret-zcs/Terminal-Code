@@ -1310,6 +1310,40 @@ class TestEvolutionEngine:
         assert len(runs) == 1
         assert runs[0].status == "running"
 
+    def test_self_evolution_review_recovers_stale_running_fork_reviewer(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+        from mewcode.evolution.models import SelfEvolutionReviewRun
+
+        engine = EvolutionEngine(tmp_path)
+        engine.store.save_self_evolution_review_run(
+            SelfEvolutionReviewRun(
+                id="review_stale",
+                mode="fork_reviewer",
+                status="running",
+                approval_mode="manual",
+                artifacts={"report": ".mewcode/evolution/review_runs/review_stale/report.md"},
+                created_at=1.0,
+            )
+        )
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+
+        runs = EvolutionEngine(tmp_path).store.load_self_evolution_review_runs()
+        stale = next(run for run in runs if run.id == "review_stale")
+        new_runs = [run for run in runs if run.id != "review_stale"]
+        assert result["status"] == "idle"
+        assert result["review_run"] is not None
+        assert stale.status == "failed"
+        assert "stale fork reviewer" in stale.error
+        assert len(new_runs) == 1
+        assert new_runs[0].status == "idle"
+
     def test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts(
         self, tmp_path: Path
     ) -> None:

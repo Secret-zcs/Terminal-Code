@@ -3774,3 +3774,42 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 补 active run 过期恢复：避免进程崩溃后旧 `running` run 永久阻塞新的自进化 review。
 - 给 review run lifecycle 增加更清晰的状态分类，区分 `busy` 返回结果和持久化 run 状态。
+
+## 77. 最新推进记录：Stale Fork Reviewer 自动恢复
+
+日期：2026-08-05
+
+本次补上 active fork reviewer 的异常恢复。上一轮新增了 `busy` gate，但如果进程崩溃或异常退出，旧 review run 可能一直停留在 `running`，从而永久阻塞后续自进化。现在 active run 判定会识别超过默认 1 小时的 `running` fork reviewer，将其标记为 `failed` 并写入错误原因，然后允许新的 review pass 正常启动。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_recovers_stale_running_fork_reviewer`，覆盖 stale running run 不再永久阻塞。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `FORK_REVIEWER_STALE_SECONDS = 60 * 60`。
+- 修改 `mewcode/evolution/auto_review.py`：`_active_fork_reviewer_run()` 对 stale run 调用 `_expire_stale_fork_reviewer_run()`，然后继续查找是否存在其他新鲜 running run。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_fork_reviewer_run_is_stale()` 和 `_expire_stale_fork_reviewer_run()`，集中处理过期判断和失败落盘。
+
+用户能看到什么：
+
+- 如果上一次 self-evolution review 因崩溃卡在 `running` 超过 1 小时，下一次触发会自动恢复，不会一直返回 busy。
+- 旧 run 会在 `.mewcode/evolution/review_runs.jsonl` 中保留为 `failed`，错误原因包含 `stale fork reviewer lock expired...`。
+
+安全边界：
+
+- 只恢复 review run 生命周期，不修改候选 skill 内容。
+- 不自动 approve、promote 或 quarantine。
+- 新鲜 running run 仍会返回 `busy`，不会并发启动第二个 fork reviewer。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_recovers_stale_running_fork_reviewer -q
+1 failed  # 实现前红灯：旧 running run 仍返回 busy，阻止新 review pass
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_recovers_stale_running_fork_reviewer tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running -q
+2 passed
+```
+
+下一步计划：
+
+- 考虑把 stale recovery 的 run id 也加入 notification，让用户在 CLI/TUI 里看到“已恢复旧卡死评审”。
+- 继续补更完整的多轮对话 candidate-skill 匹配测试。

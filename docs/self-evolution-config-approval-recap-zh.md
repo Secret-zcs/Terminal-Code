@@ -1851,3 +1851,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_busy_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running -q
 4 passed
 ```
+
+## Self-Evolution Stale Reviewer 恢复
+
+本次补 active fork reviewer 的异常恢复。若旧 review run 一直停留在 `running` 且超过默认 1 小时，新的 review pass 会先把旧 run 标记为 `failed`，错误原因写入 `stale fork reviewer lock expired...`，然后正常启动新的 fork reviewer。
+
+审批影响：
+
+- stale 恢复不会批准候选 skill。
+- stale 恢复不会推广 `.mewcode/skills/**/SKILL.md`。
+- stale 恢复只解除旧 `running` run 对新 review pass 的阻塞。
+
+安全策略：
+
+- 新鲜 `running` run 仍然返回 `busy`，不允许并发 review。
+- 过期 run 的失败状态会留在 review run 日志中，便于审计。
+- 不改变 `manual`、`deferred`、`trusted-auto` 三种审批模式的语义。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_recovers_stale_running_fork_reviewer -q
+1 failed  # 实现前红灯：旧 running run 仍返回 busy，阻止新 review pass
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_recovers_stale_running_fork_reviewer tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running -q
+2 passed
+```

@@ -11,6 +11,9 @@ from mewcode.evolution.engine import EvolutionEngine, MIN_EXECUTION_EVAL_CASES
 from mewcode.evolution.models import SelfEvolutionReviewRun, new_evolution_id
 
 
+FORK_REVIEWER_STALE_SECONDS = 60 * 60
+
+
 def format_review_notification(result: dict) -> str:
     requests = result.get("requests", [])
     blocked = result.get("blocked_generated_candidates", [])
@@ -105,10 +108,39 @@ def review_ready_skill_candidates(
 
 
 def _active_fork_reviewer_run(engine: EvolutionEngine) -> SelfEvolutionReviewRun | None:
+    now = time.time()
     for run in reversed(engine.store.load_self_evolution_review_runs()):
-        if run.mode == "fork_reviewer" and run.status == "running":
-            return run
+        if run.mode != "fork_reviewer" or run.status != "running":
+            continue
+        if _fork_reviewer_run_is_stale(run, now=now):
+            _expire_stale_fork_reviewer_run(engine, run, now=now)
+            continue
+        return run
     return None
+
+
+def _fork_reviewer_run_is_stale(
+    run: SelfEvolutionReviewRun,
+    *,
+    now: float,
+) -> bool:
+    created_at = float(run.created_at or 0.0)
+    return created_at > 0 and now - created_at > FORK_REVIEWER_STALE_SECONDS
+
+
+def _expire_stale_fork_reviewer_run(
+    engine: EvolutionEngine,
+    run: SelfEvolutionReviewRun,
+    *,
+    now: float,
+) -> None:
+    run.status = "failed"
+    run.completed_at = now
+    run.error = (
+        "stale fork reviewer lock expired after "
+        f"{FORK_REVIEWER_STALE_SECONDS} seconds"
+    )
+    engine.store.update_self_evolution_review_run(run)
 
 
 def _empty_review_result(status: str) -> dict:
