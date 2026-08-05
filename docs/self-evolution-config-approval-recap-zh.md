@@ -2752,3 +2752,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_report_includes_generated_canary_summary tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_blocks_failed_generated_candidate_in_report -q
 2 passed
 ```
+
+## Approval 详情展示 Eval Case 覆盖
+
+本次把 eval case 覆盖摘要展示到 approval request 详情页。用户打开 self-evolution approval card 时，可以直接看到候选 skill 的 eval case 数量、execution runner 分布和 case id。
+
+审批影响：
+
+- 不改变审批模式。
+- 不改变候选进入审批的条件。
+- 不改变 approve/reject/promote 行为。
+- 只增强审批材料的可读性和可审计性。
+
+安全策略：
+
+- 详情页复用已有 `_load_eval_cases()`，不会绕过 eval case 校验。
+- 候选 skill 仍必须通过 deterministic eval 和 execution eval。
+- 审批人能在提交 approve/reject 前看到测试覆盖摘要。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_canary_execution_summary -q
+1 failed  # 修复前 approval 详情没有 Eval Cases Summary
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_canary_execution_summary tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_review_materials tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_fork_reviewer_evidence -q
+3 passed
+```

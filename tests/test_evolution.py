@@ -949,6 +949,8 @@ class TestEvolutionEngine:
         ok, review = engine.render_skill_approval_request(request.id)
 
         assert ok, review
+        assert "## Eval Cases Summary" in review
+        assert "- Eval cases: `3`" in review
         assert "## Canary Execution Summary" in review
         assert "- Runner: `fork_agent_sandbox_deterministic`" in review
         assert "- Rounds: `3/3` passed" in review

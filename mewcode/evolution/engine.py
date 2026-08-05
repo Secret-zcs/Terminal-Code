@@ -1571,6 +1571,7 @@ class EvolutionEngine:
             eval_report = report_path.read_text(encoding="utf-8").strip()
         else:
             eval_report = f"(execution eval report not found: {report_path})"
+        eval_cases_summary = self._render_eval_cases_summary(proposal)
         canary_summary = self._render_canary_execution_summary(proposal.id)
         rollback_guard = self._render_trusted_auto_rollback_guard(request)
         fork_reviewer_evidence = self._render_fork_reviewer_evidence(proposal.id)
@@ -1587,6 +1588,13 @@ class EvolutionEngine:
             f"Eval report: {request.eval_report_markdown}",
             "",
         ]
+        if eval_cases_summary:
+            lines.extend([
+                "## Eval Cases Summary",
+                "",
+                eval_cases_summary,
+                "",
+            ])
         if canary_summary:
             lines.extend([
                 "## Canary Execution Summary",
@@ -1621,6 +1629,34 @@ class EvolutionEngine:
             "",
         ])
         return True, "\n".join(lines)
+
+    def _render_eval_cases_summary(self, proposal: EvolutionProposal) -> str:
+        cases, errors = self._load_eval_cases(proposal)
+        if not cases and not errors:
+            return ""
+        runner_counts: dict[str, int] = {}
+        for eval_case in cases:
+            runner = str(
+                eval_case.get("execution_runner", "deterministic_replay")
+            ).strip() or "deterministic_replay"
+            runner_counts[runner] = runner_counts.get(runner, 0) + 1
+        runner_summary = ", ".join(
+            f"{runner}={count}" for runner, count in sorted(runner_counts.items())
+        )
+        case_ids = [str(eval_case.get("id", "")).strip() for eval_case in cases]
+        rendered_ids = ", ".join(
+            f"`{case_id}`" for case_id in case_ids[:5] if case_id
+        )
+        if len(case_ids) > 5:
+            rendered_ids += f", ... (+{len(case_ids) - 5} more)"
+        lines = [f"- Eval cases: `{len(cases)}`"]
+        if runner_summary:
+            lines.append(f"- Execution runners: `{runner_summary}`")
+        if rendered_ids:
+            lines.append(f"- Case ids: {rendered_ids}")
+        if errors:
+            lines.append(f"- Eval case errors: `{len(errors)}`")
+        return "\n".join(lines)
 
     @staticmethod
     def _render_trusted_auto_rollback_guard(request: SkillApprovalRequest) -> str:

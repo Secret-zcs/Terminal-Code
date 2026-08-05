@@ -5072,3 +5072,41 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 
 - 将 approval request 详情页也补充候选测试覆盖摘要，让用户无需打开 report 文件即可看到测试效果。
 - 继续推进更接近 Hermes 的自动提取链路，但保持“测试通过后再申请应用”的 gate。
+
+## 109. 最新推进记录：Approval 详情页展示 Eval Case 覆盖摘要
+
+日期：2026-08-05
+
+本次把上一节 fork reviewer report 的测试覆盖信息前移到 approval request 详情页。此前用户打开 approval card 时能看到 canary execution summary 和完整 execution eval report，但没有一个醒目的 eval case 数量摘要；用户需要阅读后面的长报告才能判断候选 skill 被多少任务用例覆盖。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_render_skill_approval_request_shows_canary_execution_summary`，要求 approval 详情包含 `## Eval Cases Summary` 和 `Eval cases: 3`。
+- 修改 `mewcode/evolution/engine.py`：新增 `_render_eval_cases_summary()`，在 `render_skill_approval_request()` 中展示 eval case 数量、execution runner 分布和 case id。
+
+用户能看到什么：
+
+- 打开 skill approval card 时，顶部会先看到候选 skill 的 eval case 覆盖摘要。
+- 审批人不用翻到完整 execution eval report，也能快速知道候选 skill 至少经过几轮任务验证。
+
+安全边界：
+
+- 不改变 eval case 读取和校验逻辑，只复用已有 `_load_eval_cases()`。
+- 不改变 execution eval、approval request 或 promote gate。
+- 不自动 approve/reject。
+- 只增强 approval 详情展示。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_canary_execution_summary -q
+1 failed  # 实现前红灯：approval 详情缺少 Eval Cases Summary
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_canary_execution_summary tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_review_materials tests/test_evolution.py::TestEvolutionEngine::test_render_skill_approval_request_shows_fork_reviewer_evidence -q
+3 passed
+```
+
+下一步计划：
+
+- 继续把“候选 skill 何时可进入审批”的 gate 原因展示得更具体。
+- 检查 blocked/generated inbox 是否也需要直接显示 eval case 覆盖摘要。
