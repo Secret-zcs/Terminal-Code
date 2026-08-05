@@ -4801,3 +4801,43 @@ passed
 
 - 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
 - 检查 match card guarded mount 失败是否也需要用户可见提示。
+
+## 102. 最新推进记录：Match Card 挂载失败增加用户可见提示
+
+日期：2026-08-05
+
+本次补齐 self-evolution match card 的挂载失败可见性。此前 `_mount_self_evolution_match_guarded()` 只清理 `_pending_self_evolution_match_key`，用户看不到候选匹配提示为什么没有出现。现在挂载失败会显示 `Self-evolution match hint failed to open.`，同时保留 debug log。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_match_clears_pending_when_mount_fails`，覆盖 match card 挂载失败后 pending key 清理、系统消息和后续重试。
+- 修改 `mewcode/app.py`：`_mount_self_evolution_match_guarded()` 捕获异常后清理 pending key、显示系统消息并记录 debug log。
+
+用户能看到什么：
+
+- 如果候选 skill 匹配提示卡片打开失败，用户会看到明确系统消息。
+- pending key 仍会清理，后续任务匹配可重新尝试展示 match card。
+
+安全边界：
+
+- 不修改 candidate、approval request、eval report 或 project skill。
+- 不自动启用候选 skill。
+- 只改变 TUI 错误提示和日志。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_clears_pending_when_mount_fails -q
+1 failed  # 实现前红灯：messages 为空，match card 挂载失败静默
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_clears_pending_when_mount_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_match_card_can_open_pending_approval tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_views_audit tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval -q
+4 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
+下一步计划：
+
+- 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
+- 检查 inbox/match/approval 三类卡片失败提示是否需要统一文案 helper。

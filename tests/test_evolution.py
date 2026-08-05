@@ -3130,6 +3130,57 @@ class TestEvolutionEngine:
         assert request.id in match_markdown
         assert approval_request_id == request.id
 
+    @pytest.mark.asyncio
+    async def test_tui_self_evolution_match_clears_pending_when_mount_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+
+        app = _make_test_mewcode_app()
+        attempts: list[tuple[str, str, str]] = []
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        async def failing_mount(
+            match: str,
+            audit: str = "",
+            approval_request_id: str = "",
+        ) -> None:
+            attempts.append((match, audit, approval_request_id))
+            raise RuntimeError("mount failed")
+
+        app._mount_self_evolution_match = failing_mount  # type: ignore[method-assign]
+
+        app._show_self_evolution_match(
+            "# Self-Evolution Candidate Skill Matches",
+            "# Self-Evolution Candidate Skill Match Audit",
+            approval_request_id="approval_123",
+        )
+        await asyncio.sleep(0)
+
+        assert app._pending_self_evolution_match_key is None
+        assert messages == ["Self-evolution match hint failed to open."]
+
+        app._show_self_evolution_match(
+            "# Self-Evolution Candidate Skill Matches",
+            "# Self-Evolution Candidate Skill Match Audit",
+            approval_request_id="approval_123",
+        )
+        await asyncio.sleep(0)
+
+        assert attempts == [
+            (
+                "# Self-Evolution Candidate Skill Matches",
+                "# Self-Evolution Candidate Skill Match Audit",
+                "approval_123",
+            ),
+            (
+                "# Self-Evolution Candidate Skill Matches",
+                "# Self-Evolution Candidate Skill Match Audit",
+                "approval_123",
+            ),
+        ]
+
     def test_tui_self_evolution_match_response_views_audit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

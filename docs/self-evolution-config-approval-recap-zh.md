@@ -2291,6 +2291,35 @@ python3 -m py_compile mewcode/app.py
 passed
 ```
 
+## Match Card 挂载失败用户提示
+
+本次让 `_mount_self_evolution_match_guarded()` 在 match card 挂载失败时显示系统消息 `Self-evolution match hint failed to open.`，并继续清理 pending key。
+
+审批影响：
+
+- 不改变 approval mode。
+- 不处理或修改任何 approval request。
+- 不自动启用候选 skill。
+
+安全策略：
+
+- 只影响 TUI 错误提示和 debug log。
+- 不修改 approval store、candidate manifest、eval report 或 project skill。
+- pending key 清理保留，允许后续任务匹配重新展示 match card。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_clears_pending_when_mount_fails -q
+1 failed  # 修复前 match card 挂载失败静默
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_clears_pending_when_mount_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_match_card_can_open_pending_approval tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_views_audit tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval -q
+4 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
 ## Inbox 挂载失败用户提示
 
 本次让 `_mount_self_evolution_inbox_guarded()` 在 inbox widget 挂载失败时显示系统消息 `Self-evolution inbox failed to open.`，并继续清理 pending key。

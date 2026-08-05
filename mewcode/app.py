@@ -1143,9 +1143,14 @@ class MewCodeApp(App):
                 audit_markdown,
                 approval_request_id,
             )
-        except Exception:
+        except Exception as exc:
             if self._pending_self_evolution_match_key == match_key:
                 self._pending_self_evolution_match_key = None
+            try:
+                self._show_system_message("Self-evolution match hint failed to open.")
+            except Exception:
+                pass
+            log.debug("Self-evolution match hint mount failed: %s", exc)
 
     async def _mount_self_evolution_match(
         self,
