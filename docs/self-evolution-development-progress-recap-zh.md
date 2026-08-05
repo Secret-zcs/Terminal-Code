@@ -5267,3 +5267,42 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_revi
 
 - 给 complete API 的异常和非 running run 分支补测试，避免后台恢复时静默失败。
 - 在 TUI review 调度中接入 start/complete 边界，形成真正可观察的后台 review 生命周期。
+
+## 114. 最新推进记录：Fork Reviewer Run 增加子代理 Task Artifact
+
+日期：2026-08-05
+
+本次为 fork reviewer run 增加 `task.md` artifact。上一节已经把 review 生命周期拆成 start/complete 两个阶段，但 start 阶段只写 `input.json` 和 `policy.json`，更像内部程序状态；如果后续要接入真正 fork 子 Agent，它还缺少一份人类/模型都能直接读取的任务说明。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_fork_reviewer_run_can_start_and_complete_separately`，要求 start 后生成 `task.md`，且内容包含 `# Fork Reviewer Task`、`can_approve: false`、`can_promote: false`。
+- 修改 `mewcode/evolution/auto_review.py`：`_start_fork_reviewer_run()` 的 artifacts 新增 `task`，并写入 markdown 任务文件。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_render_fork_reviewer_task()`，输出 objective、当前输入计数、policy 和 required output。
+
+用户能看到什么：
+
+- 每个 fork reviewer run 现在有一份可读 `task.md`，说明这个 reviewer 应该做什么、不能做什么。
+- 后续真正 fork 子 Agent 可以直接读取 `task.md` 作为任务入口，而不是只解析 JSON。
+
+安全边界：
+
+- `task.md` 明确写入 `can_approve: false` 和 `can_promote: false`。
+- start 阶段仍不生成 candidate、不提交 approval、不写 project skill。
+- complete 阶段行为不变，仍走原 eval/execution eval/approval gate。
+- 本次只是任务 artifact，不启动真实 LLM 子 Agent。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_reviewer_run_can_start_and_complete_separately -q
+1 failed  # 实现前红灯：started_run.artifacts 缺少 task
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_reviewer_run_can_start_and_complete_separately tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_fork_reviewer_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts -q
+3 passed
+```
+
+下一步计划：
+
+- 给 `task.md` 与 `policy.json` 的一致性补更细测试，防止将来权限文案与真实 policy 漂移。
+- 在 TUI 调度里开始使用 start/complete，形成可观察后台生命周期。

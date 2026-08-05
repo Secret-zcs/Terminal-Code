@@ -427,6 +427,7 @@ def _start_fork_reviewer_run(
     artifacts = {
         "input": _project_relative(engine, run_dir / "input.json"),
         "policy": _project_relative(engine, run_dir / "policy.json"),
+        "task": _project_relative(engine, run_dir / "task.md"),
         "output": _project_relative(engine, run_dir / "output.json"),
         "report": _project_relative(engine, run_dir / "report.md"),
     }
@@ -469,6 +470,10 @@ def _start_fork_reviewer_run(
         json.dumps(policy, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    (engine.project_root / artifacts["task"]).write_text(
+        _render_fork_reviewer_task(input_payload, policy),
+        encoding="utf-8",
+    )
     run = SelfEvolutionReviewRun(
         id=run_id,
         mode="fork_reviewer",
@@ -479,6 +484,47 @@ def _start_fork_reviewer_run(
     )
     engine.store.save_self_evolution_review_run(run)
     return run
+
+
+def _render_fork_reviewer_task(input_payload: dict, policy: dict) -> str:
+    counts = input_payload.get("counts", {})
+    return "\n".join([
+        "# Fork Reviewer Task",
+        "",
+        "## Objective",
+        "",
+        (
+            "Review self-evolution evidence and candidate skills, then prepare "
+            "only the allowed approval requests and review artifacts."
+        ),
+        "",
+        "## Current Inputs",
+        "",
+        f"- approval_mode: {input_payload.get('approval_mode')}",
+        f"- evidence_count: {counts.get('evidence', 0)}",
+        f"- proposal_count: {counts.get('proposals', 0)}",
+        f"- approval_request_count: {counts.get('approval_requests', 0)}",
+        f"- skill_usage_count: {counts.get('skill_usage', 0)}",
+        "",
+        "## Policy",
+        "",
+        f"- can_record_evidence: {str(policy.get('can_record_evidence')).lower()}",
+        f"- can_generate_candidate: {str(policy.get('can_generate_candidate')).lower()}",
+        f"- can_generate_eval_case: {str(policy.get('can_generate_eval_case')).lower()}",
+        f"- can_run_eval: {str(policy.get('can_run_eval')).lower()}",
+        f"- can_submit_approval_request: {str(policy.get('can_submit_approval_request')).lower()}",
+        f"- can_approve: {str(policy.get('can_approve')).lower()}",
+        f"- can_promote: {str(policy.get('can_promote')).lower()}",
+        f"- project_write: {policy.get('project_write')}",
+        f"- network: {policy.get('network')}",
+        "",
+        "## Required Output",
+        "",
+        "- Write structured output.json and report.md through the review runner.",
+        "- Do not approve, promote, or edit project skills directly.",
+        "- Leave every candidate behind an eval, execution eval, and approval gate.",
+        "",
+    ])
 
 
 def _finish_fork_reviewer_run(

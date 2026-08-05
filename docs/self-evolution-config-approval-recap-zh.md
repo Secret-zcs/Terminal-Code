@@ -2888,3 +2888,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_revi
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_reviewer_run_can_start_and_complete_separately tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_fork_reviewer_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_recovers_stale_running_fork_reviewer -q
 4 passed
 ```
+
+## Fork Reviewer Task Artifact
+
+本次为 fork reviewer run 增加 `task.md`。它把 review 子任务、输入计数、权限策略和输出要求写成 markdown，方便后续真实 fork 子 Agent 或用户审计读取。
+
+审批影响：
+
+- 不改变审批模式。
+- 不改变 start/complete API 的状态流转。
+- 不改变 approval request 生成条件。
+- 不自动 approve/promote。
+
+安全策略：
+
+- `task.md` 明确展示 `can_approve: false` 和 `can_promote: false`。
+- task artifact 与 policy artifact 一起生成，便于审计子 Agent 权限边界。
+- 子 Agent 任务说明要求通过 runner 写 output/report，不允许直接编辑 project skill。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_reviewer_run_can_start_and_complete_separately -q
+1 failed  # 修复前 fork reviewer run 没有 task artifact
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_reviewer_run_can_start_and_complete_separately tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_fork_reviewer_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts -q
+3 passed
+```

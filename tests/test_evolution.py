@@ -1471,6 +1471,13 @@ class TestEvolutionEngine:
         assert started_run.status == "running"
         assert (tmp_path / started_run.artifacts["input"]).is_file()
         assert (tmp_path / started_run.artifacts["policy"]).is_file()
+        assert (tmp_path / started_run.artifacts["task"]).is_file()
+        task_markdown = (tmp_path / started_run.artifacts["task"]).read_text(
+            encoding="utf-8"
+        )
+        assert "# Fork Reviewer Task" in task_markdown
+        assert "can_approve: false" in task_markdown
+        assert "can_promote: false" in task_markdown
         assert not (tmp_path / started_run.artifacts["output"]).exists()
         assert not (tmp_path / started_run.artifacts["report"]).exists()
         assert EvolutionEngine(tmp_path).store.load_skill_approval_requests() == []
