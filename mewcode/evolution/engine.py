@@ -1288,6 +1288,8 @@ class EvolutionEngine:
                 "execution_eval_status": str(
                     manifest.get("execution_eval_status", "pending")
                 ),
+                "eval_case_count": self._candidate_eval_case_count(manifest),
+                "execution_eval_rounds": self._candidate_execution_rounds(manifest),
                 "candidate_skill": str(manifest.get("candidate_skill", "")),
                 "created_at": float(manifest.get("created_at", proposal.created_at) or 0.0),
             })
@@ -1337,6 +1339,8 @@ class EvolutionEngine:
                 f"- Matched terms: {terms}",
                 f"- Eval: `{match.get('eval_status')}`",
                 f"- Execution eval: `{match.get('execution_eval_status')}`",
+                f"- Eval cases: `{match.get('eval_case_count', 0)}`",
+                f"- Execution rounds: `{match.get('execution_eval_rounds', '0/0')}`",
                 f"- Approval: `{approval}`",
                 f"- Approval request: `{approval_request_id or '(none)'}`",
                 f"- Candidate: `{match.get('candidate_skill')}`",
@@ -1382,6 +1386,8 @@ class EvolutionEngine:
                 f"- Matched terms: {terms}",
                 f"- Eval: `{match.get('eval_status')}`",
                 f"- Execution eval: `{match.get('execution_eval_status')}`",
+                f"- Eval cases: `{match.get('eval_case_count', 0)}`",
+                f"- Execution rounds: `{match.get('execution_eval_rounds', '0/0')}`",
                 f"- Approval: `{approval}`",
                 f"- Approval request: `{approval_request_id or '(none)'}`",
                 f"- Candidate: `{match.get('candidate_skill')}`",

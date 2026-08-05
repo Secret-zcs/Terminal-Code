@@ -1220,6 +1220,8 @@ class TestEvolutionEngine:
         )
 
         assert request.id in markdown
+        assert "Eval cases: `3`" in markdown
+        assert "Execution rounds: `3/3`" in markdown
         assert "Approval: `pending`" in markdown
         assert "Next action: review pending approval request" in markdown
 

@@ -5149,3 +5149,41 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_self
 
 - 继续把 blocked/generated 候选的 gate 原因做成更结构化的用户可读信息。
 - 评估是否需要在 candidate match card 中同步展示 eval coverage，避免用户只看到“匹配”但看不到候选可靠性。
+
+## 111. 最新推进记录：Candidate Match Card 展示 Eval 覆盖摘要
+
+日期：2026-08-05
+
+本次把 eval coverage 摘要补到候选 skill 匹配卡片。此前用户输入任务后，如果当前任务与某个候选 skill 匹配，TUI 只展示匹配分数、状态、approval request 和下一步动作；用户能判断“相关”，但不能直接判断“可靠”。现在匹配卡片和完整 audit 都会展示候选经过多少 eval case 和多少 execution eval 轮次。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_render_skill_candidate_task_matches_shows_pending_approval_request`，要求匹配卡片展示 `Eval cases: 3` 和 `Execution rounds: 3/3`。
+- 修改 `mewcode/evolution/engine.py`：`match_skill_candidates_for_task()` 返回 `eval_case_count` 与 `execution_eval_rounds`，并在 match/audit markdown 中渲染。
+
+用户能看到什么：
+
+- 当某个候选 skill 匹配当前任务时，提示卡片会同时显示相关性和测试覆盖。
+- 用户在打开 pending approval 前，就能看到候选是否已经通过多轮任务评测。
+
+安全边界：
+
+- 不改变候选匹配评分逻辑。
+- 不改变 approval gate、execution eval gate 或 promote gate。
+- 不自动加载或启用候选 skill。
+- 只增强只读匹配提示和审计 markdown。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_pending_approval_request -q
+1 failed  # 实现前红灯：match card 缺少 Eval cases 和 Execution rounds
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_pending_approval_request tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_summarizes_hidden_matches tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_mounts_self_evolution_match_audit_widget -q
+3 passed
+```
+
+下一步计划：
+
+- 继续结构化 blocked/generated 候选的 gate reason，减少用户读长报告的成本。
+- 评估是否将 match coverage 信息折叠到更短的一行，避免 TUI 卡片过长。

@@ -2806,3 +2806,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_self
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups -q
 2 passed
 ```
+
+## Candidate Match Card 展示 Eval 覆盖
+
+本次把 eval coverage 摘要展示到 candidate match card 和完整 match audit。用户看到候选 skill 与当前任务匹配时，可以同时看到候选的测试覆盖，而不是只看到匹配分数。
+
+审批影响：
+
+- 不改变审批模式。
+- 不改变候选匹配评分、排序或过滤逻辑。
+- 不改变 approval request 状态流转。
+- 不自动启用候选 skill。
+
+安全策略：
+
+- match card 仍是只读提示。
+- 候选 skill 仍必须通过 eval、execution eval 和 approval gate。
+- 覆盖摘要只读取 candidate manifest 中已有的 eval 结果。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_pending_approval_request -q
+1 failed  # 修复前 match card 没有 eval coverage 摘要
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_pending_approval_request tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_summarizes_hidden_matches tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_mounts_self_evolution_match_audit_widget -q
+3 passed
+```
