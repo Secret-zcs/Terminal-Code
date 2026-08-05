@@ -33,6 +33,20 @@ def format_review_notification(result: dict) -> str:
         if expired:
             message += " Recovered stale review run(s): " + ", ".join(expired) + "."
         return message
+    if result.get("status") == "started":
+        run = result.get("review_run")
+        run_id = str(getattr(run, "id", "") or "").strip()
+        artifacts = getattr(run, "artifacts", {}) or {}
+        task = str(artifacts.get("task", "")).strip()
+        report = str(artifacts.get("report", "")).strip()
+        message = "Self-evolution review started."
+        if run_id:
+            message += f" Run: {run_id}."
+        if task:
+            message += f" Task: {task}."
+        if report:
+            message += f" Report: {report}."
+        return message
     if not requests and not blocked and not expired:
         return ""
     lines = []

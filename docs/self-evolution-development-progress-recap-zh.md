@@ -5306,3 +5306,40 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_revi
 
 - 给 `task.md` 与 `policy.json` 的一致性补更细测试，防止将来权限文案与真实 policy 漂移。
 - 在 TUI 调度里开始使用 start/complete，形成可观察后台生命周期。
+
+## 115. 最新推进记录：Started Fork Reviewer 增加用户可见通知
+
+日期：2026-08-05
+
+本次为 `started` 状态的 fork reviewer run 增加通知文案。上一节 start API 已经能创建 running run 和 `task.md`，但 `format_review_notification()` 对 `started` 结果仍返回空字符串。如果 TUI 后续接入 start/complete 后台生命周期，用户会看不到 review 是否启动、run id 是什么、task artifact 在哪里。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_notification_shows_started_review_run`，要求 started 结果展示 `Self-evolution review started`、run id 和 task 路径。
+- 修改 `mewcode/evolution/auto_review.py`：`format_review_notification()` 增加 `started` 分支，输出 run id、task artifact 和 report artifact。
+
+用户能看到什么：
+
+- 后续后台 review 启动后，用户可以看到 `Self-evolution review started. Run: ... Task: ... Report: ...`。
+- 这让 running review 不再是静默后台状态，便于用户审计和排查。
+
+安全边界：
+
+- 不改变 review 执行逻辑。
+- 不提交 approval、不 promote、不写 project skill。
+- 只增加通知格式化，不改变 run 状态机。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_started_review_run -q
+1 failed  # 实现前红灯：started notification 为空字符串
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_started_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_busy_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_recovered_stale_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once -q
+4 passed
+```
+
+下一步计划：
+
+- 在 TUI review 调度中尝试接入 start/complete，先做到“启动有提示、完成有审批卡片或 inbox”。
+- 再评估是否需要把 complete 阶段放到真正后台 task 中运行。

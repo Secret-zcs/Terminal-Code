@@ -2915,3 +2915,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_revi
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_reviewer_run_can_start_and_complete_separately tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_fork_reviewer_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts -q
 3 passed
 ```
+
+## Started Fork Reviewer 用户通知
+
+本次为 `started` review result 增加用户可见通知。它让后台化 fork reviewer 在启动后能展示 run id、task artifact 和 report artifact，避免用户看到静默状态。
+
+审批影响：
+
+- 不改变审批模式。
+- 不改变 start/complete 状态流转。
+- 不提交 approval request。
+- 不自动 approve/promote。
+
+安全策略：
+
+- 通知只展示项目内相对 artifact 路径。
+- 不暴露绝对路径。
+- 不改变 review policy 或 candidate gate。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_started_review_run -q
+1 failed  # 修复前 started result 没有用户可见消息
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_started_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_busy_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_recovered_stale_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once -q
+4 passed
+```
