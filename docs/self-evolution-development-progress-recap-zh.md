@@ -4959,3 +4959,40 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill
 
 - 继续清理 approval/inbox/match 三类自进化卡片的错误提示分支。
 - 检查是否还有 engine 错误消息绕过路径脱敏 helper。
+
+## 106. 最新推进记录：Approval 响应缺少 Agent 时清理 Pending 状态
+
+日期：2026-08-05
+
+本次修复 approval card 响应阶段的 UI 状态恢复问题。上一节已经让无 active agent 的 approve/reject 响应显示错误提示，但该分支仍可能保留 `_pending_skill_approval_request_id`。如果 pending id 残留，后续重新打开同一 approval request 时会被 duplicate guard 判定为“已经打开”，从而不再挂载新的审批卡片。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_tui_skill_approval_response_without_agent_is_user_visible`，要求 no-agent 分支同时清理 pending approval id。
+- 修改 `mewcode/app.py`：`on_inline_skill_approval_widget_responded()` 在 `self.agent is None` 返回前清空 `_pending_skill_approval_request_id`。
+
+用户能看到什么：
+
+- approve/reject 时如果 active agent 丢失，用户仍会看到明确失败提示。
+- 该失败不会让 approval UI 卡死；用户恢复 agent 后可以重新打开同一审批请求。
+
+安全边界：
+
+- 不自动 approve/reject。
+- 不修改 approval request、candidate manifest、eval report 或 project skill。
+- 只清理 TUI pending 状态，防止 stale UI guard 阻塞后续打开。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible -q
+1 failed  # 实现前红灯：_pending_skill_approval_request_id 残留 approval_missing_agent
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_failure_sanitizes_absolute_paths tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+3 passed
+```
+
+下一步计划：
+
+- 对 self-evolution match/inbox 入口继续检查类似 stale pending 状态。
+- 如果发现重复文案逻辑，提取小型 helper，但不改变审批状态机。

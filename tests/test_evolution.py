@@ -4040,6 +4040,7 @@ class TestEvolutionEngine:
 
         app = _make_test_mewcode_app()
         app.agent = None
+        app._pending_skill_approval_request_id = "approval_missing_agent"
         messages: list[str] = []
         app._show_system_message = messages.append  # type: ignore[method-assign]
 
@@ -4053,6 +4054,7 @@ class TestEvolutionEngine:
         assert messages == [
             "Self-evolution approval failed: no active agent."
         ]
+        assert getattr(app, "_pending_skill_approval_request_id", "") == ""
 
     def test_tui_skill_approval_response_failure_sanitizes_absolute_paths(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -2671,3 +2671,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_failure_sanitizes_absolute_paths tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible -q
 3 passed
 ```
+
+## Approval 响应缺少 Agent 的 Pending 清理
+
+本次补齐 approval response no-agent 分支的 pending 状态清理。该分支已经会给用户提示，但如果 `_pending_skill_approval_request_id` 不清空，后续打开同一个 approval request 会被重复挂载保护误判为已打开。
+
+审批影响：
+
+- 不改变审批模式。
+- 不改变 approve/reject 结果。
+- 不自动提交或撤回 approval request。
+- 只恢复 TUI 内部 pending 状态。
+
+安全策略：
+
+- active agent 缺失时不执行 resolve。
+- 不写 approval store、candidate manifest、eval report 或 project skill。
+- 清理 pending id 的目的只是让用户后续可以重新打开审批卡片。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible -q
+1 failed  # 修复前 no-agent 分支留下 stale pending approval id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_failure_sanitizes_absolute_paths tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+3 passed
+```
