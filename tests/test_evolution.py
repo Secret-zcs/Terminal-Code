@@ -1280,6 +1280,36 @@ class TestEvolutionEngine:
         assert (tmp_path / run.artifacts["policy"]).is_file()
         assert (tmp_path / run.artifacts["report"]).is_file()
 
+    def test_self_evolution_review_skips_when_fork_reviewer_is_running(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import review_ready_skill_candidates
+        from mewcode.evolution.models import SelfEvolutionReviewRun
+
+        engine = EvolutionEngine(tmp_path)
+        engine.store.save_self_evolution_review_run(
+            SelfEvolutionReviewRun(
+                id="review_running",
+                mode="fork_reviewer",
+                status="running",
+                approval_mode="manual",
+                artifacts={"report": ".mewcode/evolution/review_runs/review_running/report.md"},
+            )
+        )
+
+        result = review_ready_skill_candidates(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+
+        runs = EvolutionEngine(tmp_path).store.load_self_evolution_review_runs()
+        assert result["status"] == "busy"
+        assert result["active_review_run_id"] == "review_running"
+        assert result["review_run"] is None
+        assert len(runs) == 1
+        assert runs[0].status == "running"
+
     def test_self_evolution_review_records_trusted_auto_policy_in_run_artifacts(
         self, tmp_path: Path
     ) -> None:
@@ -1365,6 +1395,23 @@ class TestEvolutionEngine:
         assert "Self-evolution blocked generated candidate(s):" in message
         assert "prop_blocked / failing-generated-loop" in message
         assert "generated candidate canary failed: 0/3" in message
+
+    def test_self_evolution_review_notification_shows_busy_review_run(
+        self,
+    ) -> None:
+        from mewcode.evolution.auto_review import format_review_notification
+
+        message = format_review_notification({
+            "status": "busy",
+            "active_review_run_id": "review_running",
+            "active_review_report": ".mewcode/evolution/review_runs/review_running/report.md",
+            "requests": [],
+            "blocked_generated_candidates": [],
+        })
+
+        assert "Self-evolution review already running" in message
+        assert "review_running" in message
+        assert ".mewcode/evolution/review_runs/review_running/report.md" in message
 
     def test_self_evolution_review_creates_usage_patch_candidate(
         self, tmp_path: Path
@@ -2421,6 +2468,47 @@ class TestEvolutionEngine:
         app._run_self_evolution_review()
 
         assert opened == [request.id]
+
+    def test_tui_self_evolution_review_shows_busy_message(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.config import SelfEvolutionConfig
+
+        monkeypatch.setattr(
+            app_module,
+            "review_ready_skill_candidates",
+            lambda *_args, **_kwargs: {
+                "status": "busy",
+                "active_review_run_id": "review_running",
+                "active_review_report": (
+                    ".mewcode/evolution/review_runs/review_running/report.md"
+                ),
+                "requests": [],
+                "blocked_generated_candidates": [],
+            },
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        inboxes: list[tuple[str, str]] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+        app._show_self_evolution_inbox = (  # type: ignore[method-assign]
+            lambda inbox, report: inboxes.append((inbox, report))
+        )
+
+        app._run_self_evolution_review()
+
+        assert inboxes == []
+        assert len(messages) == 1
+        assert "Self-evolution review already running" in messages[0]
+        assert "review_running" in messages[0]
 
     def test_tui_self_evolution_review_shows_existing_blocked_candidate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

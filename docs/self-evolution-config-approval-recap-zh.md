@@ -1796,3 +1796,58 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_dupli
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox -q
 4 passed
 ```
+
+## Self-Evolution Fork Reviewer Busy Gate
+
+本次给 self-evolution review pass 增加 running reviewer 并发保护。若 `.mewcode/evolution/review_runs.jsonl` 中已有 `mode=fork_reviewer` 且 `status=running` 的 run，新的 `review_ready_skill_candidates()` 直接返回 `status=busy`，并携带 `active_review_run_id` 与 `active_review_report`，不再创建第二个 review run。
+
+审批影响：
+
+- 不会因为多入口触发而重复生成同一批候选 skill。
+- 不会因为并发 review 而重复提交 approval request。
+- `manual`、`deferred`、`trusted-auto` 的审批语义不变；只是进入审批前多了一道“同一时间只允许一个 fork reviewer”保护。
+
+安全策略：
+
+- `busy` 是 transient review result，不代表候选 skill 被批准或拒绝。
+- 运行中的 fork reviewer 仍不能 approve 或 promote。
+- 不新增用户命令；用户只会看到当前 review 正在运行的提示。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running -q
+1 failed  # 实现前红灯：已有 running run 时仍返回 idle 并启动新 run
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_fork_reviewer_run -q
+2 passed
+```
+
+## Self-Evolution Busy 提示可见化
+
+本次把 `busy` 状态接到 CLI/TUI 通知层。`format_review_notification()` 现在会为 `busy` 结果生成明确文案，包含 active review run id 和 report 路径；TUI 在渲染 inbox 前优先处理 `busy`，避免展示空 inbox。
+
+审批影响：
+
+- 用户能知道“这次没有新审批”是因为已有 fork reviewer 正在运行，而不是系统没反应。
+- pending approval request 仍保持更高优先级；已有审批不会被 busy 文案覆盖。
+- 空 inbox 不再遮挡 busy 状态。
+
+安全策略：
+
+- 不改变 approval request、approve、reject、promote、rollback 或 quarantine 行为。
+- 不改变候选 skill 的评测门槛。
+- 只改变 busy 状态的用户可见反馈。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_busy_review_run -q
+1 failed  # 实现前红灯：busy formatter 返回空字符串
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message -q
+1 failed  # 实现前红灯：TUI 挂载空 inbox，没有显示 busy message
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_busy_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running -q
+4 passed
+```

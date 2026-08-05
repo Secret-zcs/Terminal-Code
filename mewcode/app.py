@@ -2024,6 +2024,11 @@ class MewCodeApp(App):
                     f"{len(requests)} self-evolution approval requests are pending."
                 )
             return
+        message = format_review_notification(result)
+        if result.get("status") == "busy":
+            if message:
+                self._show_system_message(message)
+            return
         if result.get("status") != "disabled":
             engine = EvolutionEngine(self.agent.work_dir)
             inbox = engine.list_self_evolution_inbox()
@@ -2039,7 +2044,6 @@ class MewCodeApp(App):
                 )
                 self._show_self_evolution_inbox(inbox_message, report_detail)
                 return
-        message = format_review_notification(result)
         if message:
             self._show_system_message(message)
 

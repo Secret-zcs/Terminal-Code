@@ -3692,3 +3692,85 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 继续检查 approval reject path 的状态清理和用户反馈文案。
 - 把输入框 fake chat/input 也抽成 helper，进一步减少 TUI 测试样板。
+
+## 75. 最新推进记录：Fork Reviewer 并发运行保护
+
+日期：2026-08-05
+
+本次补 self-evolution review pass 的执行边界。此前 `.mewcode/evolution/review_runs.jsonl` 中如果已经存在 `running` 状态的 `fork_reviewer`，再次触发 `review_ready_skill_candidates()` 仍会新建第二个 review run。这样在真实后台/多入口触发时，可能并发生成候选 skill、重复提交 approval request，削弱“候选 skill 先评测再审批”的可信度。现在 review pass 会先检查 active fork reviewer；如果已有运行中的 run，直接返回 `busy`，不创建新 run、不生成候选、不提交审批。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_skips_when_fork_reviewer_is_running`，覆盖 running fork reviewer 存在时不启动第二个 run。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `_active_fork_reviewer_run()`，在启动 review run 前执行 active run gate。
+- 修改 `mewcode/evolution/auto_review.py`：`_empty_review_result()` 新增 `active_review_run_id` 和 `active_review_report` 字段，便于上层识别 busy 原因。
+- 修改 `mewcode/evolution/models.py`：`SelfEvolutionReviewRunStatus` 增加 `busy`，保持状态枚举与返回值一致。
+
+用户能看到什么：
+
+- 如果自进化评审已经在运行，新的触发不会重复启动第二个评审。
+- `busy` 结果会带上当前 active review run id 和报告路径，后续 UI/日志可以明确提示用户“已有评审在运行”。
+
+安全边界：
+
+- 不改变候选 skill 生成规则。
+- 不改变 eval、execution eval、canary、approval、promote、rollback 或 quarantine 逻辑。
+- 不新增用户命令。
+- 只限制并发 review pass，避免同一批候选被多路处理。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running -q
+1 failed  # 实现前红灯：已有 running run 时仍返回 idle 并启动新 run
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_fork_reviewer_run -q
+2 passed
+```
+
+下一步计划：
+
+- 为 busy 状态补 TUI/CLI 用户可见提示，避免用户看不懂“为什么这次没有生成新审批”。
+- 继续补 active run 超时/异常恢复策略，避免进程崩溃后 `running` 状态永久阻塞自进化。
+
+## 76. 最新推进记录：Fork Reviewer Busy 状态用户可见化
+
+日期：2026-08-05
+
+本次把上一轮新增的 `busy` 状态接到用户可见层。此前 `format_review_notification()` 不处理 `busy`，CLI 会静默；TUI 中 `_run_self_evolution_review()` 会先进入 inbox 渲染逻辑，可能展示一个全为空的 Self-Evolution Inbox，而不是告诉用户已有 review run 正在运行。现在 `busy` 会生成明确提示，并且 TUI 在 inbox 之前优先展示该提示。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_notification_shows_busy_review_run`，覆盖 `busy` formatter 文案。
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_shows_busy_message`，覆盖 TUI 忙碌状态不挂空 inbox，而是显示系统消息。
+- 修改 `mewcode/evolution/auto_review.py`：`format_review_notification()` 支持 `status == "busy"`，输出 active run id 和 report 路径。
+- 修改 `mewcode/app.py`：`_run_self_evolution_review()` 在 inbox 分支前处理 `busy`，避免 busy 被空 inbox 截走。
+
+用户能看到什么：
+
+- CLI：如果自进化 review 已经运行，会在 stderr 输出 `Self-evolution review already running...`。
+- TUI：如果自进化 review 已经运行，会显示系统消息，而不是出现一个没有候选、没有审批、没有阻断项的空 inbox。
+
+安全边界：
+
+- 不改变候选生成、评测、审批、推广、回滚或隔离逻辑。
+- 不新增用户命令。
+- 只改变 busy 状态的提示路径和 TUI 分支优先级。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_busy_review_run -q
+1 failed  # 实现前红灯：busy formatter 返回空字符串
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message -q
+1 failed  # 实现前红灯：TUI 挂载空 inbox，没有显示 busy message
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_busy_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running -q
+4 passed
+```
+
+下一步计划：
+
+- 补 active run 过期恢复：避免进程崩溃后旧 `running` run 永久阻塞新的自进化 review。
+- 给 review run lifecycle 增加更清晰的状态分类，区分 `busy` 返回结果和持久化 run 状态。

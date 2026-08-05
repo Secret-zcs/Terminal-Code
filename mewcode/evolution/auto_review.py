@@ -14,6 +14,15 @@ from mewcode.evolution.models import SelfEvolutionReviewRun, new_evolution_id
 def format_review_notification(result: dict) -> str:
     requests = result.get("requests", [])
     blocked = result.get("blocked_generated_candidates", [])
+    if result.get("status") == "busy":
+        active_id = str(result.get("active_review_run_id", "")).strip()
+        report = str(result.get("active_review_report", "")).strip()
+        message = "Self-evolution review already running."
+        if active_id:
+            message += f" Active run: {active_id}."
+        if report:
+            message += f" Report: {report}."
+        return message
     if not requests and not blocked:
         return ""
     lines = []
@@ -61,6 +70,13 @@ def review_ready_skill_candidates(
         ["failure", "user_feedback"],
     )
     engine = EvolutionEngine(project_root)
+    active_run = _active_fork_reviewer_run(engine)
+    if active_run is not None:
+        result = _empty_review_result("busy")
+        result["active_review_run_id"] = active_run.id
+        result["active_review_report"] = active_run.artifacts.get("report", "")
+        return result
+
     review_run = _start_fork_reviewer_run(
         engine,
         approval_mode=approval_mode,
@@ -88,6 +104,13 @@ def review_ready_skill_candidates(
     return result
 
 
+def _active_fork_reviewer_run(engine: EvolutionEngine) -> SelfEvolutionReviewRun | None:
+    for run in reversed(engine.store.load_self_evolution_review_runs()):
+        if run.mode == "fork_reviewer" and run.status == "running":
+            return run
+    return None
+
+
 def _empty_review_result(status: str) -> dict:
     return {
         "status": status,
@@ -103,6 +126,8 @@ def _empty_review_result(status: str) -> dict:
         "auto_quarantines": [],
         "ingested_usage": [],
         "review_run": None,
+        "active_review_run_id": "",
+        "active_review_report": "",
     }
 
 

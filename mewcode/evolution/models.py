@@ -28,6 +28,7 @@ ProposalRisk = Literal["low", "medium", "high"]
 SkillApprovalStatus = Literal["pending", "approved", "rejected"]
 SelfEvolutionReviewRunStatus = Literal[
     "running",
+    "busy",
     "idle",
     "generated",
     "submitted",
