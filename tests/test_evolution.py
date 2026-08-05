@@ -3848,6 +3848,8 @@ class TestEvolutionEngine:
         request = engine.submit_skill_approval_request(proposal.id)
         app = _make_test_mewcode_app()
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
 
         async def failing_mount(_request_id: str, _review_markdown: str) -> None:
             raise RuntimeError("mount failed")
@@ -3859,6 +3861,9 @@ class TestEvolutionEngine:
 
         assert opened is True
         assert getattr(app, "_pending_skill_approval_request_id", "") == ""
+        assert messages == [
+            f"Self-evolution approval card failed to open: {request.id}."
+        ]
 
     def test_add_eval_case_invalidates_existing_execution_eval(
         self, tmp_path: Path

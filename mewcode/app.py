@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import random
 import time as _time
@@ -78,6 +79,9 @@ from mewcode.permissions import (
 from mewcode.agents.loader import AgentLoader
 from mewcode.agents.task_manager import TaskManager
 from mewcode.agents.trace import TraceManager
+
+
+log = logging.getLogger(__name__)
 from mewcode.agents.notification import inject_task_notifications
 from mewcode.commands.handlers.tasks import create_tasks_command
 from mewcode.skills.executor import SkillExecutor
@@ -2325,6 +2329,12 @@ class MewCodeApp(App):
         except Exception as exc:
             if getattr(self, "_pending_skill_approval_request_id", "") == request_id:
                 self._pending_skill_approval_request_id = ""
+            try:
+                self._show_system_message(
+                    f"Self-evolution approval card failed to open: {request_id}."
+                )
+            except Exception:
+                pass
             log.debug("Self-evolution approval mount failed: %s", exc)
 
     async def _mount_self_evolution_approval(

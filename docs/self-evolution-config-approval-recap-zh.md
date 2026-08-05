@@ -2291,6 +2291,35 @@ python3 -m py_compile mewcode/app.py
 passed
 ```
 
+## Approval Card 打开失败用户提示
+
+本次为 approval card 挂载失败增加系统消息，并补上 `mewcode/app.py` 的模块级 logger，避免恢复路径里的 `log.debug(...)` 触发 `NameError`。
+
+审批影响：
+
+- 不改变审批模式或审批结果。
+- 不自动处理失败的 approval request。
+- 用户看到失败提示后，可以重新打开审批入口。
+
+安全策略：
+
+- UI 打开失败只清理 pending UI 状态。
+- 不写 candidate manifest、approval store、eval report 或 project skill。
+- 系统消息只暴露 request id，不包含额外敏感内容。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_when_mount_fails -q
+1 failed  # 修复前没有用户可见消息，并暴露 log 未定义
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_when_mount_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox -q
+3 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
 ## 自进化卡片选项渲染重构
 
 本次把 self-evolution 卡片的选项渲染和光标边界逻辑抽成 `_render_choice_lines()` 与 `_move_choice_cursor()`，供 approval、inbox 和 match card 复用。

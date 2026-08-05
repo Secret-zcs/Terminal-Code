@@ -4511,3 +4511,44 @@ passed
 
 - 继续检查 `_run_self_evolution_review()` 对 `_show_self_evolution_approval()` 返回值的处理，确保审批卡片打开失败时可以降级到 inbox 或系统消息。
 - 补齐 approval 打开失败后的用户可见提示策略，避免只有 debug log。
+
+## 95. 最新推进记录：审批卡片挂载失败增加用户可见提示
+
+日期：2026-08-05
+
+本次把 approval card 挂载失败从“只写 debug log”升级为“清理 pending 状态并显示系统消息”。同时修复 `mewcode/app.py` 里 `log.debug(...)` 使用未定义 `log` 的潜在问题，避免异常恢复路径再次抛出 `NameError`。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：增强 `test_tui_self_evolution_approval_clears_pending_when_mount_fails`，断言挂载失败时用户能看到 `Self-evolution approval card failed to open: <request_id>.`。
+- 修改 `mewcode/app.py`：新增模块级 `log = logging.getLogger(__name__)`，修复 self-evolution debug 分支的未定义 logger。
+- 修改 `mewcode/app.py`：approval guarded mount 失败时调用 `_show_system_message(...)`，同时保留 debug log。
+
+用户能看到什么：
+
+- 如果审批卡片因 TUI 挂载异常未打开，用户会看到明确系统消息，而不是静默失败。
+- pending 状态仍会被清理，用户可以重新触发审批入口。
+
+安全边界：
+
+- 不改变审批结果。
+- 不自动 approve、reject、promote 或 quarantine。
+- 系统消息只报告 UI 打开失败，不修改候选或审批存储。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_when_mount_fails -q
+1 failed  # 实现前红灯：messages 为空；同时暴露 log 未定义导致 task exception
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_when_mount_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox -q
+3 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
+下一步计划：
+
+- 继续检查 self-evolution review 通知分支，确保 busy、stale、pending approval、inbox 四种状态的用户提示互不吞没。
+- 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
