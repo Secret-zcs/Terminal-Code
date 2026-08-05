@@ -2329,6 +2329,9 @@ class MewCodeApp(App):
 
     def _show_self_evolution_approval(self, request_id: str) -> bool:
         if self.agent is None:
+            self._show_system_message(
+                "Self-evolution approval failed: no active agent."
+            )
             return False
         self._clear_pending_self_evolution_inbox()
         if getattr(self, "_pending_skill_approval_request_id", "") == request_id:

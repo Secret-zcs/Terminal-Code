@@ -4841,3 +4841,43 @@ passed
 
 - 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
 - 检查 inbox/match/approval 三类卡片失败提示是否需要统一文案 helper。
+
+## 103. 最新推进记录：Approval 打开缺少 Agent 时增加用户提示
+
+日期：2026-08-05
+
+本次补齐 `_show_self_evolution_approval()` 的前置条件失败提示。此前如果没有 active agent，函数会直接返回 `False`，调用方只能知道没有打开 approval card，但用户看不到原因。现在该路径会显示 `Self-evolution approval failed: no active agent.`。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_approval_without_agent_is_user_visible`，覆盖无 active agent 时用户可见失败消息。
+- 修改 `mewcode/app.py`：`_show_self_evolution_approval()` 在 `self.agent is None` 时显示系统消息并返回 `False`。
+
+用户能看到什么：
+
+- 如果 approval 入口被触发但当前没有 active agent，用户会看到明确失败原因。
+- 正常 approval 打开和 duplicate pending 路径不变。
+
+安全边界：
+
+- 不修改 approval request、candidate manifest、eval report 或 project skill。
+- 不自动审批、不自动拒绝、不自动 promote。
+- 只增加前置条件失败提示。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_without_agent_is_user_visible -q
+1 failed  # 实现前红灯：messages 为空，无 active agent 静默失败
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_without_agent_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox -q
+3 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
+下一步计划：
+
+- 给 duplicate pending approval 返回值分支补更直接的测试，固定其返回 `True` 且不重复挂载。
+- 检查 approval 响应处理里 agent 缺失是否也需要用户可见提示。

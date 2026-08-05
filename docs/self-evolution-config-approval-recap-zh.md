@@ -2291,6 +2291,35 @@ python3 -m py_compile mewcode/app.py
 passed
 ```
 
+## Approval 缺少 Active Agent 提示
+
+本次让 `_show_self_evolution_approval()` 在没有 active agent 时显示 `Self-evolution approval failed: no active agent.`，避免 approval 打开入口静默失败。
+
+审批影响：
+
+- 不改变 request 状态。
+- 不改变 approval mode。
+- 不自动处理 approval request。
+
+安全策略：
+
+- 只增加前置条件失败提示。
+- 不修改 approval store、candidate manifest、eval report 或 project skill。
+- 正常打开、重复 pending 和渲染失败路径保持原有 gate。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_without_agent_is_user_visible -q
+1 failed  # 修复前无 active agent 静默失败
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_without_agent_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox -q
+3 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
 ## Match Card 挂载失败用户提示
 
 本次让 `_mount_self_evolution_match_guarded()` 在 match card 挂载失败时显示系统消息 `Self-evolution match hint failed to open.`，并继续清理 pending key。

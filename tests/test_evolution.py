@@ -4051,6 +4051,23 @@ class TestEvolutionEngine:
         assert app._pending_self_evolution_inbox_key is None
         assert mounted and mounted[0][0] == request.id
 
+    def test_tui_self_evolution_approval_without_agent_is_user_visible(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+
+        app = _make_test_mewcode_app()
+        app.agent = None
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        opened = app._show_self_evolution_approval("approval_missing_agent")
+
+        assert opened is False
+        assert messages == [
+            "Self-evolution approval failed: no active agent."
+        ]
+
     @pytest.mark.asyncio
     async def test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
