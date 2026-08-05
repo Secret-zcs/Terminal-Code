@@ -4679,3 +4679,45 @@ passed
 
 - 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
 - 检查 self-evolution review 失败消息是否需要做路径/敏感信息清洗。
+
+## 99. 最新推进记录：Review 执行异常消息脱敏
+
+日期：2026-08-05
+
+本次补齐 self-evolution review 崩溃提示的安全边界。上一轮已让 review 异常用户可见，但异常字符串可能包含本机绝对路径，例如 `.mewcode/evolution` 下的候选文件路径。现在 `_run_self_evolution_review()` 在展示系统消息前会调用 `_sanitize_self_evolution_review_error()`，把绝对路径替换为 `<path>`，debug log 仍保留原始异常供开发排查。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_failure_sanitizes_absolute_paths`，覆盖用户可见消息不泄露 `tmp_path`。
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_error_sanitizer`，覆盖普通错误保持原样、绝对路径替换为 `<path>`。
+- 修改 `mewcode/app.py`：新增 `_sanitize_self_evolution_review_error()`。
+- 修改 `mewcode/app.py`：`_run_self_evolution_review()` 展示异常前先做脱敏。
+
+用户能看到什么：
+
+- review 崩溃仍然可见，但本地绝对路径会显示为 `<path>`。
+- 普通短错误，例如 `review crashed`，仍按原样显示。
+
+安全边界：
+
+- 不改变 review、candidate、approval 或 promote 状态。
+- 只处理用户可见错误文本。
+- 不影响 debug log 中的原始异常记录。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_sanitizes_absolute_paths tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_error_sanitizer -q
+2 failed, 1 passed  # 实现前红灯：路径泄露，且缺少 _sanitize_self_evolution_review_error()
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_sanitizes_absolute_paths tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_error_sanitizer tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message -q
+4 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
+下一步计划：
+
+- 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
+- 检查其他 self-evolution 用户可见错误是否也需要共用同一脱敏 helper。

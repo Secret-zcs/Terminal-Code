@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import time as _time
 from pathlib import Path
 from typing import Any
@@ -2152,7 +2153,8 @@ class MewCodeApp(App):
             )
         except Exception as exc:
             log.debug("Self-evolution review failed: %s", exc)
-            self._show_system_message(f"Self-evolution review failed: {exc}")
+            message = self._sanitize_self_evolution_review_error(str(exc))
+            self._show_system_message(f"Self-evolution review failed: {message}")
             return
         requests = list(result.get("requests", []))
         if requests:
@@ -2256,6 +2258,13 @@ class MewCodeApp(App):
         if message.startswith("review run ") and message.endswith(" not found"):
             return f"review run unavailable: {review_run_id}"
         return message
+
+    @staticmethod
+    def _sanitize_self_evolution_review_error(message: str) -> str:
+        text = str(message).strip()
+        if not text:
+            return "unknown error"
+        return re.sub(r"(?<!\w)/(?:[^\s`'\"<>]+)", "<path>", text)
 
     def _show_self_evolution_inbox(
         self,

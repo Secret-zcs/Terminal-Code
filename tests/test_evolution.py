@@ -2844,6 +2844,55 @@ class TestEvolutionEngine:
 
         assert messages == ["Self-evolution review failed: review crashed"]
 
+    def test_tui_self_evolution_review_failure_sanitizes_absolute_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.config import SelfEvolutionConfig
+
+        leaked_path = tmp_path / ".mewcode" / "evolution" / "secret.json"
+
+        def failing_review(*_args, **_kwargs):
+            raise RuntimeError(f"review crashed at {leaked_path}")
+
+        monkeypatch.setattr(
+            app_module,
+            "review_ready_skill_candidates",
+            failing_review,
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+
+        assert messages == ["Self-evolution review failed: review crashed at <path>"]
+        assert str(tmp_path) not in messages[0]
+
+    def test_tui_self_evolution_review_error_sanitizer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.app import MewCodeApp
+
+        assert (
+            MewCodeApp._sanitize_self_evolution_review_error("review crashed")
+            == "review crashed"
+        )
+        assert (
+            MewCodeApp._sanitize_self_evolution_review_error(
+                "review crashed at /tmp/private/secret.json"
+            )
+            == "review crashed at <path>"
+        )
+
     def test_tui_self_evolution_review_shows_recovered_stale_message(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

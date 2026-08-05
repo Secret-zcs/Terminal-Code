@@ -2291,6 +2291,35 @@ python3 -m py_compile mewcode/app.py
 passed
 ```
 
+## Review 异常消息脱敏
+
+本次新增 `_sanitize_self_evolution_review_error()`，用于清洗 `_run_self_evolution_review()` 的用户可见异常消息。绝对路径会被替换为 `<path>`，避免把本地 workspace 或 `.mewcode/evolution` 目录结构直接展示给用户。
+
+审批影响：
+
+- 不改变审批模式或审批状态。
+- 不自动重试失败 review。
+- 不影响 debug log 中的原始异常记录。
+
+安全策略：
+
+- 只清洗系统消息文本。
+- 不修改 approval store、candidate manifest、eval report 或 project skill。
+- 普通非路径错误保持原样，避免丢失必要排查信息。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_sanitizes_absolute_paths tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_error_sanitizer -q
+2 failed, 1 passed  # 修复前路径泄露且 helper 不存在
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_sanitizes_absolute_paths tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_error_sanitizer tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message -q
+4 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
 ## Review Ready 通知展示 Request ID
 
 本次让 `format_review_notification()` 的 ready request 行展示 approval request id，格式变为 `approval_id / proposal_id / skill_name ...`。
