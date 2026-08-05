@@ -47,6 +47,26 @@ def format_review_notification(result: dict) -> str:
         if report:
             message += f" Report: {report}."
         return message
+    if result.get("status") == "missing":
+        run_id = str(result.get("active_review_run_id", "")).strip()
+        message = "Self-evolution review run not found."
+        if run_id:
+            message += f" Run: {run_id}."
+        return message
+    if result.get("status") == "not-running":
+        run = result.get("review_run")
+        run_id = str(getattr(run, "id", "") or "").strip()
+        run_status = str(getattr(run, "status", "") or "").strip()
+        artifacts = getattr(run, "artifacts", {}) or {}
+        report = str(artifacts.get("report", "")).strip()
+        message = "Self-evolution review run is not running."
+        if run_id:
+            message += f" Run: {run_id}."
+        if run_status:
+            message += f" Status: {run_status}."
+        if report:
+            message += f" Report: {report}."
+        return message
     if not requests and not blocked and not expired:
         return ""
     lines = []
@@ -182,7 +202,9 @@ def complete_fork_reviewer_run(
     engine = EvolutionEngine(project_root)
     review_run = _get_fork_reviewer_run(engine, review_run_id)
     if review_run is None:
-        return _empty_review_result("missing")
+        result = _empty_review_result("missing")
+        result["active_review_run_id"] = review_run_id.strip()
+        return result
     if review_run.status != "running":
         result = _empty_review_result("not-running")
         result["review_run"] = review_run

@@ -5343,3 +5343,41 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 
 - 在 TUI review 调度中尝试接入 start/complete，先做到“启动有提示、完成有审批卡片或 inbox”。
 - 再评估是否需要把 complete 阶段放到真正后台 task 中运行。
+
+## 116. 最新推进记录：Fork Reviewer Complete 恢复失败增加通知
+
+日期：2026-08-05
+
+本次补齐 complete 阶段恢复失败的用户可见提示。上一节已经让 `started` 有通知，但如果后台 complete 阶段拿到的 run id 不存在，或者 run 已经不是 `running`，`format_review_notification()` 仍会返回空字符串。这样 TUI 接入 start/complete 后，恢复失败会表现成“什么都没发生”。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_notification_shows_completion_resume_failure`，覆盖 `missing` 和 `not-running` 两种恢复失败通知。
+- 修改 `mewcode/evolution/auto_review.py`：`format_review_notification()` 增加 `missing` 和 `not-running` 分支，展示 run id、状态和 report 路径。
+- 修改 `mewcode/evolution/auto_review.py`：`complete_fork_reviewer_run()` 在 run 缺失时把请求的 run id 写入 `active_review_run_id`，方便通知层展示。
+
+用户能看到什么：
+
+- complete 找不到 run 时，会显示 `Self-evolution review run not found. Run: ...`。
+- complete 发现 run 已完成/失败等非 running 状态时，会显示 `Self-evolution review run is not running. Run: ... Status: ...`。
+
+安全边界：
+
+- 不改变 complete 执行逻辑。
+- 不重试、不自动新建 run、不自动 approve/promote。
+- 只增加恢复失败的可见性。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_completion_resume_failure -q
+1 failed  # 实现前红灯：missing/not-running notification 为空字符串
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_completion_resume_failure tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_started_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_busy_review_run -q
+3 passed
+```
+
+下一步计划：
+
+- 开始在 TUI `_run_self_evolution_review()` 中接入 start/complete 生命周期，并保留现有同步 fallback。
+- complete 真正异步化前，先保证每个生命周期状态都有用户可见提示。

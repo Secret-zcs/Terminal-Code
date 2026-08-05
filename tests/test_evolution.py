@@ -1693,6 +1693,39 @@ class TestEvolutionEngine:
         assert "review_started" in message
         assert ".mewcode/evolution/review_runs/review_started/task.md" in message
 
+    def test_self_evolution_review_notification_shows_completion_resume_failure(
+        self,
+    ) -> None:
+        from mewcode.evolution.auto_review import format_review_notification
+        from mewcode.evolution.models import SelfEvolutionReviewRun
+
+        missing = format_review_notification({
+            "status": "missing",
+            "active_review_run_id": "review_missing",
+            "requests": [],
+            "blocked_generated_candidates": [],
+        })
+        not_running = format_review_notification({
+            "status": "not-running",
+            "review_run": SelfEvolutionReviewRun(
+                id="review_done",
+                mode="fork_reviewer",
+                status="submitted",
+                approval_mode="manual",
+                artifacts={
+                    "report": ".mewcode/evolution/review_runs/review_done/report.md",
+                },
+            ),
+            "requests": [],
+            "blocked_generated_candidates": [],
+        })
+
+        assert "Self-evolution review run not found" in missing
+        assert "review_missing" in missing
+        assert "Self-evolution review run is not running" in not_running
+        assert "review_done" in not_running
+        assert "submitted" in not_running
+
     def test_self_evolution_review_notification_shows_recovered_stale_run(
         self,
     ) -> None:

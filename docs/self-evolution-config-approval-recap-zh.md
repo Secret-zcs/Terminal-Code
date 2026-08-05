@@ -2942,3 +2942,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_started_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_busy_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_recovered_stale_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_submits_ready_candidates_once -q
 4 passed
 ```
+
+## Fork Reviewer Complete 恢复失败通知
+
+本次为 complete 阶段的 `missing` 和 `not-running` 结果增加通知。后台化 review 需要所有生命周期分支都可见，否则恢复失败会被误解为没有触发。
+
+审批影响：
+
+- 不改变审批模式。
+- 不改变 approval request 生成条件。
+- 不自动重启 review run。
+- 不自动 approve/promote。
+
+安全策略：
+
+- run 缺失或非 running 时只提示，不继续执行 review。
+- 通知只展示 run id、状态和项目内相对 report 路径。
+- 不写 candidate manifest、approval store 或 project skill。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_completion_resume_failure -q
+1 failed  # 修复前 missing/not-running 结果没有用户可见消息
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_completion_resume_failure tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_started_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_busy_review_run -q
+3 passed
+```
