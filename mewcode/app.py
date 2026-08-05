@@ -59,6 +59,11 @@ from mewcode.evolution.auto_review import (
     start_fork_reviewer_run,
 )
 from mewcode.evolution.engine import EvolutionEngine
+from mewcode.evolution.fork_reviewer_agent import (
+    persist_fork_reviewer_failure,
+    persist_fork_reviewer_opinion,
+    run_fork_reviewer_agent,
+)
 from mewcode.hooks import HookContext, HookEngine, load_hooks
 from mewcode.conversation import ConversationManager, Message
 from mewcode.mcp import MCPManager
@@ -2232,7 +2237,61 @@ class MewCodeApp(App):
         except Exception as exc:
             self._show_self_evolution_review_failure(exc)
             return
+        await self._run_fork_agent_review(project_root, result)
         self._handle_self_evolution_review_result(result, project_root)
+
+    async def _run_fork_agent_review(
+        self,
+        project_root: str,
+        result: dict,
+    ) -> None:
+        if self.client is None or not self._review_result_has_candidates(result):
+            return
+        review_run = result.get("review_run")
+        review_run_id = str(getattr(review_run, "id", "") or "").strip()
+        if not review_run_id:
+            return
+        try:
+            opinion = await run_fork_reviewer_agent(
+                self.client,
+                project_root,
+                review_run,
+            )
+            await asyncio.to_thread(
+                persist_fork_reviewer_opinion,
+                project_root,
+                review_run_id,
+                opinion,
+            )
+            result["fork_agent_review"] = opinion
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.debug("Self-evolution fork Agent review failed: %s", exc)
+            result["fork_agent_review"] = {
+                "status": "failed",
+                "error": str(exc),
+            }
+            try:
+                await asyncio.to_thread(
+                    persist_fork_reviewer_failure,
+                    project_root,
+                    review_run_id,
+                    exc,
+                )
+            except Exception as persist_exc:
+                log.debug(
+                    "Self-evolution fork Agent failure persistence failed: %s",
+                    persist_exc,
+                )
+
+    @staticmethod
+    def _review_result_has_candidates(result: dict) -> bool:
+        return bool(
+            result.get("requests")
+            or result.get("generated_candidates")
+            or result.get("blocked_generated_candidates")
+        )
 
     def _clear_self_evolution_review_task(self, task: asyncio.Task[None]) -> None:
         if self._self_evolution_review_task is task:

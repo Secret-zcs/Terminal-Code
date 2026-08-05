@@ -3015,3 +3015,46 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py 
 ```
 
 当前边界：后台生命周期已经完成，但 reviewer 本身仍是确定性 runner，不是拥有独立模型上下文的 Hermes 式 LLM fork Agent。后续接入真实子 Agent 时，审批 gate 和 3 轮执行证据应保持为不可绕过的外层约束。
+
+## 独立模型 Fork Reviewer 审批证据
+
+本次在确定性 complete 和审批卡之间接入专用 `ForkReviewerAgent`。它拥有独立模型上下文，但没有工具，只能对当前 run 的 task/output/report 给出结构化第二意见。
+
+审批影响：
+
+- fork Agent 的 `ready-for-user-review` 不是批准，只表示建议进入现有用户审批流程。
+- `needs-revision` 或 `block` 会作为风险意见展示；当前不会由模型直接 reject、approve 或 promote。
+- `manual` 模式仍由用户最终决定；`deferred` 和 `trusted-auto` 的原 gate 不变。
+- 模型调用失败时使用 deterministic fallback，pending request 不会丢失。
+
+权限与 schema：
+
+- LLM 调用固定 `tools=[]`；tool call 直接判定 reviewer 失败。
+- 输出只允许 `schema_version`、`recommendation`、`summary`、`risks`、`evidence`、`recommended_actions`。
+- recommendation 只允许 `ready-for-user-review`、`needs-revision`、`block`。
+- reviewer system policy 固定 `can_approve=false`、`can_promote=false`、`project_write=disabled`。
+- 45 秒超时后回退，避免模型调用无限阻塞后台 review。
+- schema version 使用精确整数类型校验，`true` 不会被当作版本 `1`。
+- artifact 读取和 agent review 写入都会解析真实路径，拒绝 project root 外路径和 symlink 越界。
+
+审计产物：
+
+- `.mewcode/evolution/review_runs/<run-id>/agent_review.json`
+- `.mewcode/evolution/review_runs/<run-id>/agent_review.md`
+- 原 `report.md` 追加 `Fork Agent Independent Review`，因此审批详情能同时展示确定性测试证据和模型意见。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py -k 'fork_reviewer_agent or persist_fork_reviewer_opinion or persists_fork_agent_opinion_before_approval or fork_agent_failure_falls_back' -q
+6 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py -q
+164 passed
+```
+
+全仓 `pytest -q` 的已知遗留失败仍是 `test_multi_step_autonomous`（旧 WriteFile 安全假设）和 `test_message_splicing`（旧消息数量断言），均不在本轮审批/fork reviewer 修改范围内。
+
+当前边界：模型 fork Agent 已经真实执行，但仅承担独立复核。候选 skill 正文仍由确定性 usage patch 产生；模型候选生成必须在下一阶段接入 candidate schema、sandbox、三轮 eval 和审批 gate 后才能启用。
+
+模式差异：`manual` 模式会在审批卡打开前展示模型第二意见；`trusted-auto` 继续保持已有 same-pass auto-promote 语义，模型意见此时是补充审计而不是前置批准条件。若后续希望模型 verdict 成为 trusted-auto gate，必须单独设计多评审一致性和误判回滚策略，不能直接把单次模型输出当作授权。

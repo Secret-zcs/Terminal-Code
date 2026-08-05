@@ -5444,3 +5444,83 @@ git diff --check -- mewcode/app.py tests/test_evolution.py docs/self-evolution-d
 - 为真实 fork Agent 定义结构化 output schema 和超时/取消协议，但继续保留确定性 runner 作为 fallback。
 - 增加进程重启后自动恢复 `running` review 的集成测试。
 - 使用固定公开任务集做有/无自进化的成功率、回归率和 token/时间成本对比，而不是继续扩展零散 TUI 展示。
+
+## 118. 最新推进记录：接入独立模型 Fork Reviewer Agent
+
+日期：2026-08-05
+
+本次把上一节的后台确定性 reviewer 进一步升级为“确定性 gate + 独立模型第二意见”。当 complete 阶段确实生成 candidate、blocked candidate 或 approval request 后，TUI 会启动一个专用 `ForkReviewerAgent`。该 Agent 使用独立 `ConversationManager`，只读取当前 review run 的 `task.md`、`output.json` 和 `report.md`，不继承主对话历史，也不暴露任何工具。
+
+修改内容：
+
+- 新增 `mewcode/evolution/fork_reviewer_agent.py`：实现专用单轮 fork Agent、45 秒超时、严格 JSON schema 校验、artifact 越界检查、token usage 记录和审计持久化。
+- 修改 `mewcode/app.py`：确定性 complete 完成后调用 fork Agent；意见持久化后才打开审批卡。
+- 修改 `mewcode/app.py`：模型超时、非法 JSON、工具调用或 API 异常时写失败审计，并继续使用确定性 gate 结果，不阻断用户审批。
+- 修改 `tests/test_evolution.py`：新增 6 条专用测试，并把原完整 skill 闭环升级为“真实 complete + 假 LLM stream + 真实持久化”的组合测试。
+
+Fork Agent 输出契约：
+
+```json
+{
+  "schema_version": 1,
+  "recommendation": "ready-for-user-review | needs-revision | block",
+  "summary": "short review summary",
+  "risks": ["risk"],
+  "evidence": ["artifact evidence"],
+  "recommended_actions": ["next action"]
+}
+```
+
+安全边界：
+
+- 调用 LLM 时固定传入 `tools=[]`，任何 tool call event 都视为 reviewer 输出失败。
+- system policy 明确 `can_approve=false`、`can_promote=false`、`project_write=disabled`。
+- 模型 recommendation 只写入 `agent_review.json`、`agent_review.md` 和审批报告，不修改 proposal/request/candidate 状态。
+- 模型失败时仍保留 deterministic eval、execution eval 和用户审批，不让外部模型可用性成为单点故障。
+- artifact 必须位于 project root 内；越界路径或缺失文件会拒绝读取。
+- schema version 必须是精确整数 `1`，布尔值不会被 Python 的相等语义误接受。
+- 写入前会解析并校验 review run 目录，symlink 不能把 `agent_review` 产物导向 project root 外。
+
+用户能看到什么：
+
+- 审批详情新增 `Fork Agent Independent Review`，展示 recommendation、summary、risks、evidence、recommended actions 和 token usage。
+- 同一审批详情仍保留 eval case 数量和 3/3 execution eval；模型意见不能替代这些证据。
+- reviewer 不可用时显示失败审计，确定性 gate 仍是权威结果。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py -k 'fork_reviewer_agent_uses_isolated_tool_free_context or fork_reviewer_agent_rejects_unstructured_output or persists_fork_agent_opinion_before_approval' -q
+3 failed  # 实现前红灯：模块和 TUI 接线均不存在
+
+PYTHONPATH=. pytest tests/test_evolution.py -k 'fork_reviewer_agent or persist_fork_reviewer_opinion or persists_fork_agent_opinion_before_approval or fork_agent_failure_falls_back' -q
+6 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -k 'background_review_completes_full_skill_loop' -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -k 'rejects_boolean_schema_version or rejects_symlinked_run_directory' -q
+2 failed  # 实现前红灯：布尔版本和 symlink 越界均被错误接受
+
+PYTHONPATH=. pytest tests/test_evolution.py -k 'rejects_boolean_schema_version or rejects_symlinked_run_directory' -q
+2 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py -q
+164 passed
+```
+
+全仓验证补充：`PYTHONPATH=. pytest -q` 已确认两个与本轮无关的遗留失败：`test_multi_step_autonomous` 仍假设未先读取即可 `WriteFile`，与当前 read-before-write 安全策略冲突；`test_message_splicing` 仍断言旧的 5 条消息结构。排除这两条后的运行到 46% 未出现新失败，但执行器在 hooks 区段提前结束且未返回退出码，因此本节不把其余全仓测试记录为通过。
+
+当前结论：
+
+- 项目现在确实会 fork 一个拥有独立模型上下文的专用 reviewer Agent，而不只是后台运行确定性函数。
+- 该 Agent 当前负责“独立复核和风险建议”，不负责生成 skill 正文，也不拥有应用权限。
+- 与完整 Hermes 仍有一个核心差距：候选 skill 目前主要由确定性 usage patch 生成；下一阶段需要让模型按受限 candidate schema 提案，再由现有 3 轮 eval 和审批 gate 验证。
+
+代码审阅结论：未发现 critical/important 问题。专用 Agent 与主 Agent 共享已配置的 provider client，但使用全新的对话对象且固定 `tools=[]`。残余边界是 `trusted-auto` 保留既有 same-pass auto-promote 语义，因此模型意见在该模式下属于应用后的补充审计；`manual` 模式下模型意见会在用户审批卡打开前完成持久化。
+
+下一步计划：
+
+- 定义模型 candidate proposal schema，只允许 `skill` 的 name/description/body/mode/context/allowedTools 字段。
+- 模型 proposal 先写 candidate sandbox，不直接写 `.mewcode/skills`；schema/static policy/eval/execution eval 任一失败即 blocked。
+- 对比模型生成候选与确定性 usage patch 的通过率，并保留确定性 fallback。

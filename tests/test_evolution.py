@@ -4056,6 +4056,7 @@ class TestEvolutionEngine:
         _install_fake_mcp(monkeypatch)
         import mewcode.app as app_module
         from mewcode.config import SelfEvolutionConfig
+        from mewcode.tools.base import StreamEnd, TextDelta
 
         monkeypatch.setattr(
             app_module.asyncio,
@@ -4095,6 +4096,24 @@ class TestEvolutionEngine:
             ),
         )
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
+
+        class FakeForkReviewerClient:
+            async def stream(self, conversation, system="", tools=None):
+                yield TextDelta(json.dumps({
+                    "schema_version": 1,
+                    "recommendation": "ready-for-user-review",
+                    "summary": "独立模型确认三轮执行评测通过。",
+                    "risks": ["仅覆盖当前任务族"],
+                    "evidence": ["execution eval 3/3 passed"],
+                    "recommended_actions": ["由用户确认适用范围"],
+                }, ensure_ascii=False))
+                yield StreamEnd(
+                    "end_turn",
+                    input_tokens=100,
+                    output_tokens=50,
+                )
+
+        app.client = FakeForkReviewerClient()
         messages: list[str] = []
         app._show_system_message = messages.append  # type: ignore[method-assign]
         opened = _capture_successful_self_evolution_approval_open(app)
@@ -4134,6 +4153,9 @@ class TestEvolutionEngine:
         assert ok is True
         assert "Eval cases: `3`" in approval_review
         assert "Rounds: `3/3` passed" in approval_review
+        assert "## Fork Agent Independent Review" in approval_review
+        assert "独立模型确认三轮执行评测通过" in approval_review
+        assert "Authority: advisory only" in approval_review
 
         ok, message = completed_engine.resolve_skill_approval_request(
             requests[0].id,
@@ -4151,6 +4173,364 @@ class TestEvolutionEngine:
             completed_engine.store.get_skill_approval_request(requests[0].id).status
             == "approved"
         )
+
+    @pytest.mark.asyncio
+    async def test_fork_reviewer_agent_uses_isolated_tool_free_context(self) -> None:
+        from mewcode.evolution.fork_reviewer_agent import ForkReviewerAgent
+        from mewcode.tools.base import StreamEnd, TextDelta
+
+        calls: list[dict] = []
+
+        class FakeClient:
+            async def stream(self, conversation, system="", tools=None):
+                calls.append({
+                    "messages": conversation.get_messages(),
+                    "system": system,
+                    "tools": tools,
+                })
+                yield TextDelta(
+                    "```json\n"
+                    '{"schema_version":1,'
+                    '"recommendation":"ready-for-user-review",'
+                    '"summary":"三轮评测通过，可交由用户审批。",'
+                    '"risks":["覆盖范围仅限当前任务族"],'
+                    '"evidence":["execution eval 3/3 passed"],'
+                    '"recommended_actions":["用户确认适用范围"]}'
+                    "\n```"
+                )
+                yield StreamEnd("end_turn", input_tokens=100, output_tokens=40)
+
+        agent = ForkReviewerAgent(FakeClient(), timeout_seconds=5.0)
+        opinion = await agent.review(
+            task_markdown="# Fork Reviewer Task\n\nReview one candidate.",
+            output_json='{"status":"submitted"}',
+            report_markdown="# Fork Reviewer Report\n\n3/3 passed.",
+        )
+
+        assert opinion["recommendation"] == "ready-for-user-review"
+        assert opinion["summary"] == "三轮评测通过，可交由用户审批。"
+        assert opinion["usage"] == {"input_tokens": 100, "output_tokens": 40}
+        assert len(calls) == 1
+        assert calls[0]["tools"] == []
+        assert len(calls[0]["messages"]) == 1
+        assert calls[0]["messages"][0].role == "user"
+        assert "can_approve: false" in calls[0]["system"]
+        assert "can_promote: false" in calls[0]["system"]
+
+    @pytest.mark.asyncio
+    async def test_fork_reviewer_agent_rejects_unstructured_output(self) -> None:
+        from mewcode.evolution.fork_reviewer_agent import (
+            ForkReviewerAgent,
+            ForkReviewerOutputError,
+        )
+        from mewcode.tools.base import StreamEnd, TextDelta
+
+        class FakeClient:
+            async def stream(self, conversation, system="", tools=None):
+                yield TextDelta("Looks good, approve it immediately.")
+                yield StreamEnd("end_turn")
+
+        agent = ForkReviewerAgent(FakeClient(), timeout_seconds=5.0)
+
+        with pytest.raises(ForkReviewerOutputError, match="valid JSON object"):
+            await agent.review(
+                task_markdown="task",
+                output_json="output",
+                report_markdown="report",
+            )
+
+    def test_fork_reviewer_agent_rejects_boolean_schema_version(self) -> None:
+        from mewcode.evolution.fork_reviewer_agent import (
+            ForkReviewerOutputError,
+            parse_fork_reviewer_output,
+        )
+
+        with pytest.raises(ForkReviewerOutputError, match="schema version"):
+            parse_fork_reviewer_output(json.dumps({
+                "schema_version": True,
+                "recommendation": "ready-for-user-review",
+                "summary": "invalid version type",
+                "risks": [],
+                "evidence": [],
+                "recommended_actions": [],
+            }))
+
+    @pytest.mark.asyncio
+    async def test_fork_reviewer_agent_timeout_is_bounded(self) -> None:
+        from mewcode.evolution.fork_reviewer_agent import (
+            ForkReviewerAgent,
+            ForkReviewerOutputError,
+        )
+
+        class SlowClient:
+            async def stream(self, conversation, system="", tools=None):
+                await asyncio.sleep(1.0)
+                if False:
+                    yield None
+
+        agent = ForkReviewerAgent(SlowClient(), timeout_seconds=0.01)
+
+        with pytest.raises(ForkReviewerOutputError, match="timed out"):
+            await agent.review(
+                task_markdown="task",
+                output_json="output",
+                report_markdown="report",
+            )
+
+    def test_persist_fork_reviewer_opinion_adds_approval_evidence(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import (
+            complete_fork_reviewer_run,
+            start_fork_reviewer_run,
+        )
+        from mewcode.evolution.fork_reviewer_agent import (
+            persist_fork_reviewer_opinion,
+        )
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        config = SelfEvolutionConfig(enabled=True, skill_approval_mode="manual")
+        started = start_fork_reviewer_run(tmp_path, config)
+        completed = complete_fork_reviewer_run(
+            tmp_path,
+            started["review_run"].id,
+            config,
+        )
+        request = completed["requests"][0]
+
+        artifacts = persist_fork_reviewer_opinion(
+            tmp_path,
+            completed["review_run"].id,
+            {
+                "schema_version": 1,
+                "recommendation": "ready-for-user-review",
+                "summary": "独立模型确认三轮评测证据完整。",
+                "risks": ["尚未覆盖其他任务族"],
+                "evidence": ["execution eval 3/3 passed"],
+                "recommended_actions": ["由用户确认适用范围"],
+                "usage": {"input_tokens": 120, "output_tokens": 60},
+            },
+        )
+
+        assert (tmp_path / artifacts["json"]).is_file()
+        assert (tmp_path / artifacts["markdown"]).is_file()
+        stored_run = EvolutionEngine(tmp_path).store.load_self_evolution_review_runs()[0]
+        assert stored_run.summary["fork_agent_review"]["recommendation"] == (
+            "ready-for-user-review"
+        )
+        ok, approval_review = EvolutionEngine(
+            tmp_path
+        ).render_skill_approval_request(request.id)
+        assert ok is True
+        assert "## Fork Agent Independent Review" in approval_review
+        assert "独立模型确认三轮评测证据完整" in approval_review
+        assert "Authority: advisory only" in approval_review
+        assert EvolutionEngine(tmp_path).store.get_proposal(proposal.id).status == (
+            "proposed"
+        )
+
+    def test_persist_fork_reviewer_opinion_rejects_symlinked_run_directory(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import start_fork_reviewer_run
+        from mewcode.evolution.fork_reviewer_agent import (
+            persist_fork_reviewer_opinion,
+        )
+
+        started = start_fork_reviewer_run(
+            tmp_path,
+            SelfEvolutionConfig(enabled=True, skill_approval_mode="manual"),
+        )
+        review_run = started["review_run"]
+        review_dir = (
+            tmp_path
+            / ".mewcode"
+            / "evolution"
+            / "review_runs"
+            / review_run.id
+        )
+        escaped_dir = tmp_path.parent / f"{tmp_path.name}-escaped-review"
+        shutil.rmtree(review_dir)
+        escaped_dir.mkdir()
+        review_dir.symlink_to(escaped_dir, target_is_directory=True)
+
+        with pytest.raises(ValueError, match="escapes project root"):
+            persist_fork_reviewer_opinion(
+                tmp_path,
+                review_run.id,
+                {
+                    "schema_version": 1,
+                    "recommendation": "ready-for-user-review",
+                    "summary": "must not escape",
+                    "risks": [],
+                    "evidence": [],
+                    "recommended_actions": [],
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
+            )
+
+    @pytest.mark.asyncio
+    async def test_tui_background_review_persists_fork_agent_opinion_before_approval(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.config import SelfEvolutionConfig
+
+        review_run = SimpleNamespace(
+            id="review_llm_fork_1",
+            artifacts={"task": "task.md", "output": "output.json", "report": "report.md"},
+        )
+        approval = SimpleNamespace(id="approval_llm_fork_1")
+        order: list[str] = []
+
+        monkeypatch.setattr(
+            app_module,
+            "start_fork_reviewer_run",
+            lambda *_args, **_kwargs: {
+                "status": "started",
+                "requests": [],
+                "review_run": review_run,
+            },
+        )
+
+        def fake_complete(*_args, **_kwargs):
+            order.append("complete")
+            return {
+                "status": "submitted",
+                "requests": [approval],
+                "review_run": review_run,
+                "generated_candidates": ["proposal_1"],
+                "blocked_generated_candidates": [],
+            }
+
+        async def fake_agent_review(*_args, **_kwargs):
+            order.append("agent-review")
+            return {
+                "schema_version": 1,
+                "recommendation": "ready-for-user-review",
+                "summary": "候选通过独立模型复核。",
+                "risks": [],
+                "evidence": ["3/3 passed"],
+                "recommended_actions": ["request user approval"],
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+
+        def fake_persist(*_args, **_kwargs):
+            order.append("persist")
+
+        monkeypatch.setattr(app_module, "complete_fork_reviewer_run", fake_complete)
+        monkeypatch.setattr(app_module, "run_fork_reviewer_agent", fake_agent_review)
+        monkeypatch.setattr(app_module, "persist_fork_reviewer_opinion", fake_persist)
+        monkeypatch.setattr(
+            app_module.asyncio,
+            "to_thread",
+            _run_after_event_loop_tick,
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(enabled=True),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        app.client = SimpleNamespace()
+        app._show_system_message = lambda _message: None  # type: ignore[method-assign]
+
+        def fake_open(request_id: str) -> bool:
+            order.append(f"open:{request_id}")
+            return True
+
+        app._show_self_evolution_approval = fake_open  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+        task = app._self_evolution_review_task
+        assert task is not None
+        await asyncio.wait_for(task, timeout=5.0)
+
+        assert order == [
+            "complete",
+            "agent-review",
+            "persist",
+            "open:approval_llm_fork_1",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_tui_fork_agent_failure_falls_back_to_deterministic_approval(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.config import SelfEvolutionConfig
+
+        review_run = SimpleNamespace(
+            id="review_llm_fallback_1",
+            artifacts={"task": "task.md", "output": "output.json", "report": "report.md"},
+        )
+        approval = SimpleNamespace(id="approval_llm_fallback_1")
+        order: list[str] = []
+        monkeypatch.setattr(
+            app_module,
+            "start_fork_reviewer_run",
+            lambda *_args, **_kwargs: {
+                "status": "started",
+                "requests": [],
+                "review_run": review_run,
+            },
+        )
+
+        def fake_complete(*_args, **_kwargs):
+            order.append("complete")
+            return {
+                "status": "submitted",
+                "requests": [approval],
+                "review_run": review_run,
+                "generated_candidates": ["proposal_1"],
+            }
+
+        async def failing_agent_review(*_args, **_kwargs):
+            order.append("agent-review-failed")
+            raise RuntimeError("model unavailable")
+
+        def fake_persist_failure(*_args, **_kwargs):
+            order.append("persist-failure")
+
+        monkeypatch.setattr(app_module, "complete_fork_reviewer_run", fake_complete)
+        monkeypatch.setattr(app_module, "run_fork_reviewer_agent", failing_agent_review)
+        monkeypatch.setattr(
+            app_module,
+            "persist_fork_reviewer_failure",
+            fake_persist_failure,
+        )
+        monkeypatch.setattr(
+            app_module.asyncio,
+            "to_thread",
+            _run_after_event_loop_tick,
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(enabled=True),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        app.client = SimpleNamespace()
+        app._show_system_message = lambda _message: None  # type: ignore[method-assign]
+
+        def fake_open(request_id: str) -> bool:
+            order.append(f"open:{request_id}")
+            return True
+
+        app._show_self_evolution_approval = fake_open  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+        task = app._self_evolution_review_task
+        assert task is not None
+        await asyncio.wait_for(task, timeout=5.0)
+
+        assert order == [
+            "complete",
+            "agent-review-failed",
+            "persist-failure",
+            "open:approval_llm_fallback_1",
+        ]
 
     def test_tui_self_evolution_inbox_response_views_report_or_dismisses(
         self, monkeypatch: pytest.MonkeyPatch
