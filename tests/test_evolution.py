@@ -2752,6 +2752,45 @@ class TestEvolutionEngine:
         assert proposal.id in messages[0]
         assert "not auto-activated" in messages[0]
 
+    @pytest.mark.asyncio
+    async def test_tui_user_message_shows_only_top_self_evolution_candidate_match(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.config import SelfEvolutionConfig
+
+        engine = EvolutionEngine(tmp_path)
+        top = engine.propose_skill(
+            name="review-loop",
+            description="自进化复盘文档和测试结果整理流程",
+            body="# 任务\n\n整理自进化复盘文档，记录测试结果和修改理由。\n",
+        )
+        lower = engine.propose_skill(
+            name="recap-loop",
+            description="复盘文档整理流程",
+            body="# 任务\n\n整理复盘文档。\n",
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(enabled=True),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        async def fake_send(_text: str) -> None:
+            pass
+
+        app._send_message = fake_send  # type: ignore[method-assign]
+
+        await app._dispatch_command("继续整理自进化复盘文档，并说明测试结果。")
+        if app._agent_task is not None:
+            await app._agent_task
+
+        assert len(messages) == 1
+        assert "Matches: `1`" in messages[0]
+        assert top.id in messages[0]
+        assert lower.id not in messages[0]
+
     def test_tui_self_evolution_review_shows_existing_blocked_candidate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

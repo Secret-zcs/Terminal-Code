@@ -1078,7 +1078,7 @@ class MewCodeApp(App):
         try:
             markdown = EvolutionEngine(
                 self.agent.work_dir
-            ).render_skill_candidate_task_matches(text, limit=3)
+            ).render_skill_candidate_task_matches(text, limit=1)
         except Exception as exc:
             log.debug("Self-evolution candidate matching failed: %s", exc)
             return

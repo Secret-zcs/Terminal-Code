@@ -2065,3 +2065,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_ski
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ignores_generic_chinese_overlap tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ranks_relevant_candidate tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
 3 passed
 ```
+
+## Self-Evolution TUI 匹配提示 Top 1
+
+本次把普通对话里的候选 skill 匹配提示限制为最高置信 1 个。engine 的匹配 API 仍支持多候选 limit，但 TUI 默认只展示 Top 1，避免多个未审批候选在主对话里制造噪音。
+
+审批影响：
+
+- Top 1 只是展示限制，不代表系统自动选择或启用该候选。
+- 被隐藏的候选不会被拒绝或修改。
+- pending approval、blocked candidate、generated candidate 的 inbox 逻辑不变。
+
+安全策略：
+
+- 仍显示 `Runtime: not auto-activated`。
+- 不调用 `LoadSkill`。
+- 不改变 approval request 状态。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_only_top_self_evolution_candidate_match -q
+1 failed  # 实现前红灯：TUI 显示了 2 个候选
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_only_top_self_evolution_candidate_match tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_self_evolution_candidate_matches -q
+2 passed
+```

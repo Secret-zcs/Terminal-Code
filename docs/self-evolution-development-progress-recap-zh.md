@@ -4093,3 +4093,40 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_ski
 
 - 给匹配报告增加阈值/原因说明，让用户能看到“为什么没展示某个低分候选”。
 - 继续评估是否需要把匹配提示改成只显示最高置信候选，减少噪音。
+
+## 85. 最新推进记录：TUI 候选 Skill 匹配只展示 Top 1
+
+日期：2026-08-05
+
+本次继续降低候选 skill 匹配提示噪音。此前 TUI 调用 `render_skill_candidate_task_matches(text, limit=3)`，如果多个候选都命中，用户会在普通对话前看到多条候选报告。现在 TUI 只展示最高置信的 1 个候选；engine API 仍保留可配置 `limit`，用于测试、报告或后续专门的审计视图。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_user_message_shows_only_top_self_evolution_candidate_match`，覆盖 TUI 只显示最高分候选。
+- 修改 `mewcode/app.py`：`_show_self_evolution_task_matches()` 将 `limit` 从 3 改为 1。
+
+用户能看到什么：
+
+- 普通对话中最多只出现 1 个候选 skill 匹配提示。
+- 如果多个候选相关，默认只展示分数最高的那个，减少干扰。
+
+安全边界：
+
+- 不改变匹配评分算法。
+- 不改变 engine API 的可配置能力。
+- 不自动启用或审批候选 skill。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_only_top_self_evolution_candidate_match -q
+1 failed  # 实现前红灯：TUI 显示了 2 个候选
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_only_top_self_evolution_candidate_match tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_self_evolution_candidate_matches -q
+2 passed
+```
+
+下一步计划：
+
+- 给被隐藏的低分候选保留审计入口，而不是在主对话里直接展示。
+- 继续完善匹配报告与审批入口的衔接。
