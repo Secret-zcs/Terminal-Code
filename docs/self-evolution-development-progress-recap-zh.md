@@ -4639,3 +4639,43 @@ passed
 
 - 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
 - 检查 blocked/generated candidate notification 是否也需要展示 candidate source review id 的更稳定格式。
+
+## 98. 最新推进记录：Review 执行异常改为用户可见
+
+日期：2026-08-05
+
+本次补齐 `_run_self_evolution_review()` 的异常透明度。此前 `review_ready_skill_candidates()` 抛异常时只写 debug log，TUI 用户不会知道 self-evolution review 已失败。现在异常会显示为系统消息 `Self-evolution review failed: <reason>`，同时保留 debug log。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_failure_is_user_visible`，覆盖 review 崩溃时的系统消息。
+- 修改 `mewcode/app.py`：`_run_self_evolution_review()` 捕获异常后调用 `_show_system_message(...)`。
+
+用户能看到什么：
+
+- 如果 self-evolution review 执行崩溃，用户会直接看到失败原因，而不是只看到没有任何 inbox/approval 提示。
+- busy、stale recovery 等正常通知分支行为保持不变。
+
+安全边界：
+
+- 不改变候选生成、eval、execution eval、approval 或 promote 逻辑。
+- 不自动重试或修改状态。
+- 只增加错误可见性。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_is_user_visible -q
+1 failed  # 实现前红灯：messages 为空，异常只写 debug log
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_recovered_stale_message -q
+3 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
+下一步计划：
+
+- 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
+- 检查 self-evolution review 失败消息是否需要做路径/敏感信息清洗。

@@ -2320,6 +2320,35 @@ python3 -m py_compile mewcode/evolution/auto_review.py
 passed
 ```
 
+## Review 执行异常用户可见
+
+本次让 `_run_self_evolution_review()` 在 `review_ready_skill_candidates()` 抛异常时显示系统消息，而不是只写 debug log。
+
+审批影响：
+
+- 不改变审批模式或审批状态。
+- 不自动重试失败 review。
+- 不自动生成、审批或应用候选 skill。
+
+安全策略：
+
+- 只增加错误提示。
+- 不修改 approval store、candidate manifest、eval report 或 project skill。
+- 后续可继续补充错误消息的路径/敏感信息清洗。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_is_user_visible -q
+1 failed  # 修复前 review 崩溃对用户不可见
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_failure_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_recovered_stale_message -q
+3 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
 ## Review 流审批打开失败的降级展示
 
 本次让 `_run_self_evolution_review()` 尊重 `_show_self_evolution_approval()` 的 bool 返回值：新审批请求打不开时显示 ready notification；已有 pending request 打不开时继续展示 self-evolution inbox。

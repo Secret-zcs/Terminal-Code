@@ -2815,6 +2815,35 @@ class TestEvolutionEngine:
         assert "Self-evolution review already running" in messages[0]
         assert "review_running" in messages[0]
 
+    def test_tui_self_evolution_review_failure_is_user_visible(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.config import SelfEvolutionConfig
+
+        def failing_review(*_args, **_kwargs):
+            raise RuntimeError("review crashed")
+
+        monkeypatch.setattr(
+            app_module,
+            "review_ready_skill_candidates",
+            failing_review,
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+
+        assert messages == ["Self-evolution review failed: review crashed"]
+
     def test_tui_self_evolution_review_shows_recovered_stale_message(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -2152,6 +2152,7 @@ class MewCodeApp(App):
             )
         except Exception as exc:
             log.debug("Self-evolution review failed: %s", exc)
+            self._show_system_message(f"Self-evolution review failed: {exc}")
             return
         requests = list(result.get("requests", []))
         if requests:
