@@ -2091,3 +2091,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_only_top_self_evolution_candidate_match tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_self_evolution_candidate_matches -q
 2 passed
 ```
+
+## Self-Evolution 匹配解释词降噪
+
+本次清理匹配报告中的中文边界噪音词。`Matched terms` 不再展示 `化复`、`盘文` 这类用户无法理解的 bigram，而保留 `复盘` 等有解释力的词。
+
+审批影响：
+
+- 只影响匹配解释和低信号 token 过滤。
+- 不影响 approval request 创建或处理。
+- 不影响候选 skill 是否能被 promote。
+
+安全策略：
+
+- 报告仍显示 gate 状态和 `Runtime: not auto-activated`。
+- 不修改 candidate manifest。
+- 不自动启用任何候选。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+1 failed  # 实现前红灯：Matched terms 包含 `盘文`
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ignores_generic_chinese_overlap tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ranks_relevant_candidate -q
+3 passed
+```

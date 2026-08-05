@@ -67,6 +67,8 @@ LOW_SIGNAL_SKILL_MATCH_TOKENS = {
     "文档",
     "修改",
     "理由",
+    "化复",
+    "盘文",
 }
 DANGEROUS_SKILL_PATTERNS = (
     "rm -rf /",

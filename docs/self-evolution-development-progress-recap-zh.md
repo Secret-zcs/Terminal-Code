@@ -4130,3 +4130,40 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_
 
 - 给被隐藏的低分候选保留审计入口，而不是在主对话里直接展示。
 - 继续完善匹配报告与审批入口的衔接。
+
+## 86. 最新推进记录：匹配报告隐藏中文边界噪音词
+
+日期：2026-08-05
+
+本次继续清理候选 skill 匹配报告的可读性。中文 bigram 会把 `自进化复盘文档` 切出 `化复`、`盘文` 这种跨词边界片段；这些片段虽然能参与分数，但对用户解释没有价值。现在将 `化复`、`盘文` 加入低信号 token 过滤，报告的 `Matched terms` 更接近用户能理解的词，如 `自进`、`进化`、`复盘`。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_render_skill_candidate_task_matches_shows_gate_status`，要求 `Matched terms` 行不包含 `盘文`。
+- 修改 `mewcode/evolution/engine.py`：`LOW_SIGNAL_SKILL_MATCH_TOKENS` 增加 `化复`、`盘文`。
+
+用户能看到什么：
+
+- 匹配报告中的 `Matched terms` 不再展示明显无意义的中文边界片段。
+- 正向匹配仍保留 `复盘` 等有解释力的词。
+
+安全边界：
+
+- 只影响匹配解释和分数中的低信号 token。
+- 不改变候选状态、审批状态或 project skill。
+- 不自动启用任何候选。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+1 failed  # 实现前红灯：Matched terms 包含 `盘文`
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ignores_generic_chinese_overlap tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ranks_relevant_candidate -q
+3 passed
+```
+
+下一步计划：
+
+- 继续把匹配提示从“系统消息”打磨成更明确的 self-evolution review card。
+- 后续考虑集中管理中文低信号词，避免散落在引擎代码中。

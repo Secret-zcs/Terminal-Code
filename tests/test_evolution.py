@@ -1166,6 +1166,10 @@ class TestEvolutionEngine:
         assert proposal.id in markdown
         assert "Matched terms" in markdown
         assert "复盘" in markdown
+        matched_line = next(
+            line for line in markdown.splitlines() if line.startswith("- Matched terms:")
+        )
+        assert "盘文" not in matched_line
         assert "Eval: `pending`" in markdown
         assert "Execution eval: `pending`" in markdown
         assert "Approval: `(none)`" in markdown
