@@ -2294,9 +2294,14 @@ class MewCodeApp(App):
                 inbox_markdown,
                 report_detail_markdown,
             )
-        except Exception:
+        except Exception as exc:
             if self._pending_self_evolution_inbox_key == inbox_key:
                 self._pending_self_evolution_inbox_key = None
+            try:
+                self._show_system_message("Self-evolution inbox failed to open.")
+            except Exception:
+                pass
+            log.debug("Self-evolution inbox mount failed: %s", exc)
 
     async def _mount_self_evolution_inbox(
         self,

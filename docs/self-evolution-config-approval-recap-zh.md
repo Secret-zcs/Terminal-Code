@@ -2291,6 +2291,35 @@ python3 -m py_compile mewcode/app.py
 passed
 ```
 
+## Inbox 挂载失败用户提示
+
+本次让 `_mount_self_evolution_inbox_guarded()` 在 inbox widget 挂载失败时显示系统消息 `Self-evolution inbox failed to open.`，并继续清理 pending key。
+
+审批影响：
+
+- 不改变 approval mode。
+- 不处理或修改任何 approval request。
+- 不影响 candidate gate、eval 或 promote 条件。
+
+安全策略：
+
+- 只影响 TUI 错误提示和 debug log。
+- 不修改 approval store、candidate manifest、eval report 或 project skill。
+- pending key 清理保留，允许后续重新展示 inbox。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails -q
+1 failed  # 修复前 inbox 挂载失败静默
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_mount_disables_and_restores_input -q
+4 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
 ## Approval 渲染失败消息脱敏
 
 本次让 `_show_self_evolution_approval()` 的失败消息复用 `_sanitize_self_evolution_review_error()`。当 approval request 渲染失败原因包含绝对路径时，系统消息会替换为 `<path>`。

@@ -3846,6 +3846,8 @@ class TestEvolutionEngine:
 
         app = _make_test_mewcode_app()
         attempts: list[tuple[str, str]] = []
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
 
         async def failing_mount(inbox: str, report: str = "") -> None:
             attempts.append((inbox, report))
@@ -3857,6 +3859,7 @@ class TestEvolutionEngine:
         await asyncio.sleep(0)
 
         assert app._pending_self_evolution_inbox_key is None
+        assert messages == ["Self-evolution inbox failed to open."]
 
         app._show_self_evolution_inbox("# Self-Evolution Inbox", "report")
         await asyncio.sleep(0)

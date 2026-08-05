@@ -4761,3 +4761,43 @@ passed
 
 - 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
 - 检查 inbox/report detail 外的其他 self-evolution 系统消息是否需要统一脱敏策略。
+
+## 101. 最新推进记录：Inbox 挂载失败增加用户可见提示
+
+日期：2026-08-05
+
+本次补齐 self-evolution inbox widget 的挂载失败可见性。此前 `_mount_self_evolution_inbox_guarded()` 只清理 `_pending_self_evolution_inbox_key`，允许后续重试，但用户看不到 inbox 没打开的原因。现在挂载失败会显示 `Self-evolution inbox failed to open.`，同时保留 debug log。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：增强 `test_tui_self_evolution_inbox_clears_pending_when_mount_fails`，断言挂载失败会产生系统消息。
+- 修改 `mewcode/app.py`：`_mount_self_evolution_inbox_guarded()` 捕获异常后清理 pending key、显示系统消息并记录 debug log。
+
+用户能看到什么：
+
+- 如果 inbox 卡片打开失败，用户会看到明确提示，而不是静默无响应。
+- pending key 仍会清理，后续 review tick 可以重新展示 inbox。
+
+安全边界：
+
+- 不修改 candidate、approval request、eval report 或 project skill。
+- 不自动 approve、reject、promote 或 quarantine。
+- 只改变 TUI 错误提示和日志。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails -q
+1 failed  # 实现前红灯：messages 为空，inbox 挂载失败静默
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_mount_disables_and_restores_input -q
+4 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
+下一步计划：
+
+- 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
+- 检查 match card guarded mount 失败是否也需要用户可见提示。
