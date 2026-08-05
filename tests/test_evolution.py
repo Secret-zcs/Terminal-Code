@@ -1338,6 +1338,7 @@ class TestEvolutionEngine:
         stale = next(run for run in runs if run.id == "review_stale")
         new_runs = [run for run in runs if run.id != "review_stale"]
         assert result["status"] == "idle"
+        assert result["expired_review_run_ids"] == ["review_stale"]
         assert result["review_run"] is not None
         assert stale.status == "failed"
         assert "stale fork reviewer" in stale.error
@@ -1446,6 +1447,21 @@ class TestEvolutionEngine:
         assert "Self-evolution review already running" in message
         assert "review_running" in message
         assert ".mewcode/evolution/review_runs/review_running/report.md" in message
+
+    def test_self_evolution_review_notification_shows_recovered_stale_run(
+        self,
+    ) -> None:
+        from mewcode.evolution.auto_review import format_review_notification
+
+        message = format_review_notification({
+            "status": "idle",
+            "expired_review_run_ids": ["review_stale"],
+            "requests": [],
+            "blocked_generated_candidates": [],
+        })
+
+        assert "Self-evolution recovered stale review run(s):" in message
+        assert "review_stale" in message
 
     def test_self_evolution_review_creates_usage_patch_candidate(
         self, tmp_path: Path
@@ -2543,6 +2559,44 @@ class TestEvolutionEngine:
         assert len(messages) == 1
         assert "Self-evolution review already running" in messages[0]
         assert "review_running" in messages[0]
+
+    def test_tui_self_evolution_review_shows_recovered_stale_message(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.config import SelfEvolutionConfig
+
+        monkeypatch.setattr(
+            app_module,
+            "review_ready_skill_candidates",
+            lambda *_args, **_kwargs: {
+                "status": "idle",
+                "expired_review_run_ids": ["review_stale"],
+                "requests": [],
+                "blocked_generated_candidates": [],
+            },
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        inboxes: list[tuple[str, str]] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+        app._show_self_evolution_inbox = (  # type: ignore[method-assign]
+            lambda inbox, report: inboxes.append((inbox, report))
+        )
+
+        app._run_self_evolution_review()
+
+        assert inboxes == []
+        assert len(messages) == 1
+        assert "Self-evolution recovered stale review run" in messages[0]
+        assert "review_stale" in messages[0]
 
     def test_tui_self_evolution_review_shows_existing_blocked_candidate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

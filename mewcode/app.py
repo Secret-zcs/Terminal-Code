@@ -2029,6 +2029,12 @@ class MewCodeApp(App):
             if message:
                 self._show_system_message(message)
             return
+        if result.get("expired_review_run_ids") and not result.get(
+            "blocked_generated_candidates"
+        ):
+            if message:
+                self._show_system_message(message)
+            return
         if result.get("status") != "disabled":
             engine = EvolutionEngine(self.agent.work_dir)
             inbox = engine.list_self_evolution_inbox()

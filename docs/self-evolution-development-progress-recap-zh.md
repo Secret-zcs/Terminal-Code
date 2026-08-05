@@ -3813,3 +3813,47 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 
 - 考虑把 stale recovery 的 run id 也加入 notification，让用户在 CLI/TUI 里看到“已恢复旧卡死评审”。
 - 继续补更完整的多轮对话 candidate-skill 匹配测试。
+
+## 78. 最新推进记录：Stale Recovery 通知可见化
+
+日期：2026-08-05
+
+本次把 stale fork reviewer 恢复结果接到通知层。上一轮已经能自动把过期 `running` run 标记为 `failed` 并启动新 review pass，但返回结果没有告诉上层恢复了哪个旧 run；CLI/TUI 也可能因为空 inbox 分支导致用户看不到恢复动作。现在 review result 会携带 `expired_review_run_ids`，formatter 会渲染恢复提示，TUI 会在空 inbox 前优先展示该提示。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_self_evolution_review_recovers_stale_running_fork_reviewer`，要求结果包含 `expired_review_run_ids`。
+- 修改 `tests/test_evolution.py`：新增 `test_self_evolution_review_notification_shows_recovered_stale_run`，覆盖 formatter 文案。
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_shows_recovered_stale_message`，覆盖 TUI 不挂空 inbox，而是显示 stale recovery message。
+- 修改 `mewcode/evolution/auto_review.py`：`_active_fork_reviewer_run()` 支持回传 expired run 列表；`review_ready_skill_candidates()` 把 expired ids 写入 result。
+- 修改 `mewcode/evolution/auto_review.py`：`format_review_notification()` 支持 `expired_review_run_ids`。
+- 修改 `mewcode/app.py`：`_run_self_evolution_review()` 在 inbox 分支前处理 stale recovery message。
+
+用户能看到什么：
+
+- CLI/TUI 会显示 `Self-evolution recovered stale review run(s): ...`。
+- 用户能知道本次触发先恢复了旧卡死评审，而不是误以为系统没有动作。
+
+安全边界：
+
+- 不改变候选 skill 生成、评测、审批、推广、回滚或隔离逻辑。
+- 不自动批准 stale run 中可能遗留的候选。
+- 只暴露恢复结果和调整 TUI 分支优先级。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_recovers_stale_running_fork_reviewer tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_recovered_stale_run -q
+2 failed  # 实现前红灯：result 无 expired_review_run_ids，formatter 返回空字符串
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_recovered_stale_message -q
+1 failed  # 实现前红灯：TUI 挂载空 inbox，没有显示 stale recovery message
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_recovered_stale_message tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
+3 passed
+```
+
+下一步计划：
+
+- 开始补多轮对话 candidate-skill 匹配：当前任务如何匹配历史生成的候选 skill。
+- 优先从可测试的规则层做起，不引入不透明模型判断。

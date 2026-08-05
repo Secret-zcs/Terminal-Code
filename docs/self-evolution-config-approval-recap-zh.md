@@ -1877,3 +1877,32 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_recovers_stale_running_fork_reviewer tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running -q
 2 passed
 ```
+
+## Self-Evolution Stale Recovery 通知
+
+本次把 stale recovery 的结果暴露给上层。`review_ready_skill_candidates()` 现在会返回 `expired_review_run_ids`，`format_review_notification()` 会输出 `Self-evolution recovered stale review run(s): ...`，TUI 会在空 inbox 前优先展示该消息。
+
+审批影响：
+
+- stale recovery 通知只说明旧 review run 已被标记为失败。
+- 不会把旧 run 中未完成的候选 skill 直接转成 approval request。
+- 不会改变已有 pending approval request 的处理优先级。
+
+安全策略：
+
+- 保留旧 run 的审计记录和失败原因。
+- 不改变候选 skill 的 eval/canary/approval gate。
+- 不新增用户命令或绕过用户审批。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_recovers_stale_running_fork_reviewer tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_recovered_stale_run -q
+2 failed  # 实现前红灯：result 无 expired_review_run_ids，formatter 返回空字符串
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_recovered_stale_message -q
+1 failed  # 实现前红灯：TUI 挂载空 inbox，没有显示 stale recovery message
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_recovered_stale_message tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_busy_message tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate -q
+3 passed
+```

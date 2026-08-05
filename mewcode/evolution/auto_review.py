@@ -17,6 +17,11 @@ FORK_REVIEWER_STALE_SECONDS = 60 * 60
 def format_review_notification(result: dict) -> str:
     requests = result.get("requests", [])
     blocked = result.get("blocked_generated_candidates", [])
+    expired = [
+        str(run_id).strip()
+        for run_id in result.get("expired_review_run_ids", [])
+        if str(run_id).strip()
+    ]
     if result.get("status") == "busy":
         active_id = str(result.get("active_review_run_id", "")).strip()
         report = str(result.get("active_review_report", "")).strip()
@@ -25,11 +30,19 @@ def format_review_notification(result: dict) -> str:
             message += f" Active run: {active_id}."
         if report:
             message += f" Report: {report}."
+        if expired:
+            message += " Recovered stale review run(s): " + ", ".join(expired) + "."
         return message
-    if not requests and not blocked:
+    if not requests and not blocked and not expired:
         return ""
     lines = []
+    if expired:
+        lines.append("Self-evolution recovered stale review run(s):")
+        for run_id in expired:
+            lines.append(f"- {run_id}")
     if requests:
+        if lines:
+            lines.append("")
         lines.append("Self-evolution approval request(s) ready:")
         for request in requests:
             lines.append(
@@ -73,11 +86,16 @@ def review_ready_skill_candidates(
         ["failure", "user_feedback"],
     )
     engine = EvolutionEngine(project_root)
-    active_run = _active_fork_reviewer_run(engine)
+    expired_review_runs: list[SelfEvolutionReviewRun] = []
+    active_run = _active_fork_reviewer_run(
+        engine,
+        expired_runs=expired_review_runs,
+    )
     if active_run is not None:
         result = _empty_review_result("busy")
         result["active_review_run_id"] = active_run.id
         result["active_review_report"] = active_run.artifacts.get("report", "")
+        result["expired_review_run_ids"] = [run.id for run in expired_review_runs]
         return result
 
     review_run = _start_fork_reviewer_run(
@@ -103,17 +121,24 @@ def review_ready_skill_candidates(
         )
         raise
 
+    result["expired_review_run_ids"] = [run.id for run in expired_review_runs]
     result["review_run"] = _finish_fork_reviewer_run(engine, review_run, result)
     return result
 
 
-def _active_fork_reviewer_run(engine: EvolutionEngine) -> SelfEvolutionReviewRun | None:
+def _active_fork_reviewer_run(
+    engine: EvolutionEngine,
+    *,
+    expired_runs: list[SelfEvolutionReviewRun] | None = None,
+) -> SelfEvolutionReviewRun | None:
     now = time.time()
     for run in reversed(engine.store.load_self_evolution_review_runs()):
         if run.mode != "fork_reviewer" or run.status != "running":
             continue
         if _fork_reviewer_run_is_stale(run, now=now):
             _expire_stale_fork_reviewer_run(engine, run, now=now)
+            if expired_runs is not None:
+                expired_runs.append(run)
             continue
         return run
     return None
@@ -160,6 +185,7 @@ def _empty_review_result(status: str) -> dict:
         "review_run": None,
         "active_review_run_id": "",
         "active_review_report": "",
+        "expired_review_run_ids": [],
     }
 
 
