@@ -1932,3 +1932,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_ski
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ranks_relevant_candidate -q
 1 passed
 ```
+
+## Self-Evolution 空 Inbox 抑制
+
+本次修复 TUI 空状态展示。`_run_self_evolution_review()` 现在会在渲染 inbox 前检查 `pending_requests`、`blocked_candidates`、`generated_candidates` 三类计数；全部为 0 时不展示 Self-Evolution Inbox。
+
+审批影响：
+
+- 有 pending approval request 时仍优先打开审批入口。
+- 有 blocked/generated candidate 时仍展示 inbox。
+- 无待处理项时不再制造一个全是 `None` 的空审批面板。
+
+安全策略：
+
+- 不改变 approval request 的创建、批准、拒绝或推广。
+- 不改变 candidate manifest 或 review run 存储。
+- 只调整 TUI 空状态显示。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_does_not_show_empty_inbox -q
+1 failed  # 实现前红灯：idle 无候选时仍挂载空 inbox
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_does_not_show_empty_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_existing_pending_request -q
+4 passed
+```

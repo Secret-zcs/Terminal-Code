@@ -2038,6 +2038,13 @@ class MewCodeApp(App):
         if result.get("status") != "disabled":
             engine = EvolutionEngine(self.agent.work_dir)
             inbox = engine.list_self_evolution_inbox()
+            counts = inbox.get("counts", {})
+            if not any(int(counts.get(key, 0) or 0) for key in (
+                "pending_requests",
+                "blocked_candidates",
+                "generated_candidates",
+            )):
+                return
             pending = inbox.get("pending_requests", [])
             if pending:
                 self._show_self_evolution_approval(pending[0]["request_id"])

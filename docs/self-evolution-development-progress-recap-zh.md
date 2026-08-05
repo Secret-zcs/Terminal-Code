@@ -3895,3 +3895,40 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_ski
 
 - 将匹配 API 接到 review report 或 TUI inbox，让用户能看到“当前任务匹配到了哪些候选 skill”。
 - 后续再考虑自动激活，但必须先经过审批策略和测试门槛，不能直接启用未批准候选。
+
+## 80. 最新推进记录：TUI 不再展示空 Self-Evolution Inbox
+
+日期：2026-08-05
+
+本次修复 self-evolution TUI 的空状态噪音。此前 `_run_self_evolution_review()` 在 self-evolution enabled 且 review result 为 idle 时，会调用 `engine.render_self_evolution_inbox()`；该函数即使没有 pending request、blocked candidate、generated candidate，也会返回一个完整但全是 `None` 的 inbox，导致 TUI 弹出无意义的空面板。现在 TUI 会先检查 inbox counts，三类计数全为 0 时直接返回，不再展示空 inbox。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_does_not_show_empty_inbox`，覆盖 idle 且无候选时不显示系统消息、不挂 inbox。
+- 修改 `mewcode/app.py`：`_run_self_evolution_review()` 在渲染 inbox 前检查 `pending_requests`、`blocked_candidates`、`generated_candidates` 三个计数。
+
+用户能看到什么：
+
+- 没有待审批、阻断或生成候选时，TUI 不再弹出空 Self-Evolution Inbox。
+- 有 pending approval、blocked candidate 或 generated candidate 时，原有 inbox/approval 展示保持不变。
+
+安全边界：
+
+- 不改变 engine 的 inbox 数据结构。
+- 不改变候选 skill 生成、评测、审批或推广逻辑。
+- 只减少 TUI 空状态打扰。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_does_not_show_empty_inbox -q
+1 failed  # 实现前红灯：idle 无候选时仍挂载空 inbox
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_does_not_show_empty_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_existing_pending_request -q
+4 passed
+```
+
+下一步计划：
+
+- 把候选 skill 匹配结果接入用户可见报告，而不是只暴露 API。
+- 继续清理 TUI self-evolution 分支，让 approval、busy、stale、inbox 的优先级更集中。
