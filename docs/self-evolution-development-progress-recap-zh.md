@@ -3619,3 +3619,39 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 检查 approval widget 已存在时重复调用 `_show_self_evolution_approval()` 的去重路径是否也会清理旧 inbox。
 - 继续减少 TUI 状态测试里的 fake widget 样板。
+
+## 73. 最新推进记录：重复 Approval 调用仍清理 Pending Inbox
+
+日期：2026-08-05
+
+本次补充 approval 去重路径的回归测试。`_show_self_evolution_approval()` 在检测到同一个 approval request 已经 pending 时会直接返回；如果这个 duplicate path 不清理旧 inbox，就可能留下无效 inbox widget。当前实现已经把 `_clear_pending_self_evolution_inbox()` 放在 duplicate 检查之前，本次用测试固定该行为。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox`。
+- 测试覆盖同一个 approval request 已经 pending 时，调用 `_show_self_evolution_approval()` 仍会移除残留 inbox、清空 pending inbox key，并且不会重复挂载 approval widget。
+- 本次不修改生产代码；现有实现已满足该边界。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 duplicate approval 路径覆盖。
+
+用户能看到什么：
+
+- 重复触发同一个 approval request 时，不会重复挂载 approval widget。
+- 如果此前残留了 inbox，重复 approval 调用仍会把 inbox 清掉。
+
+安全边界：
+
+- 不改变 candidate、review run、approval request、promote、rollback、quarantine 或 trusted-auto 行为。
+- 不新增用户命令。
+- 不修改生产代码，只补测试覆盖。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox -q
+2 passed
+```
+
+下一步计划：
+
+- 抽取 TUI self-evolution fake widget/test fixture，减少测试样板。
+- 继续检查 approval reject path 的状态清理和用户反馈文案。

@@ -1748,3 +1748,27 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_response_views_report_or_dismisses tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
 4 passed
 ```
+
+## Self-Evolution 重复 Approval 仍清理 Pending Inbox
+
+本次补充 duplicate approval path 的回归测试。同一个 approval request 已经 pending 时，`_show_self_evolution_approval()` 不会重复挂载 approval widget，但仍必须清理残留 pending inbox。当前实现已满足：`_clear_pending_self_evolution_inbox()` 在 duplicate request 检查之前执行。
+
+行为边界：
+
+- 同一个 approval request 已 pending 时不重复挂载 approval widget。
+- duplicate path 仍会移除旧 inbox 并清空 pending inbox key。
+- approval request 状态不变。
+
+安全策略：
+
+- 不改变 approval、promote、rollback、quarantine 或 trusted-auto 逻辑。
+- 不修改 candidate 或 review run 存储。
+- 不新增用户命令。
+- 不修改生产代码，只补测试覆盖。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox -q
+2 passed
+```

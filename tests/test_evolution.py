@@ -3119,6 +3119,44 @@ class TestEvolutionEngine:
         assert app._pending_self_evolution_inbox_key is None
         assert mounted and mounted[0][0] == request.id
 
+    @pytest.mark.asyncio
+    async def test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        request = engine.submit_skill_approval_request(proposal.id)
+        app = _make_test_mewcode_app()
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        app._pending_skill_approval_request_id = request.id
+        app._pending_self_evolution_inbox_key = ("# Self-Evolution Inbox", "report")
+        removed: list[str] = []
+        mounted: list[tuple[str, str]] = []
+
+        class FakeInbox:
+            def remove(self) -> None:
+                removed.append("inbox")
+
+        def fake_query_one(selector: str, *_args: object) -> object:
+            if selector == "#self-evolution-inbox-inline":
+                return FakeInbox()
+            raise LookupError(selector)
+
+        async def fake_mount(request_id: str, review_markdown: str) -> None:
+            mounted.append((request_id, review_markdown))
+
+        app.query_one = fake_query_one  # type: ignore[method-assign]
+        app._mount_self_evolution_approval = fake_mount  # type: ignore[method-assign]
+
+        app._show_self_evolution_approval(request.id)
+        await asyncio.sleep(0)
+
+        assert removed == ["inbox"]
+        assert app._pending_self_evolution_inbox_key is None
+        assert mounted == []
+
     def test_add_eval_case_invalidates_existing_execution_eval(
         self, tmp_path: Path
     ) -> None:
