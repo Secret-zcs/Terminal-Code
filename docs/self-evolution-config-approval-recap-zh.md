@@ -2860,3 +2860,31 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_se
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_self_evolution_inbox_summarizes_all_candidate_groups tests/test_evolution.py::TestEvolutionEngine::test_list_self_evolution_inbox_groups_pending_blocked_and_generated -q
 2 passed
 ```
+
+## Fork Reviewer 拆分启动/完成边界
+
+本次新增 `start_fork_reviewer_run()` 与 `complete_fork_reviewer_run()`。它把 fork reviewer 生命周期拆成 running run 创建和 run id 恢复完成两个阶段，为后续真正后台 review 或子 Agent 执行提供边界。
+
+审批影响：
+
+- start 阶段不提交 approval request。
+- complete 阶段仍沿用原 review/eval/execution eval/approval gate。
+- 不改变 `manual`、`deferred`、`trusted-auto` 审批模式。
+- 不改变 trusted-auto 的 same-pass auto-promote 范围。
+
+安全策略：
+
+- running run 仍触发 busy gate，避免并发 review 重复处理同一批候选。
+- review run policy 继续记录 `can_approve=False`、`can_promote=False`、`project_write=disabled`。
+- complete 阶段优先使用 persisted run 的 approval mode 和 trusted-auto policy，降低配置漂移风险。
+- 本次仍不是完整 LLM 子 Agent，只是把同步流程拆出可恢复 API。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_reviewer_run_can_start_and_complete_separately -q
+1 failed  # 修复前缺少 start/complete API
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_reviewer_run_can_start_and_complete_separately tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_fork_reviewer_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_recovers_stale_running_fork_reviewer -q
+4 passed
+```

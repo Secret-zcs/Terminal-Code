@@ -5226,3 +5226,44 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_se
 
 - 继续评估是否把 match card 的 coverage 行压缩，避免提示过长。
 - 后续可推进真正后台 fork reviewer，但需要先明确当前同步 review 的边界和测试入口。
+
+## 113. 最新推进记录：拆出 Fork Reviewer 可恢复启动/完成边界
+
+日期：2026-08-05
+
+本次把 fork reviewer 从“只能同步跑完整 review”推进到“可以先启动 running run，再按 run id 恢复完成”的边界。此前 `review_ready_skill_candidates()` 会创建 running run 并在同一个函数内立即完成；这让 TUI 后续接入后台任务或独立子 Agent 时缺少明确的 start/complete 接口。现在新增两个公开函数，先建立可测试边界，不一次性引入真实 LLM 子进程。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_fork_reviewer_run_can_start_and_complete_separately`，覆盖 start 后保持 running、不提交 approval、同步入口返回 busy、complete 后才提交 approval 和生成 report/output。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `start_fork_reviewer_run()`，只创建 running review run、input/policy artifact，并返回 `started`。
+- 修改 `mewcode/evolution/auto_review.py`：新增 `complete_fork_reviewer_run()`，按 run id 恢复 running run，复用原 `_review_enabled_skill_candidates()` 完成评审并写 output/report。
+- 修改 `mewcode/evolution/auto_review.py`：抽取 `_review_config_values()`、`_get_fork_reviewer_run()`、`_review_run_trusted_auto_values()`，让同步和拆分式 review 共享配置读取逻辑。
+
+用户能看到什么：
+
+- 当前同步入口行为不变。
+- 后续 TUI 或后台任务可以先创建 running review run，再异步完成它。
+- running run 会继续触发 busy gate，避免并发 review 重复生成候选或审批请求。
+
+安全边界：
+
+- start 阶段不生成 candidate、不提交 approval、不 promote、不写 project skill。
+- complete 阶段仍复用原 eval、execution eval、approval gate。
+- persisted run policy 仍记录 `can_approve=False`、`can_promote=False`、`project_write=disabled`。
+- 本次不是完整 LLM 子 Agent，只是为后续后台 fork 子 Agent 接入建立可恢复接口。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_reviewer_run_can_start_and_complete_separately -q
+1 failed  # 实现前红灯：auto_review 缺少 start_fork_reviewer_run/complete_fork_reviewer_run
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_fork_reviewer_run_can_start_and_complete_separately tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_records_fork_reviewer_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_skips_when_fork_reviewer_is_running tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_recovers_stale_running_fork_reviewer -q
+4 passed
+```
+
+下一步计划：
+
+- 给 complete API 的异常和非 running run 分支补测试，避免后台恢复时静默失败。
+- 在 TUI review 调度中接入 start/complete 边界，形成真正可观察的后台 review 生命周期。

@@ -76,16 +76,8 @@ def review_ready_skill_candidates(
     if not getattr(self_evolution_config, "enabled", False):
         return _empty_review_result("disabled")
 
-    approval_mode = getattr(self_evolution_config, "skill_approval_mode", "manual")
-    rollback_threshold = getattr(
-        self_evolution_config,
-        "trusted_auto_rollback_threshold",
-        1,
-    )
-    rollback_events = getattr(
-        self_evolution_config,
-        "trusted_auto_rollback_events",
-        ["failure", "user_feedback"],
+    approval_mode, rollback_threshold, rollback_events = _review_config_values(
+        self_evolution_config
     )
     engine = EvolutionEngine(project_root)
     expired_review_runs: list[SelfEvolutionReviewRun] = []
@@ -126,6 +118,133 @@ def review_ready_skill_candidates(
     result["expired_review_run_ids"] = [run.id for run in expired_review_runs]
     result["review_run"] = _finish_fork_reviewer_run(engine, review_run, result)
     return result
+
+
+def start_fork_reviewer_run(
+    project_root: str | Path,
+    self_evolution_config: Any,
+) -> dict:
+    """Create a resumable fork reviewer run without executing the review pass."""
+    if not getattr(self_evolution_config, "enabled", False):
+        return _empty_review_result("disabled")
+
+    approval_mode, rollback_threshold, rollback_events = _review_config_values(
+        self_evolution_config
+    )
+    engine = EvolutionEngine(project_root)
+    expired_review_runs: list[SelfEvolutionReviewRun] = []
+    active_run = _active_fork_reviewer_run(
+        engine,
+        expired_runs=expired_review_runs,
+    )
+    if active_run is not None:
+        result = _empty_review_result("busy")
+        result["active_review_run_id"] = active_run.id
+        result["active_review_report"] = active_run.artifacts.get("report", "")
+        result["expired_review_run_ids"] = [run.id for run in expired_review_runs]
+        return result
+
+    review_run = _start_fork_reviewer_run(
+        engine,
+        approval_mode=approval_mode,
+        trusted_auto_rollback_threshold=rollback_threshold,
+        trusted_auto_rollback_events=rollback_events,
+    )
+    result = _empty_review_result("started")
+    result["expired_review_run_ids"] = [run.id for run in expired_review_runs]
+    result["review_run"] = review_run
+    return result
+
+
+def complete_fork_reviewer_run(
+    project_root: str | Path,
+    review_run_id: str,
+    self_evolution_config: Any,
+) -> dict:
+    """Resume and finish a previously started fork reviewer run."""
+    if not getattr(self_evolution_config, "enabled", False):
+        return _empty_review_result("disabled")
+
+    engine = EvolutionEngine(project_root)
+    review_run = _get_fork_reviewer_run(engine, review_run_id)
+    if review_run is None:
+        return _empty_review_result("missing")
+    if review_run.status != "running":
+        result = _empty_review_result("not-running")
+        result["review_run"] = review_run
+        return result
+
+    fallback_mode, fallback_threshold, fallback_events = _review_config_values(
+        self_evolution_config
+    )
+    approval_mode = review_run.approval_mode or fallback_mode
+    rollback_threshold, rollback_events = _review_run_trusted_auto_values(
+        review_run,
+        fallback_threshold=fallback_threshold,
+        fallback_events=fallback_events,
+    )
+    try:
+        result = _review_enabled_skill_candidates(
+            engine,
+            approval_mode=approval_mode,
+            trusted_auto_rollback_threshold=rollback_threshold,
+            trusted_auto_rollback_events=rollback_events,
+        )
+    except Exception as exc:
+        _finish_fork_reviewer_run(
+            engine,
+            review_run,
+            _empty_review_result("failed"),
+            status="failed",
+            error=str(exc),
+        )
+        raise
+
+    result["expired_review_run_ids"] = []
+    result["review_run"] = _finish_fork_reviewer_run(engine, review_run, result)
+    return result
+
+
+def _review_config_values(self_evolution_config: Any) -> tuple[str, int, list[str]]:
+    approval_mode = getattr(self_evolution_config, "skill_approval_mode", "manual")
+    rollback_threshold = getattr(
+        self_evolution_config,
+        "trusted_auto_rollback_threshold",
+        1,
+    )
+    rollback_events = getattr(
+        self_evolution_config,
+        "trusted_auto_rollback_events",
+        ["failure", "user_feedback"],
+    )
+    return approval_mode, rollback_threshold, list(rollback_events)
+
+
+def _get_fork_reviewer_run(
+    engine: EvolutionEngine,
+    review_run_id: str,
+) -> SelfEvolutionReviewRun | None:
+    clean_id = review_run_id.strip()
+    if not clean_id:
+        return None
+    for run in reversed(engine.store.load_self_evolution_review_runs()):
+        if run.mode == "fork_reviewer" and run.id == clean_id:
+            return run
+    return None
+
+
+def _review_run_trusted_auto_values(
+    run: SelfEvolutionReviewRun,
+    *,
+    fallback_threshold: int,
+    fallback_events: list[str],
+) -> tuple[int, list[str]]:
+    policy = run.policy.get("trusted_auto_policy", {})
+    if not isinstance(policy, dict):
+        return fallback_threshold, fallback_events
+    threshold = int(policy.get("rollback_threshold", fallback_threshold) or 1)
+    events = policy.get("rollback_events", fallback_events)
+    return max(1, threshold), list(events or fallback_events)
 
 
 def _active_fork_reviewer_run(

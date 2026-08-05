@@ -1450,6 +1450,47 @@ class TestEvolutionEngine:
         assert (tmp_path / run.artifacts["policy"]).is_file()
         assert (tmp_path / run.artifacts["report"]).is_file()
 
+    def test_fork_reviewer_run_can_start_and_complete_separately(
+        self, tmp_path: Path
+    ) -> None:
+        from mewcode.config import SelfEvolutionConfig
+        from mewcode.evolution.auto_review import (
+            complete_fork_reviewer_run,
+            review_ready_skill_candidates,
+            start_fork_reviewer_run,
+        )
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        config = SelfEvolutionConfig(enabled=True, skill_approval_mode="manual")
+
+        started = start_fork_reviewer_run(tmp_path, config)
+
+        started_run = started["review_run"]
+        assert started["status"] == "started"
+        assert started_run.status == "running"
+        assert (tmp_path / started_run.artifacts["input"]).is_file()
+        assert (tmp_path / started_run.artifacts["policy"]).is_file()
+        assert not (tmp_path / started_run.artifacts["output"]).exists()
+        assert not (tmp_path / started_run.artifacts["report"]).exists()
+        assert EvolutionEngine(tmp_path).store.load_skill_approval_requests() == []
+
+        busy = review_ready_skill_candidates(tmp_path, config)
+        assert busy["status"] == "busy"
+        assert busy["active_review_run_id"] == started_run.id
+
+        completed = complete_fork_reviewer_run(tmp_path, started_run.id, config)
+
+        runs = EvolutionEngine(tmp_path).store.load_self_evolution_review_runs()
+        completed_run = next(run for run in runs if run.id == started_run.id)
+        assert completed["status"] == "submitted"
+        assert completed["review_run"].id == started_run.id
+        assert completed["requests"][0].proposal_id == proposal.id
+        assert completed_run.status == "submitted"
+        assert completed_run.summary["requests"] == [proposal.id]
+        assert (tmp_path / completed_run.artifacts["output"]).is_file()
+        assert (tmp_path / completed_run.artifacts["report"]).is_file()
+
     def test_self_evolution_review_skips_when_fork_reviewer_is_running(
         self, tmp_path: Path
     ) -> None:
