@@ -4996,3 +4996,41 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill
 
 - 对 self-evolution match/inbox 入口继续检查类似 stale pending 状态。
 - 如果发现重复文案逻辑，提取小型 helper，但不改变审批状态机。
+
+## 107. 最新推进记录：Approval 打开缺少 Agent 时清理 Pending 状态
+
+日期：2026-08-05
+
+本次把上一节的 stale pending 修复补到 approval 打开入口。`_show_self_evolution_approval()` 在 active agent 缺失时会返回 `False`，但如果此前已经存在同一个 `_pending_skill_approval_request_id`，该 id 会残留，后续重新打开同一审批请求可能被 duplicate guard 阻挡。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_tui_self_evolution_approval_without_agent_is_user_visible`，要求打开 approval 入口 no-agent 分支也清空 pending id。
+- 修改 `mewcode/app.py`：`_show_self_evolution_approval()` 在 `self.agent is None` 返回前清空 `_pending_skill_approval_request_id`。
+
+用户能看到什么：
+
+- approval 打开失败时仍显示 `Self-evolution approval failed: no active agent.`。
+- 该失败不会让后续同一个审批请求卡在“已 pending”状态。
+
+安全边界：
+
+- 不读取或修改 approval request 内容。
+- 不改变审批模式和 promote gate。
+- 不自动 approve/reject。
+- 只恢复 TUI pending 状态。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_without_agent_is_user_visible -q
+1 failed  # 实现前红灯：打开 approval no-agent 分支留下 stale pending id
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_without_agent_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox -q
+3 passed
+```
+
+下一步计划：
+
+- 继续检查 match/inbox 响应链路是否存在“失败后输入框或 pending 状态不恢复”的边界。
+- 将重复的 no-agent approval 恢复逻辑收敛为小 helper，前提是测试覆盖保持清晰。
