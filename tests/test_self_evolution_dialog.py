@@ -79,3 +79,24 @@ def test_self_evolution_inbox_widget_emits_view_report_and_dismiss() -> None:
 
     assert captured[-1].choice == SelfEvolutionInboxChoice.DISMISS
     assert captured[-1].report_markdown == ""
+
+
+def test_self_evolution_inbox_widget_hides_report_action_without_detail() -> None:
+    captured = []
+    widget = InlineSelfEvolutionInboxWidget(
+        inbox_markdown="# Self-Evolution Inbox\n\n- generated candidate",
+        report_detail_markdown="   ",
+    )
+    widget.post_message = captured.append  # type: ignore[method-assign]
+
+    content = widget._build_content()
+
+    assert "generated candidate" in content
+    assert "View report details" not in content
+    assert "Dismiss inbox" in content
+
+    widget.action_cursor_down()
+    widget.action_select()
+
+    assert captured[-1].choice == SelfEvolutionInboxChoice.DISMISS
+    assert captured[-1].report_markdown == ""

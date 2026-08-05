@@ -1697,3 +1697,27 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_deduplicates_pending_display tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_clears_pending_when_mount_fails -q
 3 passed
 ```
+
+## Self-Evolution Inbox 无报告详情动作隐藏
+
+本次补充 inbox widget 的 no-report-detail 回归测试。`report_detail_markdown` 为空或只有空白字符时，widget 不显示 `View report details`，只保留 `Dismiss inbox`，选择后不会返回 report Markdown。
+
+行为边界：
+
+- 空白 report detail 不产生查看报告动作。
+- `Dismiss inbox` 仍可正常选择。
+- 选择后事件为 `DISMISS`，`report_markdown` 为空。
+
+安全策略：
+
+- 不改变 approval、promote、rollback、quarantine 或 trusted-auto 逻辑。
+- 不修改 candidate 或 review run 存储。
+- 不新增用户命令。
+- 不修改生产代码，只补测试覆盖。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_hides_report_action_without_detail -q
+1 passed
+```

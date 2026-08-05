@@ -3543,3 +3543,39 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 补充 no report detail 场景下 inbox widget 只显示 `Dismiss inbox` 的边界测试。
 - 继续检查 self-evolution TUI 事件是否存在状态泄露。
+
+## 71. 最新推进记录：Inbox 无报告详情时隐藏查看动作
+
+日期：2026-08-05
+
+本次补充 self-evolution inbox widget 的 no-report-detail 回归测试。`InlineSelfEvolutionInboxWidget` 已经通过 `report_detail_markdown.strip()` 判断是否显示 `View report details`；当 report detail 为空或只有空白字符时，widget 应只显示 `Dismiss inbox`，并且选择后不会返回任何 report Markdown。
+
+修改内容：
+
+- 修改 `tests/test_self_evolution_dialog.py`：新增 `test_self_evolution_inbox_widget_hides_report_action_without_detail`。
+- 测试覆盖空白 report detail、隐藏 `View report details`、保留 `Dismiss inbox`、选择后返回 `DISMISS` 且 report 为空。
+- 本次不修改生产代码；现有实现已满足该边界。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档测试补强。
+
+用户能看到什么：
+
+- 没有可读报告详情时，inbox 不会展示无效的 `View report details` 动作。
+- 用户只会看到可执行的 `Dismiss inbox` 动作，避免点开空报告。
+
+安全边界：
+
+- 不改变 candidate、review run、approval request、promote、rollback、quarantine 或 trusted-auto 行为。
+- 不新增用户命令。
+- 不修改生产代码，只补测试覆盖。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_hides_report_action_without_detail -q
+1 passed
+```
+
+下一步计划：
+
+- 继续检查 self-evolution TUI 事件是否存在状态泄露。
+- 考虑把 inbox widget 的选项列表暴露为只读测试 helper，减少直接依赖 `_build_content()` 字符串断言。
