@@ -1133,6 +1133,30 @@ class TestEvolutionEngine:
         assert "复盘" in matches[0]["matched_terms"]
         assert all(match["proposal_id"] != deploy_proposal.id for match in matches)
 
+    def test_render_skill_candidate_task_matches_shows_gate_status(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="review-loop",
+            description="自进化复盘文档和测试结果整理流程",
+            body="# 任务\n\n整理复盘文档，记录测试结果和修改理由。\n",
+        )
+
+        markdown = engine.render_skill_candidate_task_matches(
+            "继续整理自进化复盘文档，并说明测试结果。"
+        )
+
+        assert "# Self-Evolution Candidate Skill Matches" in markdown
+        assert "review-loop" in markdown
+        assert proposal.id in markdown
+        assert "Matched terms" in markdown
+        assert "复盘" in markdown
+        assert "Eval: `pending`" in markdown
+        assert "Execution eval: `pending`" in markdown
+        assert "Approval: `(none)`" in markdown
+        assert "not auto-activated" in markdown
+
     def test_read_self_evolution_review_report_returns_markdown(
         self, tmp_path: Path
     ) -> None:
@@ -2657,6 +2681,46 @@ class TestEvolutionEngine:
 
         assert messages == []
         assert inboxes == []
+
+    @pytest.mark.asyncio
+    async def test_tui_user_message_shows_self_evolution_candidate_matches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.config import SelfEvolutionConfig
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = engine.propose_skill(
+            name="review-loop",
+            description="自进化复盘文档和测试结果整理流程",
+            body="# 任务\n\n整理复盘文档，记录测试结果和修改理由。\n",
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        sent: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        async def fake_send(text: str) -> None:
+            sent.append(text)
+
+        app._send_message = fake_send  # type: ignore[method-assign]
+
+        await app._dispatch_command("继续整理自进化复盘文档，并说明测试结果。")
+        if app._agent_task is not None:
+            await app._agent_task
+
+        assert sent == ["继续整理自进化复盘文档，并说明测试结果。"]
+        assert len(messages) == 1
+        assert "# Self-Evolution Candidate Skill Matches" in messages[0]
+        assert "review-loop" in messages[0]
+        assert proposal.id in messages[0]
+        assert "not auto-activated" in messages[0]
 
     def test_tui_self_evolution_review_shows_existing_blocked_candidate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

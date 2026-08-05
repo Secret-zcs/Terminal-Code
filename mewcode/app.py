@@ -1039,6 +1039,7 @@ class MewCodeApp(App):
         if not is_command:
             if self._streaming or self.agent is None:
                 return
+            self._show_self_evolution_task_matches(text)
             self._agent_task = asyncio.create_task(self._send_message(text))
             return
 
@@ -1068,6 +1069,21 @@ class MewCodeApp(App):
             await cmd.handler(ctx)
         except Exception as e:
             self._show_error(f"命令执行失败: {e}")
+
+    def _show_self_evolution_task_matches(self, text: str) -> None:
+        if not getattr(self._self_evolution_config, "enabled", False):
+            return
+        if self.agent is None:
+            return
+        try:
+            markdown = EvolutionEngine(
+                self.agent.work_dir
+            ).render_skill_candidate_task_matches(text, limit=3)
+        except Exception as exc:
+            log.debug("Self-evolution candidate matching failed: %s", exc)
+            return
+        if markdown:
+            self._show_system_message(markdown)
 
     # -----------------------------------------------------------------
     # 输入处理

@@ -1958,3 +1958,32 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_does_not_show_empty_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_existing_pending_request -q
 4 passed
 ```
+
+## Self-Evolution 候选匹配提示接入 TUI
+
+本次把候选 skill 匹配报告接入 TUI。普通用户消息进入 Agent 前，若 self-evolution enabled，TUI 会调用 `render_skill_candidate_task_matches()`；有匹配项时展示 Markdown 系统消息，说明匹配到哪些候选 skill、匹配词、分数和 gate 状态。
+
+审批影响：
+
+- 匹配提示不是审批，不会改变 approval request 状态。
+- 匹配提示不是启用，不会调用 `LoadSkill`。
+- 未通过 eval/execution eval/approval 的候选只能被展示为候选，不能生效。
+
+安全策略：
+
+- TUI 报告明确包含 `Runtime: not auto-activated`。
+- 匹配失败只记录 debug log，不影响用户消息继续发送给 Agent。
+- 报告只读，不写 candidate manifest、project skill 或 approval log。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+1 failed  # 实现前红灯：缺少 render_skill_candidate_task_matches API
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_self_evolution_candidate_matches -q
+1 failed  # 实现前红灯：TUI 不显示候选 skill 匹配报告
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_self_evolution_candidate_matches tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+2 passed
+```

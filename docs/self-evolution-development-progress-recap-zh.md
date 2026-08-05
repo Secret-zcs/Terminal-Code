@@ -3932,3 +3932,47 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 
 - 把候选 skill 匹配结果接入用户可见报告，而不是只暴露 API。
 - 继续清理 TUI self-evolution 分支，让 approval、busy、stale、inbox 的优先级更集中。
+
+## 81. 最新推进记录：候选 Skill 匹配报告与 TUI 提示
+
+日期：2026-08-05
+
+本次把候选 skill 匹配从“只读 API”推进到“用户可见”。新增 `render_skill_candidate_task_matches()`，把当前任务匹配到的候选 skill 渲染成 Markdown，包含 score、matched terms、eval 状态、execution eval 状态、approval 状态和 candidate path。TUI 在普通用户消息发送给 Agent 前调用该报告；如果有匹配项，会先显示系统消息，但不会自动加载或启用候选 skill。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_render_skill_candidate_task_matches_shows_gate_status`，覆盖匹配报告必须显示 gate 状态和 `not auto-activated`。
+- 修改 `tests/test_evolution.py`：新增 `test_tui_user_message_shows_self_evolution_candidate_matches`，覆盖用户消息命中候选 skill 时 TUI 显示匹配报告，并仍继续发送原消息给 Agent。
+- 修改 `mewcode/evolution/engine.py`：新增 `render_skill_candidate_task_matches()`。
+- 修改 `mewcode/app.py`：新增 `_show_self_evolution_task_matches()`，并在非 slash command 消息进入 Agent 前执行只读匹配提示。
+
+用户能看到什么：
+
+- 跨对话时，如果当前任务与历史候选 skill 相关，TUI 会展示 `Self-Evolution Candidate Skill Matches`。
+- 用户能看到为什么匹配：`Matched terms`、`Score` 和候选 gate 状态。
+- 系统明确显示 `Runtime: not auto-activated`，避免误以为未审批候选已经生效。
+
+安全边界：
+
+- 不自动调用 `LoadSkill`。
+- 不自动 approve、promote 或 activate 候选 skill。
+- 只读扫描 `.mewcode/evolution/candidates/**/manifest.json` 和 proposals。
+- 匹配提示失败时只写 debug log，不影响主消息发送。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+1 failed  # 实现前红灯：缺少 render_skill_candidate_task_matches API
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_self_evolution_candidate_matches -q
+1 failed  # 实现前红灯：TUI 不显示候选 skill 匹配报告
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_self_evolution_candidate_matches tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+2 passed
+```
+
+下一步计划：
+
+- 进一步限制提示噪音：只在候选达到更高分数或用户开启 self-evolution 时展示。
+- 给匹配报告加 “下一步建议”，例如等待评测、提交审批或拒绝候选。

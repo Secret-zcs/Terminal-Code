@@ -1276,6 +1276,48 @@ class EvolutionEngine:
         matches.sort(key=lambda item: (-int(item["score"]), -float(item["created_at"])))
         return matches[: max(1, limit)]
 
+    def render_skill_candidate_task_matches(
+        self,
+        task: str,
+        *,
+        limit: int = 5,
+        minimum_score: int = 2,
+    ) -> str:
+        matches = self.match_skill_candidates_for_task(
+            task,
+            limit=limit,
+            minimum_score=minimum_score,
+        )
+        if not matches:
+            return ""
+        lines = [
+            "# Self-Evolution Candidate Skill Matches",
+            "",
+            f"- Task: {task.strip()}",
+            f"- Matches: `{len(matches)}`",
+            "- Safety: candidates are not auto-activated; eval, execution eval, and approval gates still apply.",
+            "",
+            "## Matches",
+            "",
+        ]
+        for match in matches:
+            terms = ", ".join(match.get("matched_terms", [])) or "(none)"
+            approval = str(match.get("approval_status") or "(none)")
+            lines.extend([
+                f"### {match.get('skill_name')}",
+                "",
+                f"- Proposal: `{match.get('proposal_id')}`",
+                f"- Score: `{match.get('score')}`",
+                f"- Matched terms: {terms}",
+                f"- Eval: `{match.get('eval_status')}`",
+                f"- Execution eval: `{match.get('execution_eval_status')}`",
+                f"- Approval: `{approval}`",
+                f"- Candidate: `{match.get('candidate_skill')}`",
+                "- Runtime: not auto-activated",
+                "",
+            ])
+        return "\n".join(lines).rstrip() + "\n"
+
     @staticmethod
     def _skill_match_tokens(text: str) -> set[str]:
         lowered = text.lower()
