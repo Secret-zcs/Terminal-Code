@@ -3579,3 +3579,43 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_inb
 
 - 继续检查 self-evolution TUI 事件是否存在状态泄露。
 - 考虑把 inbox widget 的选项列表暴露为只读测试 helper，减少直接依赖 `_build_content()` 字符串断言。
+
+## 72. 最新推进记录：Approval 优先时清理 Pending Inbox
+
+日期：2026-08-05
+
+本次修复 self-evolution TUI 的优先级状态泄露。approval request 应高于 inbox 展示；此前如果 inbox widget 仍处于 pending 状态，随后出现 approval request，app 会继续挂载 approval widget，但不会主动移除旧 inbox，导致聊天区可能同时存在 inbox 和 approval 两个交互入口。现在 `_show_self_evolution_approval()` 在展示 approval 前会先清理 pending inbox widget 和 pending key。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_approval_clears_pending_inbox`，覆盖 approval 出现时旧 inbox 被移除、pending key 被清空、approval 继续挂载。
+- 修改 `mewcode/app.py`：新增 `_clear_pending_self_evolution_inbox()`，集中处理 inbox widget 移除和 pending key 清理。
+- 修改 `mewcode/app.py`：`on_inline_self_evolution_inbox_widget_responded()` 复用该 helper。
+- 修改 `mewcode/app.py`：`_show_self_evolution_approval()` 在挂载 approval 前先清理 pending inbox。
+- 修改本文档和 `docs/self-evolution-config-approval-recap-zh.md`：留档 approval 优先级修复。
+
+用户能看到什么：
+
+- 当候选 skill 进入 approval 阶段时，旧 inbox 不会继续占着界面。
+- TUI 同一时间不会同时要求用户处理 inbox 和 approval。
+
+安全边界：
+
+- 不改变 candidate、review run、approval request、promote、rollback、quarantine 或 trusted-auto 行为。
+- 不新增用户命令。
+- 只调整 TUI 展示优先级和 pending 状态清理。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox -q
+1 failed  # 实现前红灯：approval 出现时旧 inbox 未移除
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_response_views_report_or_dismisses tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+4 passed
+```
+
+下一步计划：
+
+- 检查 approval widget 已存在时重复调用 `_show_self_evolution_approval()` 的去重路径是否也会清理旧 inbox。
+- 继续减少 TUI 状态测试里的 fake widget 样板。

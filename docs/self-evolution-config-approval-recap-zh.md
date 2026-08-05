@@ -1721,3 +1721,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_inbox_widget_hides_report_action_without_detail -q
 1 passed
 ```
+
+## Self-Evolution Approval 优先清理 Pending Inbox
+
+approval request 的优先级高于 inbox。现在 `_show_self_evolution_approval()` 会在挂载 approval widget 前调用 `_clear_pending_self_evolution_inbox()`，移除旧 inbox widget 并清空 `_pending_self_evolution_inbox_key`，避免同一时间出现两个 self-evolution 交互入口。
+
+行为边界：
+
+- approval 展示前会清理 pending inbox。
+- inbox 响应处理也复用同一个清理 helper。
+- approval 挂载和 request 状态仍按原逻辑执行。
+
+安全策略：
+
+- 不改变 approval、promote、rollback、quarantine 或 trusted-auto 逻辑。
+- 不修改 candidate 或 review run 存储。
+- 不新增用户命令。
+- 只调整 TUI 展示优先级和 pending 清理。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox -q
+1 failed  # 实现前红灯：approval 出现时旧 inbox 未移除
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_response_views_report_or_dismisses tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_inbox_allows_only_one_pending_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+4 passed
+```

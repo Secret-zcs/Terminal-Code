@@ -1650,10 +1650,23 @@ class MewCodeApp(App):
     def on_inline_self_evolution_inbox_widget_responded(
         self, event: "InlineSelfEvolutionInboxWidget.Responded"
     ) -> None:
-        from mewcode.self_evolution_dialog import (
-            InlineSelfEvolutionInboxWidget,
-            SelfEvolutionInboxChoice,
-        )
+        from mewcode.self_evolution_dialog import SelfEvolutionInboxChoice
+
+        self._clear_pending_self_evolution_inbox()
+        try:
+            self.query_one("#chat-input").disabled = False
+            self.query_one("#chat-input").focus()
+        except Exception:
+            pass
+
+        if (
+            event.choice == SelfEvolutionInboxChoice.VIEW_REPORT
+            and event.report_markdown.strip()
+        ):
+            self._show_system_message(event.report_markdown)
+
+    def _clear_pending_self_evolution_inbox(self) -> None:
+        from mewcode.self_evolution_dialog import InlineSelfEvolutionInboxWidget
 
         try:
             self.query_one(
@@ -1662,18 +1675,7 @@ class MewCodeApp(App):
             ).remove()
         except Exception:
             pass
-        try:
-            self.query_one("#chat-input").disabled = False
-            self.query_one("#chat-input").focus()
-        except Exception:
-            pass
         self._pending_self_evolution_inbox_key = None
-
-        if (
-            event.choice == SelfEvolutionInboxChoice.VIEW_REPORT
-            and event.report_markdown.strip()
-        ):
-            self._show_system_message(event.report_markdown)
 
     def _reload_skill_catalog_after_self_evolution(self) -> None:
         if self.skill_loader is None:
@@ -2149,6 +2151,7 @@ class MewCodeApp(App):
     def _show_self_evolution_approval(self, request_id: str) -> None:
         if self.agent is None:
             return
+        self._clear_pending_self_evolution_inbox()
         if getattr(self, "_pending_skill_approval_request_id", "") == request_id:
             return
         engine = EvolutionEngine(self.agent.work_dir)
