@@ -1155,6 +1155,7 @@ class TestEvolutionEngine:
         assert "Eval: `pending`" in markdown
         assert "Execution eval: `pending`" in markdown
         assert "Approval: `(none)`" in markdown
+        assert "Next action: complete eval before approval" in markdown
         assert "not auto-activated" in markdown
 
     def test_read_self_evolution_review_report_returns_markdown(

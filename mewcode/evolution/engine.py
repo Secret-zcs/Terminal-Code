@@ -1303,6 +1303,7 @@ class EvolutionEngine:
         for match in matches:
             terms = ", ".join(match.get("matched_terms", [])) or "(none)"
             approval = str(match.get("approval_status") or "(none)")
+            next_action = self._skill_candidate_match_next_action(match)
             lines.extend([
                 f"### {match.get('skill_name')}",
                 "",
@@ -1313,10 +1314,28 @@ class EvolutionEngine:
                 f"- Execution eval: `{match.get('execution_eval_status')}`",
                 f"- Approval: `{approval}`",
                 f"- Candidate: `{match.get('candidate_skill')}`",
+                f"- Next action: {next_action}",
                 "- Runtime: not auto-activated",
                 "",
             ])
         return "\n".join(lines).rstrip() + "\n"
+
+    @staticmethod
+    def _skill_candidate_match_next_action(match: dict) -> str:
+        approval = str(match.get("approval_status") or "").strip()
+        eval_status = str(match.get("eval_status") or "pending").strip()
+        execution_status = str(
+            match.get("execution_eval_status") or "pending"
+        ).strip()
+        if approval == "blocked":
+            return "inspect the blocked candidate report before revising or rejecting"
+        if approval == "pending":
+            return "review the pending approval request before using this skill"
+        if eval_status != "passed":
+            return "complete eval before approval"
+        if execution_status != "passed":
+            return "complete execution eval before approval"
+        return "submit approval request before this skill can be used"
 
     @staticmethod
     def _skill_match_tokens(text: str) -> set[str]:

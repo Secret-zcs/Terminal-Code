@@ -3976,3 +3976,43 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_
 
 - 进一步限制提示噪音：只在候选达到更高分数或用户开启 self-evolution 时展示。
 - 给匹配报告加 “下一步建议”，例如等待评测、提交审批或拒绝候选。
+
+## 82. 最新推进记录：候选 Skill 匹配报告增加 Next Action
+
+日期：2026-08-05
+
+本次让候选 skill 匹配报告更可操作。此前报告只显示候选名、匹配词和 gate 状态，用户仍需要自己判断下一步是补 eval、跑 execution eval、看审批还是处理 blocked candidate。现在每个匹配项都会显示 `Next action`，根据 eval、execution eval 和 approval 状态给出下一步建议。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：扩展 `test_render_skill_candidate_task_matches_shows_gate_status`，要求 pending eval 候选显示 `Next action: complete eval before approval`。
+- 修改 `mewcode/evolution/engine.py`：新增 `_skill_candidate_match_next_action()`，将候选 gate 状态映射为下一步建议。
+- 修改 `mewcode/evolution/engine.py`：`render_skill_candidate_task_matches()` 在每个匹配项中输出 `Next action`。
+
+用户能看到什么：
+
+- 匹配候选还没 eval：提示先完成 eval。
+- eval 已过但 execution eval 未过：提示先完成 execution eval。
+- approval pending：提示先处理审批。
+- blocked：提示先查看阻断报告再修改或拒绝。
+
+安全边界：
+
+- `Next action` 只是提示，不执行任何状态变更。
+- 不自动 approve、promote、activate 或 reject。
+- 不改变候选生成和评测逻辑。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+1 failed  # 实现前红灯：报告没有 Next action
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_self_evolution_candidate_matches -q
+2 passed
+```
+
+下一步计划：
+
+- 继续降低误匹配风险：增加最低分、匹配原因和候选状态过滤测试。
+- 后续可将 match report 与 approval review report 合并，减少用户来回查看。

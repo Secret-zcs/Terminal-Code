@@ -1987,3 +1987,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_self_evolution_candidate_matches tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
 2 passed
 ```
+
+## Self-Evolution 匹配报告 Next Action
+
+本次给候选 skill 匹配报告增加 `Next action`。报告会根据候选的 eval、execution eval、approval 状态提示下一步：补 eval、跑 execution eval、处理 pending approval，或查看 blocked 报告。
+
+审批影响：
+
+- `Next action` 不会执行审批动作。
+- `Next action` 不会改变 candidate manifest 或 approval request。
+- 它只帮助用户判断候选 skill 离可用还差哪一道 gate。
+
+安全策略：
+
+- 未通过 gate 的候选仍显示 `Runtime: not auto-activated`。
+- pending approval 仍需要审批处理。
+- blocked candidate 不会被重新启用，只提示先检查阻断报告。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+1 failed  # 实现前红灯：报告没有 Next action
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_shows_self_evolution_candidate_matches -q
+2 passed
+```
