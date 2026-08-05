@@ -4921,3 +4921,41 @@ passed
 
 - 给 duplicate pending approval 返回值分支补更直接的测试，固定其返回 `True` 且不重复挂载。
 - 检查 approval response 失败消息是否也需要复用路径脱敏 helper。
+
+## 105. 最新推进记录：Approval 响应失败消息增加路径脱敏
+
+日期：2026-08-05
+
+本次补齐 approval card 响应失败路径的隐私保护。此前 `_show_self_evolution_approval()` 打开失败已经会脱敏绝对路径，但 `on_inline_skill_approval_widget_responded()` 在 approve/reject resolve 失败时会把 engine 返回的错误消息原样展示，存在泄露本地 `.mewcode/evolution/approvals.json` 等路径的风险。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_skill_approval_response_failure_sanitizes_absolute_paths`，构造 resolve 失败并返回绝对路径的 fake engine。
+- 修改 `mewcode/app.py`：approval response 失败时复用 `_sanitize_self_evolution_review_error()`，再显示系统消息。
+
+用户能看到什么：
+
+- approve/reject 执行失败时仍能看到失败原因。
+- 本地绝对路径会被替换为 `<path>`，避免泄露工作目录、临时目录或内部 store 文件位置。
+
+安全边界：
+
+- 不改变 approval request 的状态机。
+- 不改变 approve/reject/promote 的判断条件。
+- 不修改 candidate manifest、eval report 或 project skill。
+- 只改变失败消息展示前的脱敏处理。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_failure_sanitizes_absolute_paths -q
+1 failed  # 实现前红灯：失败消息原样包含 /tmp/.../.mewcode/evolution/approvals.json
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_failure_sanitizes_absolute_paths tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible -q
+3 passed
+```
+
+下一步计划：
+
+- 继续清理 approval/inbox/match 三类自进化卡片的错误提示分支。
+- 检查是否还有 engine 错误消息绕过路径脱敏 helper。

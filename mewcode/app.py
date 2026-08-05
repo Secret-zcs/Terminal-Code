@@ -1748,6 +1748,7 @@ class MewCodeApp(App):
         )
         self._pending_skill_approval_request_id = ""
         if not ok:
+            message = self._sanitize_self_evolution_review_error(message)
             self._show_system_message(f"Self-evolution approval failed: {message}")
             return
         if approved:

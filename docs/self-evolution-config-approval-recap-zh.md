@@ -2644,3 +2644,30 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_
 python3 -m py_compile mewcode/app.py
 passed
 ```
+
+## Approval 响应失败消息脱敏
+
+本次为 approval response 的 resolve 失败分支接入路径脱敏。此前打开 approval card 失败会脱敏路径，但用户点击 `Approve` / `Reject` 后如果 engine resolve 失败，错误消息可能原样包含本地工作目录或 `.mewcode/evolution` store 文件路径。
+
+审批影响：
+
+- 不改变 `manual`、`deferred`、`trusted-auto` 三种审批模式。
+- 不改变 approve/reject 的状态流转。
+- 不改变 skill promote 条件。
+- 只影响失败消息展示内容。
+
+安全策略：
+
+- 继续向用户展示失败原因，但隐藏绝对路径。
+- 防止 UI 错误提示泄露本机目录结构、临时目录和内部 store 文件位置。
+- 不写 candidate manifest、approval store、eval report 或 project skill。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_failure_sanitizes_absolute_paths -q
+1 failed  # 修复前 approval response 失败消息原样泄露绝对路径
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_failure_sanitizes_absolute_paths tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible -q
+3 passed
+```

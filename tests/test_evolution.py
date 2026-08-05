@@ -4054,6 +4054,50 @@ class TestEvolutionEngine:
             "Self-evolution approval failed: no active agent."
         ]
 
+    def test_tui_skill_approval_response_failure_sanitizes_absolute_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.self_evolution_dialog import (
+            InlineSkillApprovalWidget,
+            SkillApprovalChoice,
+        )
+        import mewcode.app as app_module
+
+        leaked_path = tmp_path / ".mewcode" / "evolution" / "approvals.json"
+
+        class FakeEngine:
+            def __init__(self, _work_dir: str) -> None:
+                pass
+
+            def resolve_skill_approval_request(
+                self,
+                _request_id: str,
+                *,
+                approved: bool,
+                reviewer: str,
+                reason: str,
+            ) -> tuple[bool, str]:
+                return False, f"approval resolve failed at {leaked_path}"
+
+        monkeypatch.setattr(app_module, "EvolutionEngine", FakeEngine)
+        app = _make_test_mewcode_app()
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        app.on_inline_skill_approval_widget_responded(
+            InlineSkillApprovalWidget.Responded(
+                "approval_leaks_path",
+                SkillApprovalChoice.APPROVE,
+            )
+        )
+
+        assert messages == [
+            "Self-evolution approval failed: approval resolve failed at <path>"
+        ]
+        assert str(tmp_path) not in messages[0]
+
     @pytest.mark.asyncio
     async def test_tui_self_evolution_approval_clears_pending_inbox(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
