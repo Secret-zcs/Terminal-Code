@@ -2311,9 +2311,21 @@ class MewCodeApp(App):
             return False
         self._pending_skill_approval_request_id = request_id
         asyncio.ensure_future(
-            self._mount_self_evolution_approval(request_id, review)
+            self._mount_self_evolution_approval_guarded(request_id, review)
         )
         return True
+
+    async def _mount_self_evolution_approval_guarded(
+        self,
+        request_id: str,
+        review_markdown: str,
+    ) -> None:
+        try:
+            await self._mount_self_evolution_approval(request_id, review_markdown)
+        except Exception as exc:
+            if getattr(self, "_pending_skill_approval_request_id", "") == request_id:
+                self._pending_skill_approval_request_id = ""
+            log.debug("Self-evolution approval mount failed: %s", exc)
 
     async def _mount_self_evolution_approval(
         self,

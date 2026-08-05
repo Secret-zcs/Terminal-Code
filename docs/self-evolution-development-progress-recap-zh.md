@@ -4470,3 +4470,44 @@ passed
 
 - 给 `_show_self_evolution_approval()` 的返回值语义补直接测试，覆盖 duplicate pending request 和 agent 缺失场景。
 - 继续检查自进化 review/inbox/match 三条 UI 流是否还有状态去重或失败恢复缺口。
+
+## 94. 最新推进记录：审批卡片挂载失败时清理 Pending 状态
+
+日期：2026-08-05
+
+本次补齐 approval card 的 guarded mount：`_show_self_evolution_approval()` 会先设置 `_pending_skill_approval_request_id` 再异步挂载卡片；如果挂载过程失败，旧实现会留下 pending id，导致后续再次打开同一个审批请求时被误判为“已经打开”。现在挂载失败会清理 pending id，并通过 debug log 记录异常。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_approval_clears_pending_when_mount_fails`，覆盖 approval card 挂载异常后的 pending 清理。
+- 修改 `mewcode/app.py`：新增 `_mount_self_evolution_approval_guarded()`，对 approval card 挂载异常做局部恢复。
+- 修改 `mewcode/app.py`：`_show_self_evolution_approval()` 改为调度 guarded mount，避免未处理 task exception 泄露。
+
+用户能看到什么：
+
+- 正常审批卡片行为不变。
+- 如果 TUI 挂载审批卡片失败，后续仍可重新打开同一个审批请求，不会被残留 pending id 卡住。
+
+安全边界：
+
+- 不自动审批、不自动拒绝、不自动 promote。
+- 只清理 UI pending 状态，不修改 approval request、candidate manifest 或 skill 文件。
+- 挂载异常被限制在 UI 层，不影响自进化评审和候选评估数据。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_when_mount_fails -q
+1 failed  # 实现前红灯：mount failed 后 _pending_skill_approval_request_id 仍残留，并产生未处理 task exception
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_when_mount_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox -q
+3 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
+下一步计划：
+
+- 继续检查 `_run_self_evolution_review()` 对 `_show_self_evolution_approval()` 返回值的处理，确保审批卡片打开失败时可以降级到 inbox 或系统消息。
+- 补齐 approval 打开失败后的用户可见提示策略，避免只有 debug log。

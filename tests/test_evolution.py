@@ -3837,6 +3837,29 @@ class TestEvolutionEngine:
         assert app._pending_self_evolution_inbox_key is None
         assert mounted == []
 
+    @pytest.mark.asyncio
+    async def test_tui_self_evolution_approval_clears_pending_when_mount_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        request = engine.submit_skill_approval_request(proposal.id)
+        app = _make_test_mewcode_app()
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+
+        async def failing_mount(_request_id: str, _review_markdown: str) -> None:
+            raise RuntimeError("mount failed")
+
+        app._mount_self_evolution_approval = failing_mount  # type: ignore[method-assign]
+
+        opened = app._show_self_evolution_approval(request.id)
+        await asyncio.sleep(0)
+
+        assert opened is True
+        assert getattr(app, "_pending_skill_approval_request_id", "") == ""
+
     def test_add_eval_case_invalidates_existing_execution_eval(
         self, tmp_path: Path
     ) -> None:

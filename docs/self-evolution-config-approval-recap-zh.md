@@ -2322,3 +2322,32 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py -q
 python3 -m py_compile mewcode/self_evolution_dialog.py
 passed
 ```
+
+## Approval Card 挂载失败恢复
+
+本次为 `_show_self_evolution_approval()` 增加 guarded mount。审批卡片异步挂载失败时，会清理 `_pending_skill_approval_request_id`，避免同一 request 后续无法再次打开。
+
+审批影响：
+
+- 不改变 approval mode。
+- 不改变 approve/reject/promote 的条件。
+- 挂载失败不会自动处理审批请求，只允许用户后续重新打开。
+
+安全策略：
+
+- pending 清理只发生在 UI mount 失败时。
+- approval request、candidate manifest、eval report 和 project skill 不被修改。
+- 异常通过 debug log 记录，避免未处理 task exception 干扰主流程。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_when_mount_fails -q
+1 failed  # 修复前 pending id 残留
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_when_mount_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_clears_pending_inbox tests/test_evolution.py::TestEvolutionEngine::test_tui_duplicate_self_evolution_approval_still_clears_pending_inbox -q
+3 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
