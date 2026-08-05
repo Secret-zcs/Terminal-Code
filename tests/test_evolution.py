@@ -146,6 +146,11 @@ def _capture_successful_self_evolution_approval_open(app) -> list[str]:
     return opened
 
 
+async def _run_after_event_loop_tick(function, *args, **kwargs):
+    await asyncio.sleep(0)
+    return function(*args, **kwargs)
+
+
 def _install_fake_pending_inbox_query(app) -> list[str]:
     removed: list[str] = []
 
@@ -3913,6 +3918,239 @@ class TestEvolutionEngine:
 
         assert not hasattr(MewCodeApp, "_format_self_evolution_inbox_message")
         assert not hasattr(MewCodeApp, "_format_self_evolution_source_part")
+
+    @pytest.mark.asyncio
+    async def test_tui_self_evolution_review_starts_then_completes_in_background(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.config import SelfEvolutionConfig
+
+        review_run = SimpleNamespace(
+            id="review_background_1",
+            artifacts={
+                "task": (
+                    ".mewcode/evolution/review_runs/"
+                    "review_background_1/task.md"
+                ),
+                "report": (
+                    ".mewcode/evolution/review_runs/"
+                    "review_background_1/report.md"
+                ),
+            },
+        )
+        approval = SimpleNamespace(id="approval_background_1")
+        calls: list[tuple[str, str]] = []
+
+        monkeypatch.setattr(
+            app_module,
+            "start_fork_reviewer_run",
+            lambda project_root, _config: {
+                "status": "started",
+                "requests": [],
+                "review_run": review_run,
+            },
+        )
+
+        def fake_complete(project_root: str, review_run_id: str, _config: object):
+            calls.append((str(project_root), review_run_id))
+            return {
+                "status": "approval-required",
+                "requests": [approval],
+                "review_run": review_run,
+            }
+
+        monkeypatch.setattr(
+            app_module,
+            "complete_fork_reviewer_run",
+            fake_complete,
+        )
+        monkeypatch.setattr(
+            app_module.asyncio,
+            "to_thread",
+            _run_after_event_loop_tick,
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(enabled=True),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+        opened = _capture_successful_self_evolution_approval_open(app)
+
+        app._run_self_evolution_review()
+
+        assert messages == [
+            "Self-evolution review started. Run: review_background_1. "
+            "Task: .mewcode/evolution/review_runs/"
+            "review_background_1/task.md. Report: "
+            ".mewcode/evolution/review_runs/"
+            "review_background_1/report.md."
+        ]
+        assert opened == []
+        task = app._self_evolution_review_task
+        assert task is not None
+
+        await asyncio.wait_for(task, timeout=5.0)
+
+        assert calls == [(str(tmp_path), "review_background_1")]
+        assert opened == ["approval_background_1"]
+
+    @pytest.mark.asyncio
+    async def test_tui_self_evolution_background_failure_is_user_visible(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.config import SelfEvolutionConfig
+
+        review_run = SimpleNamespace(
+            id="review_background_missing",
+            artifacts={"task": "task.md", "report": "report.md"},
+        )
+        monkeypatch.setattr(
+            app_module,
+            "start_fork_reviewer_run",
+            lambda *_args, **_kwargs: {
+                "status": "started",
+                "requests": [],
+                "review_run": review_run,
+            },
+        )
+        monkeypatch.setattr(
+            app_module,
+            "complete_fork_reviewer_run",
+            lambda *_args, **_kwargs: {
+                "status": "missing",
+                "requests": [],
+                "active_review_run_id": "review_background_missing",
+            },
+        )
+        monkeypatch.setattr(
+            app_module.asyncio,
+            "to_thread",
+            _run_after_event_loop_tick,
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(enabled=True),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+        task = app._self_evolution_review_task
+        assert task is not None
+        await asyncio.wait_for(task, timeout=5.0)
+
+        assert messages[-1] == (
+            "Self-evolution review run not found. "
+            "Run: review_background_missing."
+        )
+
+    @pytest.mark.asyncio
+    async def test_tui_self_evolution_background_review_completes_full_skill_loop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.config import SelfEvolutionConfig
+
+        monkeypatch.setattr(
+            app_module.asyncio,
+            "to_thread",
+            _run_after_event_loop_tick,
+        )
+
+        skill_path = tmp_path / ".mewcode" / "skills" / "review-loop" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        original_skill = (
+            "---\n"
+            "name: review-loop\n"
+            "description: Review flow\n"
+            "mode: inline\n"
+            "context: recent\n"
+            "---\n\n"
+            "# Review\n\n原流程。\n"
+        )
+        skill_path.write_text(original_skill, encoding="utf-8")
+        engine = EvolutionEngine(tmp_path)
+        engine.record_skill_usage(
+            "review-loop",
+            event="failure",
+            source="conversation-1",
+            metadata={"summary": "错误地跳过复盘文档。"},
+        )
+        engine.record_skill_usage(
+            "review-loop",
+            event="user_feedback",
+            source="conversation-2",
+            metadata={"summary": "用户纠正：遗漏验证。"},
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+        opened = _capture_successful_self_evolution_approval_open(app)
+
+        app._run_self_evolution_review()
+        task = app._self_evolution_review_task
+        assert task is not None
+        assert messages[0].startswith("Self-evolution review started.")
+        assert skill_path.read_text(encoding="utf-8") == original_skill
+
+        await asyncio.wait_for(task, timeout=5.0)
+
+        completed_engine = EvolutionEngine(tmp_path)
+        proposals = completed_engine.store.load_proposals()
+        requests = completed_engine.store.load_skill_approval_requests()
+        assert len(proposals) == 1
+        assert len(requests) == 1
+        assert opened == [requests[0].id]
+        assert skill_path.read_text(encoding="utf-8") == original_skill
+        eval_case_lines = completed_engine.eval_cases_path("review-loop").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        assert len(eval_case_lines) == 3
+        execution_report = json.loads(
+            completed_engine.execution_eval_report_path(proposals[0].id).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert execution_report["summary"] == {
+            "total": 3,
+            "passed": 3,
+            "failed": 0,
+        }
+        ok, approval_review = completed_engine.render_skill_approval_request(
+            requests[0].id
+        )
+        assert ok is True
+        assert "Eval cases: `3`" in approval_review
+        assert "Rounds: `3/3` passed" in approval_review
+
+        ok, message = completed_engine.resolve_skill_approval_request(
+            requests[0].id,
+            approved=True,
+            reviewer="user",
+            reason="3 轮任务执行均通过，同意应用。",
+        )
+
+        assert ok, message
+        promoted_skill = skill_path.read_text(encoding="utf-8")
+        assert "错误地跳过复盘文档" in promoted_skill
+        assert "用户纠正：遗漏验证" in promoted_skill
+        assert completed_engine.store.get_proposal(proposals[0].id).status == "applied"
+        assert (
+            completed_engine.store.get_skill_approval_request(requests[0].id).status
+            == "approved"
+        )
 
     def test_tui_self_evolution_inbox_response_views_report_or_dismisses(
         self, monkeypatch: pytest.MonkeyPatch

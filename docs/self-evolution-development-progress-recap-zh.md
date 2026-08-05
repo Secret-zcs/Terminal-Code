@@ -5381,3 +5381,66 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 
 - 开始在 TUI `_run_self_evolution_review()` 中接入 start/complete 生命周期，并保留现有同步 fallback。
 - complete 真正异步化前，先保证每个生命周期状态都有用户可见提示。
+
+## 117. 最新推进记录：TUI 后台评审与完整 Skill 闭环
+
+日期：2026-08-05
+
+本次完成此前计划中的主线闭环。TUI 不再在 Agent 主循环内同步执行完整 self-evolution review，而是先调用 `start_fork_reviewer_run()` 创建可恢复的 `running` run，立即展示 run id、`task.md` 和预期 report 路径，再通过后台线程调用 `complete_fork_reviewer_run()`。完成结果回到 TUI 后，优先打开待审批卡片；没有待审批请求时沿用现有 inbox、blocked、busy、stale 和错误提示。
+
+修改内容：
+
+- 修改 `mewcode/app.py`：增加 `_self_evolution_review_task`，接入 start/complete 生命周期，并在应用退出时取消未完成任务。
+- 修改 `mewcode/app.py`：拆出同步兼容入口、后台 complete 协程、结果分发和统一错误展示；无事件循环调用仍走原同步 review。
+- 修改 `mewcode/app.py`：`missing`、`not-running` complete 结果直接显示通知，不再被空 inbox 分支吞掉。
+- 修改 `tests/test_evolution.py`：新增后台启动/完成测试、恢复失败可见性测试和真实 skill 完整闭环测试。
+
+完整闭环验证：
+
+1. 旧 `review-loop` skill 在两个对话来源中累计 `failure` 和 `user_feedback`。
+2. TUI 启动 fork reviewer，正式 `SKILL.md` 保持不变。
+3. complete 阶段生成 patch candidate、3 条 eval case，并完成 3/3 canary execution eval。
+4. 引擎创建 pending approval request，TUI 自动打开审批卡；审批详情展示 eval case 数量和 3/3 结果。
+5. 用户批准后才覆盖正式 `SKILL.md`，proposal/request 分别进入 `applied`/`approved`。
+
+安全边界：
+
+- 后台 reviewer 仍不能 approve 或 promote，项目 skill 在用户批准前不会变化。
+- `manual`、`deferred`、`trusted-auto` 的既有策略未改变。
+- complete 在线程中运行，候选评测不会阻塞 TUI 事件循环。
+- 这仍是确定性 reviewer runner，不是真正调用独立 LLM 的 fork Agent；`task.md` 已准备好后续接入边界。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_starts_then_completes_in_background tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_background_failure_is_user_visible -q
+2 failed  # 实现前红灯：app 未导入 start/complete API
+
+PYTHONPATH=. pytest tests/test_evolution.py -k 'self_evolution_review_starts_then_completes_in_background or self_evolution_background_failure_is_user_visible or background_review_completes_full_skill_loop' -q
+3 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -k 'tui_self_evolution_review or tui_self_evolution_background' -q
+22 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py -q
+156 passed
+
+python3 -m py_compile mewcode/app.py mewcode/self_evolution_dialog.py mewcode/evolution/engine.py mewcode/evolution/auto_review.py
+通过
+
+git diff --check -- mewcode/app.py tests/test_evolution.py docs/self-evolution-development-progress-recap-zh.md docs/self-evolution-config-approval-recap-zh.md
+通过
+```
+
+代码审阅结论：未发现 critical/important 问题。重复触发由 persisted busy gate 防重；task done callback 只清理同一任务引用；取消后台协程后不会进入 UI 结果分发；审批前正式 skill 保持不变。当前剩余风险是后台线程中的同步 complete 无法被 Python 强制中止，应用退出后应依赖 review run 的持久化状态和 stale recovery 审计。
+
+当前结论：
+
+- 安全自进化 MVP 的运行闭环已经完整：证据提取、候选生成、三轮评测、后台 review、用户可见测试结果、审批后应用、失败后阻断/回滚均有实现和测试。
+- 尚未完成的 Hermes 对齐项主要是“由真正独立 LLM fork Agent 阅读 `task.md` 并产出候选/评审结果”；当前 fork reviewer 是受限的确定性执行器。
+
+下一步计划：
+
+- 为真实 fork Agent 定义结构化 output schema 和超时/取消协议，但继续保留确定性 runner 作为 fallback。
+- 增加进程重启后自动恢复 `running` review 的集成测试。
+- 使用固定公开任务集做有/无自进化的成功率、回归率和 token/时间成本对比，而不是继续扩展零散 TUI 展示。

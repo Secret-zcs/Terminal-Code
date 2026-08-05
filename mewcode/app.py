@@ -53,8 +53,10 @@ from mewcode.commands.completion import CompletionPopup
 from mewcode.commands.handlers import register_all_commands
 from mewcode.config import MCPServerConfig, ProviderConfig, SelfEvolutionConfig
 from mewcode.evolution.auto_review import (
+    complete_fork_reviewer_run,
     format_review_notification,
     review_ready_skill_candidates,
+    start_fork_reviewer_run,
 )
 from mewcode.evolution.engine import EvolutionEngine
 from mewcode.hooks import HookContext, HookEngine, load_hooks
@@ -634,6 +636,7 @@ class MewCodeApp(App):
         self.task_manager: TaskManager = TaskManager()
         self.trace_manager: TraceManager = TraceManager()
         self._notification_check_task: asyncio.Task[None] | None = None
+        self._self_evolution_review_task: asyncio.Task[None] | None = None
         self.worktree_manager: WorktreeManager | None = None
         self._stale_cleanup_task: asyncio.Task[None] | None = None
         self._current_streaming_label: Static | None = None
@@ -2122,6 +2125,12 @@ class MewCodeApp(App):
             if self._stale_cleanup_task and not self._stale_cleanup_task.done():
                 self._stale_cleanup_task.cancel()
 
+            if (
+                self._self_evolution_review_task
+                and not self._self_evolution_review_task.done()
+            ):
+                self._self_evolution_review_task.cancel()
+
             if hasattr(self, 'team_manager'):
                 for name in list(self.team_manager._teams):
                     try:
@@ -2157,15 +2166,88 @@ class MewCodeApp(App):
         if self.agent is None:
             return
         try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            self._run_self_evolution_review_sync()
+            return
+
+        project_root = self.agent.work_dir
+        try:
+            result = start_fork_reviewer_run(
+                project_root,
+                self._self_evolution_config,
+            )
+        except Exception as exc:
+            self._show_self_evolution_review_failure(exc)
+            return
+
+        if result.get("status") != "started":
+            self._handle_self_evolution_review_result(result, project_root)
+            return
+
+        message = format_review_notification(result)
+        if message:
+            self._show_system_message(message)
+        review_run = result.get("review_run")
+        review_run_id = str(getattr(review_run, "id", "") or "").strip()
+        if not review_run_id:
+            self._show_system_message(
+                "Self-evolution review failed: started run has no id."
+            )
+            return
+
+        task = asyncio.create_task(
+            self._complete_self_evolution_review(project_root, review_run_id)
+        )
+        self._self_evolution_review_task = task
+        task.add_done_callback(self._clear_self_evolution_review_task)
+
+    def _run_self_evolution_review_sync(self) -> None:
+        if self.agent is None:
+            return
+        try:
             result = review_ready_skill_candidates(
                 self.agent.work_dir,
                 self._self_evolution_config,
             )
         except Exception as exc:
-            log.debug("Self-evolution review failed: %s", exc)
-            message = self._sanitize_self_evolution_review_error(str(exc))
-            self._show_system_message(f"Self-evolution review failed: {message}")
+            self._show_self_evolution_review_failure(exc)
             return
+        self._handle_self_evolution_review_result(result, self.agent.work_dir)
+
+    async def _complete_self_evolution_review(
+        self,
+        project_root: str,
+        review_run_id: str,
+    ) -> None:
+        try:
+            result = await asyncio.to_thread(
+                complete_fork_reviewer_run,
+                project_root,
+                review_run_id,
+                self._self_evolution_config,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._show_self_evolution_review_failure(exc)
+            return
+        self._handle_self_evolution_review_result(result, project_root)
+
+    def _clear_self_evolution_review_task(self, task: asyncio.Task[None]) -> None:
+        if self._self_evolution_review_task is task:
+            self._self_evolution_review_task = None
+
+    def _show_self_evolution_review_failure(self, exc: Exception) -> None:
+        log.debug("Self-evolution review failed: %s", exc)
+        message = self._sanitize_self_evolution_review_error(str(exc))
+        self._show_system_message(f"Self-evolution review failed: {message}")
+
+    def _handle_self_evolution_review_result(
+        self,
+        result: dict,
+        project_root: str,
+    ) -> None:
         requests = list(result.get("requests", []))
         if requests:
             opened = self._show_self_evolution_approval(requests[0].id)
@@ -2179,7 +2261,7 @@ class MewCodeApp(App):
                 )
             return
         message = format_review_notification(result)
-        if result.get("status") == "busy":
+        if result.get("status") in {"busy", "missing", "not-running"}:
             if message:
                 self._show_system_message(message)
             return
@@ -2190,7 +2272,7 @@ class MewCodeApp(App):
                 self._show_system_message(message)
             return
         if result.get("status") != "disabled":
-            engine = EvolutionEngine(self.agent.work_dir)
+            engine = EvolutionEngine(project_root)
             inbox = engine.list_self_evolution_inbox()
             counts = inbox.get("counts", {})
             if not any(int(counts.get(key, 0) or 0) for key in (

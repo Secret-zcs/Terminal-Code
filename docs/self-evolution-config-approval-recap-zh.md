@@ -2969,3 +2969,49 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evol
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_completion_resume_failure tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_started_review_run tests/test_evolution.py::TestEvolutionEngine::test_self_evolution_review_notification_shows_busy_review_run -q
 3 passed
 ```
+
+## TUI 后台 Review 与审批闭环
+
+本次把 start/complete 生命周期接入 TUI。Agent 一轮任务结束后，TUI 先创建 `running` review 并立即返回；候选生成和多轮执行评测在后台线程完成。完成后若存在 pending request，TUI 自动打开审批卡；否则展示 blocked/generated inbox 或生命周期错误。
+
+审批影响：
+
+- `manual` 模式下，3/3 execution eval 通过只会创建 pending request，不会更新正式 skill。
+- 用户能在审批详情中看到 eval case 数量、执行轮次和 reviewer report，再决定批准或拒绝。
+- 只有 `resolve_skill_approval_request(..., approved=True)` 成功后才 promote candidate。
+- `deferred` 和 `trusted-auto` 继续使用既有策略，本次没有放宽任何 gate。
+
+安全策略：
+
+- start 阶段只创建 run 和 artifacts，不生成审批、不写正式 skill。
+- complete 阶段使用启动时持久化的 review policy；reviewer policy 仍为 `can_approve=false`、`can_promote=false`。
+- `missing`、`not-running` 和执行异常会显示给用户，不静默重试或绕过审批。
+- 应用退出时取消 TUI 持有的后台任务；磁盘上的 running run 仍可由 stale recovery/complete API 审计和恢复。
+
+端到端证据：
+
+```text
+旧 skill + 两条负面使用证据
+  -> 后台 fork review started
+  -> patch candidate
+  -> 3 eval cases
+  -> execution eval 3/3 passed
+  -> pending approval card（正式 skill 未变化）
+  -> 用户批准
+  -> 正式 SKILL.md 更新，proposal=applied，request=approved
+```
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py -k 'self_evolution_review_starts_then_completes_in_background or self_evolution_background_failure_is_user_visible or background_review_completes_full_skill_loop' -q
+3 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -k 'tui_self_evolution_review or tui_self_evolution_background' -q
+22 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py -q
+156 passed
+```
+
+当前边界：后台生命周期已经完成，但 reviewer 本身仍是确定性 runner，不是拥有独立模型上下文的 Hermes 式 LLM fork Agent。后续接入真实子 Agent 时，审批 gate 和 3 轮执行证据应保持为不可绕过的外层约束。
