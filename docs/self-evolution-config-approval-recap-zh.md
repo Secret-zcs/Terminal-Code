@@ -2291,6 +2291,35 @@ python3 -m py_compile mewcode/app.py
 passed
 ```
 
+## Approval 响应缺少 Active Agent 提示
+
+本次让 `on_inline_skill_approval_widget_responded()` 在没有 active agent 时显示 `Self-evolution approval failed: no active agent.`，避免 approve/reject 响应静默失败。
+
+审批影响：
+
+- 不改变 request 状态。
+- 不改变 approval mode。
+- 不自动 approve 或 reject。
+
+安全策略：
+
+- 只增加响应阶段的前置条件失败提示。
+- 不修改 approval store、candidate manifest、eval report 或 project skill。
+- 正常 approve/reject 路径保持原 gate。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible -q
+1 failed  # 修复前 approval response 无 active agent 静默失败
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+2 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
 ## Approval 缺少 Active Agent 提示
 
 本次让 `_show_self_evolution_approval()` 在没有 active agent 时显示 `Self-evolution approval failed: no active agent.`，避免 approval 打开入口静默失败。

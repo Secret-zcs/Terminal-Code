@@ -1733,6 +1733,9 @@ class MewCodeApp(App):
             pass
 
         if self.agent is None:
+            self._show_system_message(
+                "Self-evolution approval failed: no active agent."
+            )
             return
 
         approved = event.choice == SkillApprovalChoice.APPROVE

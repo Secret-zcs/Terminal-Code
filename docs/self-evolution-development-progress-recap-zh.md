@@ -4881,3 +4881,43 @@ passed
 
 - 给 duplicate pending approval 返回值分支补更直接的测试，固定其返回 `True` 且不重复挂载。
 - 检查 approval 响应处理里 agent 缺失是否也需要用户可见提示。
+
+## 104. 最新推进记录：Approval 响应缺少 Agent 时增加用户提示
+
+日期：2026-08-05
+
+本次补齐 approval card 响应阶段的前置条件失败提示。上一节处理的是“打开 approval card 时没有 active agent”；本次处理的是用户已经在 approval card 上选择 approve/reject，但响应处理时 active agent 已不存在。此前该路径会静默返回，现在会显示 `Self-evolution approval failed: no active agent.`。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_skill_approval_response_without_agent_is_user_visible`，覆盖 approval 响应阶段无 active agent 的系统消息。
+- 修改 `mewcode/app.py`：`on_inline_skill_approval_widget_responded()` 在 `self.agent is None` 时显示系统消息并返回。
+
+用户能看到什么：
+
+- approve/reject 操作无法执行时，用户会看到明确原因。
+- 正常 approve/reject 流程不变。
+
+安全边界：
+
+- 不修改 approval request、candidate manifest、eval report 或 project skill。
+- 不自动重试、不自动 approve、不自动 reject。
+- 只增加前置条件失败提示。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible -q
+1 failed  # 实现前红灯：messages 为空，approval response 无 active agent 静默失败
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_without_agent_is_user_visible tests/test_evolution.py::TestEvolutionEngine::test_tui_skill_approval_response_approves_and_reloads_skills -q
+2 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
+下一步计划：
+
+- 给 duplicate pending approval 返回值分支补更直接的测试，固定其返回 `True` 且不重复挂载。
+- 检查 approval response 失败消息是否也需要复用路径脱敏 helper。

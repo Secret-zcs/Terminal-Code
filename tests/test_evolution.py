@@ -4029,6 +4029,31 @@ class TestEvolutionEngine:
         app.agent.set_skill_catalog.assert_called_once()
         assert any("approved" in message for message in messages)
 
+    def test_tui_skill_approval_response_without_agent_is_user_visible(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        from mewcode.self_evolution_dialog import (
+            InlineSkillApprovalWidget,
+            SkillApprovalChoice,
+        )
+
+        app = _make_test_mewcode_app()
+        app.agent = None
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        app.on_inline_skill_approval_widget_responded(
+            InlineSkillApprovalWidget.Responded(
+                "approval_missing_agent",
+                SkillApprovalChoice.APPROVE,
+            )
+        )
+
+        assert messages == [
+            "Self-evolution approval failed: no active agent."
+        ]
+
     @pytest.mark.asyncio
     async def test_tui_self_evolution_approval_clears_pending_inbox(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
