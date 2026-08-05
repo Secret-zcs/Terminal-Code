@@ -2959,7 +2959,7 @@ class TestEvolutionEngine:
         removed: list[str] = []
         focused: list[str] = []
         app._show_system_message = messages.append  # type: ignore[method-assign]
-        app._pending_self_evolution_match_key = ("match", "audit")
+        app._pending_self_evolution_match_key = ("match", "audit", "")
 
         class FakeMatch:
             def remove(self) -> None:
@@ -3009,6 +3009,7 @@ class TestEvolutionEngine:
         app = _make_test_mewcode_app()
         removed: list[str] = []
         opened: list[str] = []
+        focused: list[str] = []
         app._pending_self_evolution_match_key = ("match", "audit", "approval_123")
         app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
 
@@ -3020,13 +3021,15 @@ class TestEvolutionEngine:
             disabled = True
 
             def focus(self) -> None:
-                pass
+                focused.append("input")
+
+        fake_input = FakeInput()
 
         def fake_query_one(selector: str, *_args: object) -> object:
             if selector == "#self-evolution-match-inline":
                 return FakeMatch()
             if selector == "#chat-input":
-                return FakeInput()
+                return fake_input
             raise LookupError(selector)
 
         app.query_one = fake_query_one  # type: ignore[method-assign]
@@ -3039,6 +3042,8 @@ class TestEvolutionEngine:
         )
 
         assert removed == ["match"]
+        assert fake_input.disabled is True
+        assert focused == []
         assert app._pending_self_evolution_match_key is None
         assert opened == ["approval_123"]
 

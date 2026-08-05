@@ -1765,6 +1765,13 @@ class MewCodeApp(App):
         from mewcode.self_evolution_dialog import SelfEvolutionMatchChoice
 
         self._clear_pending_self_evolution_match()
+        if (
+            event.choice == SelfEvolutionMatchChoice.OPEN_APPROVAL
+            and event.approval_request_id.strip()
+        ):
+            self._show_self_evolution_approval(event.approval_request_id)
+            return
+
         try:
             self.query_one("#chat-input").disabled = False
             self.query_one("#chat-input").focus()
@@ -1776,11 +1783,6 @@ class MewCodeApp(App):
             and event.audit_markdown.strip()
         ):
             self._show_system_message(event.audit_markdown)
-        elif (
-            event.choice == SelfEvolutionMatchChoice.OPEN_APPROVAL
-            and event.approval_request_id.strip()
-        ):
-            self._show_self_evolution_approval(event.approval_request_id)
 
     def _clear_pending_self_evolution_match(self) -> None:
         from mewcode.self_evolution_dialog import InlineSelfEvolutionMatchWidget

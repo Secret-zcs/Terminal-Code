@@ -2232,3 +2232,32 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_mat
 python3 -m py_compile mewcode/app.py mewcode/self_evolution_dialog.py
 passed
 ```
+
+## Match Card 到 Approval Card 的输入状态边界
+
+本次修正 `Open pending approval` 的 TUI 状态切换：打开待审批请求时不再恢复 chat input，而是直接进入原 approval card 流程。
+
+审批影响：
+
+- 审批模式没有变化，仍支持 `manual`、`deferred`、`trusted-auto`。
+- 用户仍必须在 approval card 或对应 approval gate 中完成决策。
+- 该修复只避免审批卡片挂载前输入框被短暂启用。
+
+安全策略：
+
+- `OPEN_APPROVAL` 分支不调用 approve/reject/promote。
+- 输入框保持禁用，降低待审批状态下继续发起新任务导致 UI 状态交叉的风险。
+- `VIEW_AUDIT` 和 `DISMISS` 仍恢复输入框，保持原交互。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval -q
+1 failed  # 修复前会错误恢复 chat input
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_shows_pending_approval_action tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_emits_view_audit_and_dismiss tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_views_audit -q
+3 passed
+```

@@ -4340,3 +4340,44 @@ passed
 
 - 继续减少 match card 与 inbox card 的重复选项渲染逻辑。
 - 补充 match card 与 approval card 同时存在时的状态恢复测试，确保输入框禁用/恢复一致。
+
+## 91. 最新推进记录：修复 Match Card 打开审批时的输入框状态
+
+日期：2026-08-05
+
+本次补齐 match card 与 approval card 衔接时的状态恢复边界：用户选择 `Open pending approval` 后，match card 会被清理，但输入框不会被短暂恢复为可输入状态，因为下一步立即进入 approval card，审批卡片本身需要保持输入禁用，避免用户在待审批操作未处理前继续发送消息。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：增强 `test_tui_self_evolution_match_response_opens_pending_approval`，断言打开 pending approval 时不恢复 chat input、不 focus 输入框。
+- 修改 `tests/test_evolution.py`：把旧的 `_pending_self_evolution_match_key` 测试夹具从二元组更新为三元组，和当前状态模型一致。
+- 修改 `mewcode/app.py`：`on_inline_self_evolution_match_widget_responded()` 在 `OPEN_APPROVAL` 分支中先打开 approval 并直接返回，不再执行输入框恢复逻辑。
+
+用户能看到什么：
+
+- 选择 `Open pending approval` 后，界面直接进入审批卡片，不会出现输入框先可用再被禁用的状态闪烁。
+- `View all matches` 和 `Dismiss match hint` 仍会按原逻辑恢复输入框。
+
+安全边界：
+
+- 不改变审批决策，只修正 TUI 状态切换。
+- 不自动 approve、reject、promote 或 activate。
+- 只影响 match card 到 approval card 的跳转路径。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval -q
+1 failed  # 实现前红灯：OPEN_APPROVAL 分支仍恢复 chat input，fake_input.disabled 从 True 变为 False
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_shows_pending_approval_action tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_emits_view_audit_and_dismiss tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_views_audit -q
+3 passed
+```
+
+下一步计划：
+
+- 继续抽出 inbox/match card 共用的选项渲染和光标移动逻辑。
+- 给 approval 打开失败路径补测试，确保 request id 失效时 pending 状态和输入框状态可恢复。
