@@ -4294,3 +4294,49 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py 
 
 - 减少 match/inbox widget 重复逻辑，把共同的选项渲染模式抽成 helper 或轻量基类。
 - 继续补 match card 失败挂载时 pending key 清理和去重测试。
+
+## 90. 最新推进记录：候选 Skill 匹配卡片衔接待审批入口
+
+日期：2026-08-05
+
+本次把跨对话候选 skill 匹配卡片和原有审批流打通：当 Top 1 匹配候选已经存在 pending approval request 时，match card 会展示 `Open pending approval`。用户选择后，TUI 会移除匹配提示卡并打开对应审批卡片，继续沿用已有 approval widget 完成 approve / reject / defer。
+
+修改内容：
+
+- 修改 `mewcode/evolution/engine.py` 之外的 TUI 衔接逻辑：`_show_self_evolution_task_matches()` 读取 Top 1 匹配候选的 `approval_request_id`。
+- 修改 `mewcode/app.py`：match pending key 增加 approval request 维度，避免不同审批请求共用同一去重键。
+- 修改 `mewcode/app.py`：`InlineSelfEvolutionMatchWidget.Responded` 选择 `OPEN_APPROVAL` 时调用 `_show_self_evolution_approval(request_id)`。
+- 修改 `mewcode/self_evolution_dialog.py`：新增 `SelfEvolutionMatchChoice.OPEN_APPROVAL` 和 `Open pending approval` 选项。
+- 修改 `tests/test_self_evolution_dialog.py`：覆盖 match widget 展示 pending approval 操作，并携带 request id。
+- 修改 `tests/test_evolution.py`：覆盖用户消息触发 match card 时传入 approval request，以及选择卡片后打开原审批流。
+
+用户能看到什么：
+
+- 当前任务匹配到候选 skill 且该候选等待审批时，卡片会给出 `Open pending approval`。
+- 用户可以从“候选匹配提示”直接跳到“审批详情”，不用等待独立 inbox 提示。
+- 没有 pending approval 的候选仍只展示匹配提示、完整审计入口和 dismiss。
+
+安全边界：
+
+- 这不是自动审批，只是导航入口。
+- 不自动 promote project skill。
+- 不自动 load 或 activate candidate skill。
+- 审批结果仍由原 approval gate 和用户/配置审批模式决定。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_shows_pending_approval_action tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_emits_view_audit_and_dismiss tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_match_card_can_open_pending_approval tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval -q
+4 passed
+
+python3 -m py_compile mewcode/app.py mewcode/self_evolution_dialog.py
+passed
+```
+
+下一步计划：
+
+- 继续减少 match card 与 inbox card 的重复选项渲染逻辑。
+- 补充 match card 与 approval card 同时存在时的状态恢复测试，确保输入框禁用/恢复一致。

@@ -2202,3 +2202,33 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_mat
 PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py -q
 133 passed
 ```
+
+## Self-Evolution 匹配卡片打开待审批请求
+
+本次把候选 skill 匹配提示与审批请求衔接起来：如果 Top 1 匹配候选已经有 pending approval request，match card 会显示 `Open pending approval`，用户选择后直接打开对应审批卡片。
+
+审批影响：
+
+- `Open pending approval` 只是打开原审批详情，不代表 approve。
+- 审批动作仍由 approval widget、approval mode 和原 gate 处理。
+- 没有 pending approval request 的候选不会出现该操作。
+
+安全策略：
+
+- 不自动 promote project skill。
+- 不自动启用候选 skill。
+- 不绕过 eval、execution eval、canary、approval gate 或 quarantine 状态。
+- match card pending key 纳入 approval request id，避免多个审批请求被错误去重。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval -q
+1 passed
+
+PYTHONPATH=. pytest tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_shows_pending_approval_action tests/test_self_evolution_dialog.py::test_self_evolution_match_widget_emits_view_audit_and_dismiss tests/test_evolution.py::TestEvolutionEngine::test_tui_user_message_match_card_can_open_pending_approval tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_opens_pending_approval -q
+4 passed
+
+python3 -m py_compile mewcode/app.py mewcode/self_evolution_dialog.py
+passed
+```

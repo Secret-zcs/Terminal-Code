@@ -118,6 +118,22 @@ def test_self_evolution_match_widget_shows_match_and_audit_action() -> None:
     assert "Dismiss match hint" in content
 
 
+def test_self_evolution_match_widget_shows_pending_approval_action() -> None:
+    captured = []
+    widget = InlineSelfEvolutionMatchWidget(
+        match_markdown="# Self-Evolution Candidate Skill Matches\n\n- pending approval",
+        approval_request_id="approval_123",
+    )
+    widget.post_message = captured.append  # type: ignore[method-assign]
+
+    content = widget._build_content()
+    widget.action_select()
+
+    assert "Open pending approval" in content
+    assert captured[-1].choice == SelfEvolutionMatchChoice.OPEN_APPROVAL
+    assert captured[-1].approval_request_id == "approval_123"
+
+
 def test_self_evolution_match_widget_emits_view_audit_and_dismiss() -> None:
     captured = []
     widget = InlineSelfEvolutionMatchWidget(

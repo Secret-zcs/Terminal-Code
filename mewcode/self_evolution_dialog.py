@@ -20,6 +20,7 @@ class SelfEvolutionInboxChoice(str, Enum):
 
 
 class SelfEvolutionMatchChoice(str, Enum):
+    OPEN_APPROVAL = "open_approval"
     VIEW_AUDIT = "view_audit"
     DISMISS = "dismiss"
 
@@ -248,20 +249,24 @@ class InlineSelfEvolutionMatchWidget(Vertical, can_focus=True):
             self,
             choice: SelfEvolutionMatchChoice,
             audit_markdown: str = "",
+            approval_request_id: str = "",
         ) -> None:
             super().__init__()
             self.choice = choice
             self.audit_markdown = audit_markdown
+            self.approval_request_id = approval_request_id
 
     def __init__(
         self,
         match_markdown: str,
         audit_markdown: str = "",
+        approval_request_id: str = "",
         **kwargs,
     ) -> None:
         super().__init__(id="self-evolution-match-inline", **kwargs)
         self._match_markdown = match_markdown
         self._audit_markdown = audit_markdown
+        self._approval_request_id = approval_request_id.strip()
         self._cursor = 0
 
     def compose(self) -> ComposeResult:
@@ -289,6 +294,11 @@ class InlineSelfEvolutionMatchWidget(Vertical, can_focus=True):
 
     def _options(self) -> list[tuple[str, SelfEvolutionMatchChoice]]:
         options: list[tuple[str, SelfEvolutionMatchChoice]] = []
+        if self._approval_request_id:
+            options.append((
+                "Open pending approval",
+                SelfEvolutionMatchChoice.OPEN_APPROVAL,
+            ))
         if self._audit_markdown.strip():
             options.append(("View all matches", SelfEvolutionMatchChoice.VIEW_AUDIT))
         options.append(("Dismiss match hint", SelfEvolutionMatchChoice.DISMISS))
@@ -319,7 +329,12 @@ class InlineSelfEvolutionMatchWidget(Vertical, can_focus=True):
             if choice == SelfEvolutionMatchChoice.VIEW_AUDIT
             else ""
         )
-        self.post_message(self.Responded(choice, audit))
+        request_id = (
+            self._approval_request_id
+            if choice == SelfEvolutionMatchChoice.OPEN_APPROVAL
+            else ""
+        )
+        self.post_message(self.Responded(choice, audit, request_id))
 
     def action_dismiss(self) -> None:
         self.post_message(self.Responded(SelfEvolutionMatchChoice.DISMISS))

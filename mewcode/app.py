@@ -640,7 +640,7 @@ class MewCodeApp(App):
         self._teammate_tree: TeammateTree | None = None
         self._teammate_timer = None
         self._pending_self_evolution_inbox_key: tuple[str, str] | None = None
-        self._pending_self_evolution_match_key: tuple[str, str] | None = None
+        self._pending_self_evolution_match_key: tuple[str, str, str] | None = None
 
     @staticmethod
     def _make_banner(model: str = "", work_dir: str = "") -> RichText:
@@ -1078,24 +1078,41 @@ class MewCodeApp(App):
             return
         try:
             engine = EvolutionEngine(self.agent.work_dir)
+            matches = engine.match_skill_candidates_for_task(text, limit=1)
             markdown = engine.render_skill_candidate_task_matches(text, limit=1)
             audit_markdown = (
                 engine.render_skill_candidate_task_match_audit(text)
                 if markdown and "- Hidden matches: `0`" not in markdown
                 else ""
             )
+            approval_request_id = ""
+            if matches:
+                top_match = matches[0]
+                if str(top_match.get("approval_status") or "") == "pending":
+                    approval_request_id = str(
+                        top_match.get("approval_request_id") or ""
+                    ).strip()
         except Exception as exc:
             log.debug("Self-evolution candidate matching failed: %s", exc)
             return
         if markdown:
-            self._show_self_evolution_match(markdown, audit_markdown)
+            self._show_self_evolution_match(
+                markdown,
+                audit_markdown,
+                approval_request_id=approval_request_id,
+            )
 
     def _show_self_evolution_match(
         self,
         match_markdown: str,
         audit_markdown: str = "",
+        approval_request_id: str = "",
     ) -> None:
-        match_key = (match_markdown.strip(), audit_markdown.strip())
+        match_key = (
+            match_markdown.strip(),
+            audit_markdown.strip(),
+            approval_request_id.strip(),
+        )
         if self._pending_self_evolution_match_key is not None:
             return
         self._pending_self_evolution_match_key = match_key
@@ -1103,6 +1120,7 @@ class MewCodeApp(App):
             self._mount_self_evolution_match_guarded(
                 match_markdown,
                 audit_markdown,
+                approval_request_id,
                 match_key,
             )
         )
@@ -1111,10 +1129,15 @@ class MewCodeApp(App):
         self,
         match_markdown: str,
         audit_markdown: str,
-        match_key: tuple[str, str],
+        approval_request_id: str,
+        match_key: tuple[str, str, str],
     ) -> None:
         try:
-            await self._mount_self_evolution_match(match_markdown, audit_markdown)
+            await self._mount_self_evolution_match(
+                match_markdown,
+                audit_markdown,
+                approval_request_id,
+            )
         except Exception:
             if self._pending_self_evolution_match_key == match_key:
                 self._pending_self_evolution_match_key = None
@@ -1123,11 +1146,16 @@ class MewCodeApp(App):
         self,
         match_markdown: str,
         audit_markdown: str = "",
+        approval_request_id: str = "",
     ) -> None:
         from mewcode.self_evolution_dialog import InlineSelfEvolutionMatchWidget
 
         chat = self.query_one("#chat-area", VerticalScroll)
-        widget = InlineSelfEvolutionMatchWidget(match_markdown, audit_markdown)
+        widget = InlineSelfEvolutionMatchWidget(
+            match_markdown,
+            audit_markdown,
+            approval_request_id=approval_request_id,
+        )
         await chat.mount(widget)
         self.call_after_refresh(chat.scroll_end, animate=False)
         try:
@@ -1748,6 +1776,11 @@ class MewCodeApp(App):
             and event.audit_markdown.strip()
         ):
             self._show_system_message(event.audit_markdown)
+        elif (
+            event.choice == SelfEvolutionMatchChoice.OPEN_APPROVAL
+            and event.approval_request_id.strip()
+        ):
+            self._show_self_evolution_approval(event.approval_request_id)
 
     def _clear_pending_self_evolution_match(self) -> None:
         from mewcode.self_evolution_dialog import InlineSelfEvolutionMatchWidget
