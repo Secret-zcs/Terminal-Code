@@ -1133,6 +1133,20 @@ class TestEvolutionEngine:
         assert "复盘" in matches[0]["matched_terms"]
         assert all(match["proposal_id"] != deploy_proposal.id for match in matches)
 
+    def test_match_skill_candidates_for_task_ignores_generic_chinese_overlap(
+        self, tmp_path: Path
+    ) -> None:
+        engine = EvolutionEngine(tmp_path)
+        engine.propose_skill(
+            name="generic-report-loop",
+            description="测试结果整理流程",
+            body="# 任务\n\n记录测试结果并整理文档。\n",
+        )
+
+        matches = engine.match_skill_candidates_for_task("继续说明测试结果。")
+
+        assert matches == []
+
     def test_render_skill_candidate_task_matches_shows_gate_status(
         self, tmp_path: Path
     ) -> None:

@@ -4055,3 +4055,41 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 
 - 将 approval request id 与 TUI approval 打开动作更紧密地衔接，但仍不自动审批。
 - 继续补误匹配抑制和候选状态过滤测试。
+
+## 84. 最新推进记录：候选 Skill 匹配低信号中文词降噪
+
+日期：2026-08-05
+
+本次修复候选 skill 匹配中的中文误报风险。此前 `_skill_match_tokens()` 会对连续中文生成 bigram，例如 `测试结果` 会产生 `测试`、`试结`、`结果`。这些词太泛化，可能让一个只提到“测试结果整理”的候选误匹配用户的普通“说明测试结果”请求。现在新增低信号 token 过滤，过滤 `测试`、`试结`、`结果`、`文档`、`整理`、`记录` 等泛化词，同时保留 `复盘`、`自进`、`进化` 等更有区分度的匹配词。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_match_skill_candidates_for_task_ignores_generic_chinese_overlap`，覆盖泛化中文重叠不应触发候选匹配。
+- 修改 `mewcode/evolution/engine.py`：新增 `LOW_SIGNAL_SKILL_MATCH_TOKENS`。
+- 修改 `mewcode/evolution/engine.py`：`_skill_match_tokens()` 统一过滤低信号 token。
+
+用户能看到什么：
+
+- TUI 不会因为“测试/结果/文档”这种泛化词就展示候选 skill 匹配报告。
+- 真正有区分度的任务，例如“自进化复盘文档”，仍能匹配到复盘类候选 skill。
+
+安全边界：
+
+- 只改变匹配提示的召回逻辑。
+- 不修改候选 skill、approval request 或 project skill。
+- 不影响已通过审批的 skill 使用。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ignores_generic_chinese_overlap -q
+1 failed  # 实现前红灯：泛化中文 token 触发了误匹配
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ignores_generic_chinese_overlap tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ranks_relevant_candidate tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+3 passed
+```
+
+下一步计划：
+
+- 给匹配报告增加阈值/原因说明，让用户能看到“为什么没展示某个低分候选”。
+- 继续评估是否需要把匹配提示改成只显示最高置信候选，减少噪音。

@@ -2039,3 +2039,29 @@ PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_sk
 PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_pending_approval_request tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
 2 passed
 ```
+
+## Self-Evolution 候选匹配低信号词降噪
+
+本次降低候选 skill 匹配误报。中文 bigram 会产生大量泛化 token，例如 `测试`、`结果`、`文档`，这些词不足以说明当前任务真的适合某个候选 skill。现在匹配逻辑会过滤低信号中文 token，避免普通任务触发无关候选提示。
+
+审批影响：
+
+- 降噪只影响候选匹配提示是否展示。
+- 不影响 pending approval request 的状态。
+- 不改变 approve、reject、promote 或 trusted-auto rollback。
+
+安全策略：
+
+- 低信号匹配不会被展示为“推荐候选”。
+- 高信号匹配仍显示 gate 状态和 `Runtime: not auto-activated`。
+- 不修改 candidate manifest 或 project skill。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ignores_generic_chinese_overlap -q
+1 failed  # 实现前红灯：泛化中文 token 触发了误匹配
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ignores_generic_chinese_overlap tests/test_evolution.py::TestEvolutionEngine::test_match_skill_candidates_for_task_ranks_relevant_candidate tests/test_evolution.py::TestEvolutionEngine::test_render_skill_candidate_task_matches_shows_gate_status -q
+3 passed
+```

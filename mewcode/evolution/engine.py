@@ -52,6 +52,22 @@ SUPPORTED_EVOLUTION_TARGETS = {"memory", "skill"}
 SUPPORTED_EXECUTION_RUNNERS = {"deterministic_replay", "agent_loop_scripted"}
 MIN_EXECUTION_EVAL_CASES = 3
 NEGATIVE_SKILL_USAGE_EVENTS = {"failure", "user_feedback"}
+LOW_SIGNAL_SKILL_MATCH_TOKENS = {
+    "任务",
+    "流程",
+    "需要",
+    "进行",
+    "说明",
+    "继续",
+    "测试",
+    "试结",
+    "结果",
+    "整理",
+    "记录",
+    "文档",
+    "修改",
+    "理由",
+}
 DANGEROUS_SKILL_PATTERNS = (
     "rm -rf /",
     "sudo rm -rf",
@@ -1353,9 +1369,12 @@ class EvolutionEngine:
                 tokens.add(run)
             for index in range(len(run) - 1):
                 token = run[index : index + 2]
-                if token not in {"任务", "流程", "需要", "进行", "说明"}:
-                    tokens.add(token)
-        return tokens
+                tokens.add(token)
+        return {
+            token
+            for token in tokens
+            if token not in LOW_SIGNAL_SKILL_MATCH_TOKENS
+        }
 
     @staticmethod
     def _render_pending_inbox_line(item: dict) -> str:
