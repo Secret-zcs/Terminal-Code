@@ -2291,6 +2291,38 @@ python3 -m py_compile mewcode/app.py
 passed
 ```
 
+## Review 流审批打开失败的降级展示
+
+本次让 `_run_self_evolution_review()` 尊重 `_show_self_evolution_approval()` 的 bool 返回值：新审批请求打不开时显示 ready notification；已有 pending request 打不开时继续展示 self-evolution inbox。
+
+审批影响：
+
+- 不改变 approval mode。
+- 不自动处理打不开的审批请求。
+- 只确保用户仍能看到 pending request 或 inbox 信息。
+
+安全策略：
+
+- fallback 只影响 TUI 展示路径。
+- 不修改 approval store、candidate manifest、eval report 或 project skill。
+- 失败分支不会绕过 eval、execution eval 或 approval gate。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_when_new_approval_open_fails -q
+1 failed  # 修复前 ready notification 被吞掉
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_to_inbox_when_pending_open_fails -q
+1 failed  # 修复前 pending inbox 被提前 return 吞掉
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_approval_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_when_new_approval_open_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_existing_pending_request tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_to_inbox_when_pending_open_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+6 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
 ## Approval Card 打开失败用户提示
 
 本次为 approval card 挂载失败增加系统消息，并补上 `mewcode/app.py` 的模块级 logger，避免恢复路径里的 `log.debug(...)` 触发 `NameError`。

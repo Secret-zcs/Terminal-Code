@@ -135,6 +135,17 @@ def _capture_self_evolution_match_mount(app) -> list[tuple[str, str, str]]:
     return mounted
 
 
+def _capture_successful_self_evolution_approval_open(app) -> list[str]:
+    opened: list[str] = []
+
+    def fake_open(request_id: str) -> bool:
+        opened.append(request_id)
+        return True
+
+    app._show_self_evolution_approval = fake_open  # type: ignore[method-assign]
+    return opened
+
+
 def _install_fake_pending_inbox_query(app) -> list[str]:
     removed: list[str] = []
 
@@ -2633,8 +2644,7 @@ class TestEvolutionEngine:
             ),
         )
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
-        opened: list[str] = []
-        app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
+        opened = _capture_successful_self_evolution_approval_open(app)
         app._show_system_message = lambda _text: None  # type: ignore[method-assign]
 
         app._run_self_evolution_review()
@@ -2642,6 +2652,55 @@ class TestEvolutionEngine:
         requests = engine.store.load_skill_approval_requests()
         assert len(requests) == 1
         assert opened == [requests[0].id]
+
+    def test_tui_self_evolution_review_falls_back_when_new_approval_open_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.config import SelfEvolutionConfig
+
+        request = SimpleNamespace(
+            id="approval_failed_open",
+            proposal_id="proposal_ready",
+            skill_name="debug-regression-loop",
+            approval_mode="manual",
+            eval_report_markdown=".mewcode/evolution/candidates/proposal/eval_report.md",
+        )
+        monkeypatch.setattr(
+            app_module,
+            "review_ready_skill_candidates",
+            lambda *_args, **_kwargs: {
+                "status": "idle",
+                "requests": [request],
+                "blocked_generated_candidates": [],
+                "expired_review_run_ids": [],
+            },
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        opened: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        def fake_show_approval(request_id: str) -> bool:
+            opened.append(request_id)
+            return False
+
+        app._show_self_evolution_approval = fake_show_approval  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+
+        assert opened == ["approval_failed_open"]
+        assert len(messages) == 1
+        assert "Self-evolution approval request(s) ready" in messages[0]
+        assert "approval_failed_open" not in messages[0]
+        assert "proposal_ready" in messages[0]
 
     def test_tui_self_evolution_review_opens_existing_pending_request(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2659,13 +2718,60 @@ class TestEvolutionEngine:
             ),
         )
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
-        opened: list[str] = []
-        app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
+        opened = _capture_successful_self_evolution_approval_open(app)
         app._show_system_message = lambda _text: None  # type: ignore[method-assign]
 
         app._run_self_evolution_review()
 
         assert opened == [request.id]
+
+    def test_tui_self_evolution_review_falls_back_to_inbox_when_pending_open_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+        from mewcode.config import SelfEvolutionConfig
+
+        engine = EvolutionEngine(tmp_path)
+        proposal = _make_ready_skill_candidate(engine)
+        request = engine.submit_skill_approval_request(proposal.id)
+        monkeypatch.setattr(
+            app_module,
+            "review_ready_skill_candidates",
+            lambda *_args, **_kwargs: {
+                "status": "idle",
+                "requests": [],
+                "blocked_generated_candidates": [],
+                "expired_review_run_ids": [],
+            },
+        )
+        app = _make_test_mewcode_app(
+            self_evolution_config=SelfEvolutionConfig(
+                enabled=True,
+                skill_approval_mode="manual",
+            ),
+        )
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        opened: list[str] = []
+        inboxes: list[tuple[str, str]] = []
+        app._show_self_evolution_inbox = (  # type: ignore[method-assign]
+            lambda inbox, report: inboxes.append((inbox, report))
+        )
+
+        def fake_show_approval(request_id: str) -> bool:
+            opened.append(request_id)
+            return False
+
+        app._show_self_evolution_approval = fake_show_approval  # type: ignore[method-assign]
+
+        app._run_self_evolution_review()
+
+        assert opened == [request.id]
+        assert len(inboxes) == 1
+        inbox_markdown, _report_detail = inboxes[0]
+        assert "# Self-Evolution Inbox" in inbox_markdown
+        assert "## Pending Approval Requests" in inbox_markdown
+        assert request.id in inbox_markdown
 
     def test_tui_self_evolution_review_shows_busy_message(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -3157,9 +3263,8 @@ class TestEvolutionEngine:
             ),
         )
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
-        opened: list[str] = []
+        opened = _capture_successful_self_evolution_approval_open(app)
         inboxes: list[tuple[str, str]] = []
-        app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
         app._show_self_evolution_inbox = (  # type: ignore[method-assign]
             lambda inbox, report: inboxes.append((inbox, report))
         )
@@ -3221,9 +3326,8 @@ class TestEvolutionEngine:
             ),
         )
         app.agent = SimpleNamespace(work_dir=str(tmp_path))
-        opened: list[str] = []
+        opened = _capture_successful_self_evolution_approval_open(app)
         inboxes: list[tuple[str, str]] = []
-        app._show_self_evolution_approval = opened.append  # type: ignore[method-assign]
         app._show_self_evolution_inbox = (  # type: ignore[method-assign]
             lambda inbox, report: inboxes.append((inbox, report))
         )

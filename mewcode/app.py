@@ -2155,8 +2155,12 @@ class MewCodeApp(App):
             return
         requests = list(result.get("requests", []))
         if requests:
-            self._show_self_evolution_approval(requests[0].id)
-            if len(requests) > 1:
+            opened = self._show_self_evolution_approval(requests[0].id)
+            if not opened:
+                message = format_review_notification(result)
+                if message:
+                    self._show_system_message(message)
+            elif len(requests) > 1:
                 self._show_system_message(
                     f"{len(requests)} self-evolution approval requests are pending."
                 )
@@ -2184,8 +2188,9 @@ class MewCodeApp(App):
                 return
             pending = inbox.get("pending_requests", [])
             if pending:
-                self._show_self_evolution_approval(pending[0]["request_id"])
-                return
+                opened = self._show_self_evolution_approval(pending[0]["request_id"])
+                if opened:
+                    return
             inbox_message = engine.render_self_evolution_inbox()
             if inbox_message:
                 report_detail = self._format_self_evolution_review_report_detail(

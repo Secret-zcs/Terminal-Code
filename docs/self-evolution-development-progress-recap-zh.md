@@ -4552,3 +4552,49 @@ passed
 
 - 继续检查 self-evolution review 通知分支，确保 busy、stale、pending approval、inbox 四种状态的用户提示互不吞没。
 - 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
+
+## 96. 最新推进记录：Review 流打开审批失败时降级展示通知或 Inbox
+
+日期：2026-08-05
+
+本次补齐 `_run_self_evolution_review()` 对 `_show_self_evolution_approval()` 返回值的处理。此前 review 生成新 approval request 或发现已有 pending request 后，会直接调用审批卡片并 `return`；如果审批卡片打不开，用户可能既看不到 approval card，也看不到 ready notification 或 inbox。现在新请求打开失败会降级显示 review notification，已有 pending request 打开失败会继续渲染 self-evolution inbox。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_falls_back_when_new_approval_open_fails`，覆盖新审批请求打开失败时显示 ready notification。
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_review_falls_back_to_inbox_when_pending_open_fails`，覆盖已有 pending approval 打开失败时展示 inbox。
+- 修改 `tests/test_evolution.py`：新增 `_capture_successful_self_evolution_approval_open()` helper，使测试 mock 明确返回 `True`，匹配 `_show_self_evolution_approval()` 的 bool API。
+- 修改 `mewcode/app.py`：新 approval request 分支检查 `opened`；失败时调用 `format_review_notification(result)` 并显示系统消息。
+- 修改 `mewcode/app.py`：已有 pending request 分支检查 `opened`；失败时不提前 return，继续渲染 `render_self_evolution_inbox()`。
+
+用户能看到什么：
+
+- 如果 review 刚生成审批请求但 approval card 打不开，用户仍能看到审批请求 ready notification。
+- 如果已有 pending approval 打不开，用户仍能看到 self-evolution inbox，并可看到 pending request 详情。
+
+安全边界：
+
+- 不自动审批、不自动拒绝、不自动 promote。
+- fallback 只改变 UI 展示路径，不修改 candidate、approval request 或 skill 文件。
+- `trusted-auto`、`manual`、`deferred` 的审批语义保持不变。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_when_new_approval_open_fails -q
+1 failed  # 实现前红灯：messages 为空，review notification 被吞掉
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_to_inbox_when_pending_open_fails -q
+1 failed  # 实现前红灯：inboxes 为空，pending inbox 被提前 return 吞掉
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_approval_widget tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_when_new_approval_open_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_opens_existing_pending_request tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_falls_back_to_inbox_when_pending_open_fails tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_blocked_candidate tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_review_shows_existing_generated_candidate -q
+6 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
+下一步计划：
+
+- 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
+- 继续梳理 review notification 中 request id / proposal id 的展示粒度，避免用户无法定位具体审批请求。
