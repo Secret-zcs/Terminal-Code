@@ -4721,3 +4721,43 @@ passed
 
 - 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
 - 检查其他 self-evolution 用户可见错误是否也需要共用同一脱敏 helper。
+
+## 100. 最新推进记录：Approval 渲染失败消息复用脱敏 Helper
+
+日期：2026-08-05
+
+本次把 `_sanitize_self_evolution_review_error()` 扩展到 approval request 渲染失败路径。`_show_self_evolution_approval()` 调用 `EvolutionEngine.render_skill_approval_request()` 失败时，底层错误也可能包含本机绝对路径；现在展示 `Self-evolution approval failed: ...` 前会先替换绝对路径为 `<path>`。
+
+修改内容：
+
+- 修改 `tests/test_evolution.py`：新增 `test_tui_self_evolution_approval_failure_sanitizes_absolute_paths`，覆盖 approval 渲染失败时不泄露 `tmp_path`。
+- 修改 `mewcode/app.py`：`_show_self_evolution_approval()` 的失败消息复用 `_sanitize_self_evolution_review_error()`。
+
+用户能看到什么：
+
+- approval 渲染失败仍会展示原因。
+- 如果原因里包含本地绝对路径，用户只会看到 `<path>`。
+
+安全边界：
+
+- 不改变 approval request 状态。
+- 不自动 approve、reject、promote 或 quarantine。
+- 只清洗用户可见错误文本。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_failure_sanitizes_absolute_paths -q
+1 failed  # 实现前红灯：approval failure 消息泄露 tmp_path
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_failure_sanitizes_absolute_paths tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_restores_input_when_approval_missing -q
+2 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
+下一步计划：
+
+- 给 `_show_self_evolution_approval()` agent 缺失和 duplicate pending 两个返回值分支补轻量测试。
+- 检查 inbox/report detail 外的其他 self-evolution 系统消息是否需要统一脱敏策略。

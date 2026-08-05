@@ -2326,6 +2326,7 @@ class MewCodeApp(App):
         engine = EvolutionEngine(self.agent.work_dir)
         ok, review = engine.render_skill_approval_request(request_id)
         if not ok:
+            review = self._sanitize_self_evolution_review_error(review)
             self._show_system_message(f"Self-evolution approval failed: {review}")
             return False
         self._pending_skill_approval_request_id = request_id

@@ -2291,6 +2291,35 @@ python3 -m py_compile mewcode/app.py
 passed
 ```
 
+## Approval 渲染失败消息脱敏
+
+本次让 `_show_self_evolution_approval()` 的失败消息复用 `_sanitize_self_evolution_review_error()`。当 approval request 渲染失败原因包含绝对路径时，系统消息会替换为 `<path>`。
+
+审批影响：
+
+- 不改变 request 状态。
+- 不改变 approval mode。
+- 不自动处理失败 request。
+
+安全策略：
+
+- 只清洗用户可见错误文本。
+- 不修改 approval store、candidate manifest、eval report 或 project skill。
+- 和 review 执行异常使用同一条脱敏规则，减少遗漏。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_failure_sanitizes_absolute_paths -q
+1 failed  # 修复前 approval failure 消息泄露 tmp_path
+
+PYTHONPATH=. pytest tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_approval_failure_sanitizes_absolute_paths tests/test_evolution.py::TestEvolutionEngine::test_tui_self_evolution_match_response_restores_input_when_approval_missing -q
+2 passed
+
+python3 -m py_compile mewcode/app.py
+passed
+```
+
 ## Review 异常消息脱敏
 
 本次新增 `_sanitize_self_evolution_review_error()`，用于清洗 `_run_self_evolution_review()` 的用户可见异常消息。绝对路径会被替换为 `<path>`，避免把本地 workspace 或 `.mewcode/evolution` 目录结构直接展示给用户。

@@ -4048,6 +4048,35 @@ class TestEvolutionEngine:
             f"Self-evolution approval card failed to open: {request.id}."
         ]
 
+    def test_tui_self_evolution_approval_failure_sanitizes_absolute_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_mcp(monkeypatch)
+        import mewcode.app as app_module
+
+        leaked_path = tmp_path / ".mewcode" / "evolution" / "approval.json"
+
+        class FakeEngine:
+            def __init__(self, _work_dir: str) -> None:
+                pass
+
+            def render_skill_approval_request(self, _request_id: str) -> tuple[bool, str]:
+                return False, f"approval render failed at {leaked_path}"
+
+        monkeypatch.setattr(app_module, "EvolutionEngine", FakeEngine)
+        app = _make_test_mewcode_app()
+        app.agent = SimpleNamespace(work_dir=str(tmp_path))
+        messages: list[str] = []
+        app._show_system_message = messages.append  # type: ignore[method-assign]
+
+        opened = app._show_self_evolution_approval("approval_missing")
+
+        assert opened is False
+        assert messages == [
+            "Self-evolution approval failed: approval render failed at <path>"
+        ]
+        assert str(tmp_path) not in messages[0]
+
     def test_add_eval_case_invalidates_existing_execution_eval(
         self, tmp_path: Path
     ) -> None:
