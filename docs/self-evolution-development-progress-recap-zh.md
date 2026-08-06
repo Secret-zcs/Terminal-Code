@@ -5646,3 +5646,37 @@ python3 -m py_compile mewcode/__main__.py mewcode/evolution/headless_review.py
 ```
 
 当前边界：模型候选生成已覆盖交互式和 headless 两个运行入口；公开 OASST1/WildChat 数据下载、脱敏派生样本和 baseline/evolved 对比实验仍未实现。
+
+## 122. 最新推进记录：OASST1 真实对话派生评测
+
+日期：2026-08-06
+
+本次新增真实公开对话数据管线：
+
+- `scripts/download_self_evolution_conversations.py`：通过 Hugging Face dataset-server 下载固定 revision 的 OASST1 行数据，计算 SHA256，并将原始 JSONL 写入 `.mewcode/evolution/datasets/oasst1/`。
+- `mewcode/evolution/real_dataset.py`：从对话树抽取“代码任务 + 后续用户反馈”信号；不把原始 text、user ID 或 message ID 写入派生数据。
+- `benchmarks/oasst1_derived_cases.jsonl`：提交 19 条脱敏派生评测 case。
+- `benchmarks/oasst1_derived_manifest.json`：提交数据源、license、revision、SHA256、行数和隐私字段说明。
+- `docs/self-evolution-oasst1-experiment-recap-zh.md`：记录实验方法、结果、复现命令和限制。
+
+真实执行记录：OASST1 `validation` split，固定 revision `fdf72ae0827c1cda404aff25b6603abec9e3399b`，下载 1000 行，原始响应 SHA256 为 `b72d358bb4f9f794ac0d4536027865ee4fbb701d9a4f4bade4b3b3318dbf4726`。筛选出 19 条至少三轮、包含代码信号和后续用户消息的对话树。
+
+对比结果：baseline SOP 的 required-term recall 为 `0.00%`、通过 `0/19`；evolved SOP 为 `100.00%`、通过 `19/19`。这证明当前自进化 SOP 对真实多轮对话抽取出的 guardrail 有更高结构覆盖，不代表真实 LLM 的修复成功率或用户满意度。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_self_evolution_real_dataset.py -q
+collection error  # 红灯：real_dataset 模块不存在
+
+PYTHONPATH=. pytest tests/test_self_evolution_real_dataset.py tests/test_self_evolution_benchmark.py -q
+8 passed
+
+PYTHONPATH=. python3 scripts/download_self_evolution_conversations.py --row-limit 1000
+下载成功，生成 19 个脱敏派生 case
+
+PYTHONPATH=. python3 scripts/run_self_evolution_dataset_eval.py --dataset benchmarks/oasst1_derived_cases.jsonl ...
+baseline 0.00% -> evolved 100.00%，0/19 -> 19/19
+```
+
+当前限制：本实验没有逐条调用外部模型来生成 Skill，也没有运行真实仓库测试。下一阶段需要将相同任务在 baseline Agent 与 Fork Proposer Agent 间进行 sandbox replay，比较 schema/static policy/execution eval/真实测试的通过率、token 和耗时。

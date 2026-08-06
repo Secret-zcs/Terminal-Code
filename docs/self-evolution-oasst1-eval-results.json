@@ -1,0 +1,811 @@
+{
+  "dataset": "benchmarks/oasst1_derived_cases.jsonl",
+  "summary": {
+    "case_count": 19,
+    "baseline_required_recall": 0.0,
+    "evolved_required_recall": 1.0,
+    "delta_required_recall": 1.0,
+    "baseline_passed": 0,
+    "evolved_passed": 19
+  },
+  "cases": [
+    {
+      "id": "oasst1-1acc7539f720",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-9c34cc82c98d",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-53f739d38f4a",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-28c136a7b733",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-6016e045496e",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-32a392d07371",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-9baa4b6a737e",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-231697c6b0e1",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-b501672d0d73",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-46ab82b926ca",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-b60273bee528",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-ee6c55745efa",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-e579afc2f8bb",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-445438beb955",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-89d4423d1c89",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-b6fb810d6899",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-8071e3dbaa72",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-0fd2c3ae66d7",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    },
+    {
+      "id": "oasst1-15560dde8fdc",
+      "source": "OASST1",
+      "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+      "task_family": "code-task-with-follow-up",
+      "task": "Derived from a real multi-turn code conversation with user correction; generate a narrow skill that records feedback, verifies the patch, and reports evidence.",
+      "notes": "Derived metadata only; raw conversation text, user IDs, and message IDs are intentionally excluded.",
+      "required_terms": [
+        "阅读相关文件",
+        "记录用户反馈",
+        "回归测试",
+        "验证报告"
+      ],
+      "forbidden_terms": [
+        "跳过测试",
+        "盲目重试"
+      ],
+      "baseline": {
+        "required_hits": [],
+        "missing_required": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "forbidden_hits": [],
+        "required_recall": 0.0,
+        "passed": false
+      },
+      "evolved": {
+        "required_hits": [
+          "阅读相关文件",
+          "记录用户反馈",
+          "回归测试",
+          "验证报告"
+        ],
+        "missing_required": [],
+        "forbidden_hits": [],
+        "required_recall": 1.0,
+        "passed": true
+      }
+    }
+  ]
+}

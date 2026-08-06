@@ -45,7 +45,7 @@ DEFAULT_BASELINE_SKILL = """
 DEFAULT_EVOLVED_SKILL = """
 处理 issue 或代码任务时，先阅读相关文件并保持既有风格；复现失败后做最小补丁，
 补回归测试和目标测试，形成验证报告。遇到工具失败时，读取错误，修正参数并重试一次，
-记录 failure usage。涉及 rewind 时先 checkpoint，用户确认后执行，且不覆盖用户修改。
+记录用户反馈和 failure usage。涉及 rewind 时先 checkpoint，用户确认后执行，且不覆盖用户修改。
 函数题先明确函数规格、输入输出约束和 docstring，再补边界用例、三个测试和断言；
 只改必要代码，禁止硬编码，所有关键决策需要留档。
 """
@@ -149,7 +149,7 @@ def render_markdown_report(result: dict[str, Any]) -> str:
         "## Methodology",
         "",
         "- This is a deterministic SOP coverage benchmark, not a live model benchmark.",
-        "- Public datasets define task families; local JSONL cases are seed cases derived from those families, not copied benchmark instances.",
+        "- Local JSONL cases are either public-benchmark seed cases or privacy-preserving derived task signals; raw conversations are not included.",
         "- A case passes when all required terms are covered and no forbidden terms appear in the skill SOP.",
         "- The result measures whether self-evolution made the candidate skill more testable against expected behaviors.",
         "",
@@ -166,7 +166,7 @@ def render_markdown_report(result: dict[str, Any]) -> str:
         "",
         "- Baseline is the pre-evolution generic coding SOP.",
         "- Evolved is the post-evolution candidate skill SOP distilled from the self-evolution design.",
-        f"- The observed delta is {summary['delta_required_recall']:.2%} required-term recall across the seed cases.",
+        f"- The observed delta is {summary['delta_required_recall']:.2%} required-term recall across the evaluated cases.",
         "- A positive delta means the candidate SOP covers more expected guardrails; it does not prove higher live task success.",
         "",
         "## Summary",
@@ -225,6 +225,7 @@ def _string_list(value: object) -> list[str]:
 
 def _source_rationales(cases: list[dict[str, Any]]) -> list[tuple[str, str]]:
     known = {
+        "OASST1": "Human-generated multi-turn conversations provide real follow-up and correction patterns; only sanitized task signals are retained.",
         "SWE-bench": "Repository-level issue repair tests regression reproduction, patch minimality, and verification discipline.",
         "AgentBench": "Agent/task interaction scenarios test tool-failure recovery and long-horizon safety guardrails.",
         "MBPP": "Short programming tasks test whether the skill asks for specs, boundary cases, and focused tests.",

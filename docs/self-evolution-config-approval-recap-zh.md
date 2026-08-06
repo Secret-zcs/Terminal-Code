@@ -3092,3 +3092,11 @@ TUI 后台自进化现在会先调用 Fork Proposer 生成候选，再由确定�
 `mewcode -p` 已接入同一套 Proposer/Reviewer 编排。命令行模式不会因为缺少 TUI 审批卡而自动应用候选：`manual` 和 `deferred` 仍只产生 pending request，通知中包含审批报告路径；只有既有配置明确允许的 `trusted-auto` 规则才能走原有受限自动 promote。
 
 headless 测试覆盖了两种情况：正常顺序为 `proposer -> complete -> reviewer -> persist`；Proposer 抛出 provider 异常时仍执行 complete。相关自进化回归为 `172 passed`。下一阶段才开始接入真实公开对话数据，数据只通过固定版本下载脚本进入本地缓存，仓库只保留脱敏派生评测样本。
+
+## 真实对话评测数据治理
+
+日期：2026-08-06
+
+已实现 OASST1 真实多轮对话派生评测。提交的 `benchmarks/oasst1_derived_cases.jsonl` 只有匿名哈希 case ID、任务族、语言、轮数和代码/反馈布尔信号；不含任何原始对话内容、用户 ID 或消息 ID。`benchmarks/oasst1_derived_manifest.json` 固定记录数据集 `OpenAssistant/oasst1`、Apache-2.0、revision `fdf72ae0827c1cda404aff25b6603abec9e3399b` 和本次原始响应 SHA256。
+
+本次 1000 行 validation 下载派生出 19 个评测 case。结构化 SOP 对比为 baseline `0/19`、evolved `19/19`，但该指标不能绕过审批，也不能作为模型自主 promote 的证据。候选仍必须分别通过 schema/static policy、三轮 execution eval、Reviewer 和配置要求的审批模式。真实对话数据只用于离线评测与候选设计，不会被运行时 Agent 自动读取或写入正式 Skill。

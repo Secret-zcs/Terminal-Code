@@ -1,0 +1,18 @@
+{
+  "dataset": "OpenAssistant/oasst1",
+  "split": "validation",
+  "revision": "fdf72ae0827c1cda404aff25b6603abec9e3399b",
+  "sha256": "b72d358bb4f9f794ac0d4536027865ee4fbb701d9a4f4bade4b3b3318dbf4726",
+  "row_count": 1000,
+  "raw_path": ".mewcode/evolution/datasets/oasst1/validation-fdf72ae0827c-1000.jsonl",
+  "license": "Apache-2.0",
+  "source_url": "https://huggingface.co/datasets/OpenAssistant/oasst1",
+  "raw_retention": "local-cache-only",
+  "derived_path": "benchmarks/oasst1_derived_cases.jsonl",
+  "derived_case_count": 19,
+  "privacy": {
+    "raw_text_in_derived": false,
+    "user_ids_in_derived": false,
+    "message_ids_in_derived": false
+  }
+}
