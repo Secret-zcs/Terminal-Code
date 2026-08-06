@@ -177,17 +177,8 @@ async def run_fork_skill_proposer_agent(
 
 def parse_fork_skill_proposer_output(raw_output: str) -> dict[str, Any]:
     text = raw_output.strip()
-    if text.startswith("```"):
-        first_newline = text.find("\n")
-        if first_newline >= 0 and text.endswith("```"):
-            text = text[first_newline + 1 : -3].strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ForkSkillProposerOutputError(
-            "fork skill proposer output must be a valid JSON object"
-        ) from exc
-    if not isinstance(data, dict):
+    data = _decode_json_object(text)
+    if data is None:
         raise ForkSkillProposerOutputError(
             "fork skill proposer output must be a valid JSON object"
         )
@@ -239,6 +230,28 @@ def parse_fork_skill_proposer_output(raw_output: str) -> dict[str, Any]:
             "candidate body contains dangerous download-and-execute command"
         )
     return data
+
+
+def _decode_json_object(text: str) -> dict[str, Any] | None:
+    """Extract a JSON object from harmless provider-added prose or fences."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        data = None
+    if isinstance(data, dict):
+        return data
+
+    decoder = json.JSONDecoder()
+    for offset, character in enumerate(text):
+        if character != "{":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(text[offset:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict):
+            return candidate
+    return None
 
 
 def _require_text(data: dict[str, Any], field: str, max_length: int) -> None:

@@ -5724,3 +5724,7 @@ PYTHONPATH=. pytest tests/test_proposer_benchmark.py tests/test_fork_skill_propo
 同时修复 provider API key 环境变量解析，并兼容旧版 `providers: {name: {...}}` 配置格式。旧格式中的 `default` provider 会被放到列表首位，以适配当前 CLI/TUI 使用 `config.providers[0]` 的选择逻辑。
 
 验证结果：配置单测 4 项通过；在 `DEEPSEEK_API_KEY=test-secret` 下成功加载 `deepseek-v4-flash`、`anthropic`、自进化开启和 `manual` 审批模式。关联 MCP 测试仍有既有的映射格式不兼容和缺少可选 `mcp` 包问题，未归因于本次改动。
+
+真实调用补充：使用当前 provider 跑 1 个 OASST1 派生 case 时，API 已返回模型内容，但首轮内容未直接解析为 JSON，因而在 schema gate 失败，结果为 `approval-ready=0/1`。本次随后增加 provider 外层文本兼容解析，并保留后续严格 schema、静态策略、3 轮 execution eval 和用户审批门禁；重跑结果待下一步验证。
+
+复测结论：正式 benchmark 后续两次单 case 仍为 `schema-failed`、`approval-ready=0/1`；独立诊断调用有一次成功解析候选，但不计入评测分数。当前 provider 已打通，候选生成的格式稳定性仍不足；下一步应增加有上限的结构化重试和原始响应分类统计，不应降低 schema 或审批门禁。

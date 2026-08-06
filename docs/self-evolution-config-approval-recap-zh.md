@@ -3134,3 +3134,13 @@ mewcode
 ```
 
 关闭自进化或调整审批模式时，编辑 `.mewcode/config.local.yaml` 的 `self_evolution` 段即可。该文件属于本机运行配置，禁止提交真实密钥。
+
+## 2026-08-06 真实调用留档
+
+使用 `deepseek-v4-flash` 运行 1 个 OASST1 派生 case：API 请求完成，但返回内容未直接满足 JSON schema，首轮结果为 `schema-failed`、`approval-ready=0/1`。这证明密钥和 endpoint 已打通，但不能把它计为候选 Skill 通过；后续增加了仅提取 JSON 对象的解析兼容，严格 schema、静态策略和 3 轮执行评测仍保持不变。
+
+重跑结果：正式 benchmark 的后续两次单 case 运行仍为 `schema-failed`、`approval-ready=0/1`；一次独立诊断调用成功解析出候选，但不计入 benchmark。结论是 provider 可调用，当前真实候选生成稳定性不足，不能进入用户审批队列。
+
+## 后续真实调用
+
+配置加载验证不等于模型调用验证。真实评测应先使用 `--max-cases 1`，确认 DeepSeek 的 Anthropic 兼容端点可用，再扩大到 3 个或 19 个 case；结果只写入 `.mewcode/evolution/benchmarks/`，并记录模型输出是否通过候选 Skill 的完整门禁。

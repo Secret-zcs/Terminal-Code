@@ -73,6 +73,17 @@ def test_proposer_rejects_unknown_fields_and_invalid_candidate_values() -> None:
         parse_fork_skill_proposer_output(json.dumps(payload))
 
 
+def test_proposer_extracts_json_from_provider_preamble() -> None:
+    from mewcode.evolution.fork_skill_proposer_agent import (
+        parse_fork_skill_proposer_output,
+    )
+
+    payload = _candidate_payload()
+    output = "Here is the candidate:\n" + json.dumps(payload) + "\nEnd."
+
+    assert parse_fork_skill_proposer_output(output)["name"] == "review-before-write"
+
+
 def test_proposer_rejects_dangerous_skill_body() -> None:
     from mewcode.evolution.fork_skill_proposer_agent import (
         ForkSkillProposerOutputError,
