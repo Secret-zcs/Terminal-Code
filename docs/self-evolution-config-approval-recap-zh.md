@@ -3100,3 +3100,11 @@ headless 测试覆盖了两种情况：正常顺序为 `proposer -> complete -> 
 已实现 OASST1 真实多轮对话派生评测。提交的 `benchmarks/oasst1_derived_cases.jsonl` 只有匿名哈希 case ID、任务族、语言、轮数和代码/反馈布尔信号；不含任何原始对话内容、用户 ID 或消息 ID。`benchmarks/oasst1_derived_manifest.json` 固定记录数据集 `OpenAssistant/oasst1`、Apache-2.0、revision `fdf72ae0827c1cda404aff25b6603abec9e3399b` 和本次原始响应 SHA256。
 
 本次 1000 行 validation 下载派生出 19 个评测 case。结构化 SOP 对比为 baseline `0/19`、evolved `19/19`，但该指标不能绕过审批，也不能作为模型自主 promote 的证据。候选仍必须分别通过 schema/static policy、三轮 execution eval、Reviewer 和配置要求的审批模式。真实对话数据只用于离线评测与候选设计，不会被运行时 Agent 自动读取或写入正式 Skill。
+
+## 真实 Proposer 评测与审批隔离
+
+日期：2026-08-06
+
+新增真实 provider benchmark runner 后，模型生成的测试候选只写入临时目录。Runner 不调用 `submit_skill_approval_request()`、`resolve_skill_approval_request()` 或 `promote()`，因此 benchmark 的 `approval-ready` 只表示通过全部前置门禁，不会产生真实 pending request，也不会写正式 Skill。
+
+当前机器未配置 provider，真实模型运行被配置校验阻断；Fake Client 的测试结果只用于验证 runner。真实运行仍必须显式配置 provider/API key，并通过单独脚本启动，不会因为 `self_evolution.enabled=true` 自动消费整个数据集或产生模型费用。

@@ -5680,3 +5680,37 @@ baseline 0.00% -> evolved 100.00%，0/19 -> 19/19
 ```
 
 当前限制：本实验没有逐条调用外部模型来生成 Skill，也没有运行真实仓库测试。下一阶段需要将相同任务在 baseline Agent 与 Fork Proposer Agent 间进行 sandbox replay，比较 schema/static policy/execution eval/真实测试的通过率、token 和耗时。
+
+## 123. 最新推进记录：真实 Fork Proposer Benchmark Runner
+
+日期：2026-08-06
+
+本次新增 `mewcode/evolution/proposer_benchmark.py` 和 `scripts/run_fork_skill_proposer_benchmark.py`。Runner 会逐条读取脱敏 OASST1 case，通过配置的真实 provider 调用独立 Fork Proposer，然后在每 case 独立的临时项目中执行生产同款门禁：
+
+```text
+candidate schema
+  -> EvolutionEngine static validation
+  -> 3 个 eval case
+  -> deterministic eval
+  -> 3/3 execution eval
+  -> approval-ready 统计
+```
+
+结果记录 total、schema/static/eval/execution/approval-ready/baseline 通过数、输入/输出 token、每 case 耗时、执行 runner 和失败类型。正式项目 candidate、Skill 和审批队列不会被修改。
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_proposer_benchmark.py -q
+2 failed  # 红灯：proposer_benchmark 模块不存在
+
+PYTHONPATH=. pytest tests/test_proposer_benchmark.py -q
+2 passed
+
+PYTHONPATH=. pytest tests/test_proposer_benchmark.py tests/test_fork_skill_proposer_agent.py tests/test_fork_skill_proposer_flow.py -q
+8 passed
+```
+
+真实运行检查：当前机器 `load_config()` 返回 `At least one provider must be configured`，所以没有真实模型结果。本次没有把 Fake Client 的 `1/1 approval-ready` 当作模型效果；该结果仅验证评测器能把候选正确送入四层 gate。复现与配置方法见 `docs/fork-skill-proposer-real-benchmark-guide-zh.md`。
+
+下一步：配置一个真实 provider 后先运行 1 至 3 个 case，记录 schema pass、3/3 execution eval、token 和耗时；随后再扩展到 19 个 case，并增加真实代码仓库任务的 baseline/evolved 双跑。
