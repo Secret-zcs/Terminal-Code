@@ -190,7 +190,7 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
     conv = ConversationManager()
     last_result = await agent.run_to_completion(prompt, conv)
     print(last_result, flush=True)
-    _run_self_evolution_review(work_dir, config.self_evolution)
+    await _run_self_evolution_review(work_dir, config.self_evolution, client)
 
     if not team_manager._teams:
         return
@@ -214,17 +214,25 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
             "Teammate notifications received. Process them and continue.", conv
         )
         print(last_result, flush=True)
-        _run_self_evolution_review(work_dir, config.self_evolution)
+        await _run_self_evolution_review(work_dir, config.self_evolution, client)
 
 
-def _run_self_evolution_review(work_dir: str, self_evolution_config) -> None:
+async def _run_self_evolution_review(
+    work_dir: str,
+    self_evolution_config,
+    client,
+) -> None:
     from mewcode.evolution.auto_review import (
         format_review_notification,
-        review_ready_skill_candidates,
     )
+    from mewcode.evolution.headless_review import run_headless_self_evolution_review
 
     try:
-        result = review_ready_skill_candidates(work_dir, self_evolution_config)
+        result = await run_headless_self_evolution_review(
+            client=client,
+            project_root=work_dir,
+            self_evolution_config=self_evolution_config,
+        )
     except Exception as exc:
         logging.getLogger(__name__).debug("Self-evolution review failed: %s", exc)
         return

@@ -3084,3 +3084,11 @@ TUI 后台自进化现在会先调用 Fork Proposer 生成候选，再由确定�
 - 模型失败时 deterministic fallback 会标记 `generation_source=deterministic-usage-patch`；模型成功时标记 `generation_source=fork-skill-proposer`，用户和审计报告可以区分来源。
 
 审计产物包括 candidate 内的 `proposer_output.json`、manifest 的 token usage，以及 review run 的 `skill_proposer.json`/`skill_proposer.md`。相关回归共 `170 passed`。当前 TUI 已接入，headless `mewcode -p` 尚待下一阶段接入。
+
+## Headless 审批链路
+
+日期：2026-08-06
+
+`mewcode -p` 已接入同一套 Proposer/Reviewer 编排。命令行模式不会因为缺少 TUI 审批卡而自动应用候选：`manual` 和 `deferred` 仍只产生 pending request，通知中包含审批报告路径；只有既有配置明确允许的 `trusted-auto` 规则才能走原有受限自动 promote。
+
+headless 测试覆盖了两种情况：正常顺序为 `proposer -> complete -> reviewer -> persist`；Proposer 抛出 provider 异常时仍执行 complete。相关自进化回归为 `172 passed`。下一阶段才开始接入真实公开对话数据，数据只通过固定版本下载脚本进入本地缓存，仓库只保留脱敏派生评测样本。

@@ -5611,3 +5611,38 @@ git diff --check
 ```
 
 当前边界：交互式 TUI 已由真正的 Fork Proposer 负责候选正文生成；无模型候选时确定性 patch 只作为可审计 fallback。`mewcode -p` 的 headless 入口仍走同步 deterministic review，下一逻辑单元需把相同的 Proposer/Reviewer 顺序接入该入口。公开真实对话数据集下载、脱敏派生和前后对比评测尚未开始实现。
+
+## 121. 最新推进记录：headless 入口接入 Fork Proposer
+
+日期：2026-08-06
+
+本次新增 `mewcode/evolution/headless_review.py`，并修改 `mewcode/__main__.py`。非交互 `mewcode -p` 路径现在与 TUI 保持同一顺序：
+
+```text
+start review -> Fork Skill Proposer -> deterministic complete -> Fork Reviewer -> print notification
+```
+
+实现约束：
+
+- Proposer 异常会记录失败结果，但不会阻断 deterministic complete。
+- 有候选或审批申请时才调用 Reviewer；Reviewer 失败会写 `agent_review` failure 审计，不影响确定性审批 gate。
+- Reviewer 意见持久化完成后才输出 headless review notification。
+- disabled/busy/missing 等 start 状态直接返回，不会创建额外模型调用。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_headless_self_evolution_review.py -q
+2 failed  # 红灯：headless_review 协调器不存在
+
+PYTHONPATH=. pytest tests/test_headless_self_evolution_review.py -q
+2 passed
+
+PYTHONPATH=. pytest tests/test_fork_skill_proposer_agent.py tests/test_fork_skill_proposer_flow.py tests/test_headless_self_evolution_review.py tests/test_evolution.py tests/test_self_evolution_dialog.py -q
+172 passed
+
+python3 -m py_compile mewcode/__main__.py mewcode/evolution/headless_review.py
+通过
+```
+
+当前边界：模型候选生成已覆盖交互式和 headless 两个运行入口；公开 OASST1/WildChat 数据下载、脱敏派生样本和 baseline/evolved 对比实验仍未实现。
