@@ -3058,3 +3058,13 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py 
 当前边界：模型 fork Agent 已经真实执行，但仅承担独立复核。候选 skill 正文仍由确定性 usage patch 产生；模型候选生成必须在下一阶段接入 candidate schema、sandbox、三轮 eval 和审批 gate 后才能启用。
 
 模式差异：`manual` 模式会在审批卡打开前展示模型第二意见；`trusted-auto` 继续保持已有 same-pass auto-promote 语义，模型意见此时是补充审计而不是前置批准条件。若后续希望模型 verdict 成为 trusted-auto gate，必须单独设计多评审一致性和误判回滚策略，不能直接把单次模型输出当作授权。
+
+## Fork Skill Proposer 权限边界
+
+日期：2026-08-06
+
+本次新增独立 `ForkSkillProposerAgent`，让模型能够生成受限 Candidate Skill JSON。该 Agent 与主对话隔离，固定不携带工具，也没有文件写入、审批或 promote 能力。
+
+审批链路没有放宽：Proposer 输出只是未落地的候选数据。后续接入主流程时，必须先由 Engine 写入 `.mewcode/evolution/candidates/<proposal-id>/`，依次通过 schema/static policy、eval case、至少三轮 execution eval 和独立 Reviewer；`manual` 模式最终仍由用户批准后才能写入 `.mewcode/skills/`。
+
+当前实现已经验证：隔离单消息上下文、`tools=[]`、严格字段集合、非法名称拒绝、危险下载执行命令拒绝和 45 秒默认超时。目标测试 `tests/test_fork_skill_proposer_agent.py` 为 `4 passed`，编译和 `git diff --check` 通过。当前尚未修改 approval mode 语义，也尚未把模型输出接入自动 candidate 生成。

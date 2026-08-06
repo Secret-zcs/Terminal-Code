@@ -5524,3 +5524,32 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py 
 - 定义模型 candidate proposal schema，只允许 `skill` 的 name/description/body/mode/context/allowedTools 字段。
 - 模型 proposal 先写 candidate sandbox，不直接写 `.mewcode/skills`；schema/static policy/eval/execution eval 任一失败即 blocked。
 - 对比模型生成候选与确定性 usage patch 的通过率，并保留确定性 fallback。
+
+## 119. 最新推进记录：实现独立 Fork Skill Proposer Agent
+
+日期：2026-08-06
+
+本次新增 `mewcode/evolution/fork_skill_proposer_agent.py`，开始把候选 Skill 的正文生成职责从确定性 usage patch 迁移给独立模型 Agent。该组件使用全新的 `ConversationManager`，固定 `tools=[]`，只接收已有 Skill、失败证据、当前提案任务和可选的脱敏对话样本。
+
+输出严格限定为 `schema_version/action/name/description/mode/context/allowedTools/body/rationale`。解析器会拒绝未知或缺失字段、非法 Skill 名称、非法 mode/context、超长正文、空字段、非法工具列表和下载后直接执行等危险命令。模型仅能提出候选，不能写项目、批准或 promote。
+
+TDD 记录：
+
+```text
+PYTHONPATH=. pytest tests/test_fork_skill_proposer_agent.py -q
+4 failed  # 红灯：Fork Skill Proposer 模块尚不存在
+
+PYTHONPATH=. pytest tests/test_fork_skill_proposer_agent.py -q
+1 failed, 3 passed  # 首次实现后发现带 URL 的 curl | sh 变体未被阻断
+
+PYTHONPATH=. pytest tests/test_fork_skill_proposer_agent.py -q
+4 passed
+
+python3 -m py_compile mewcode/evolution/fork_skill_proposer_agent.py
+通过
+
+git diff --check
+通过
+```
+
+当前边界：Proposer 已可独立调用，但尚未接入自动 review 主流程，因此现阶段运行时仍由确定性 usage patch 生成候选。下一逻辑单元会把 Proposer 输出交给 `EvolutionEngine.propose_skill_patch()`，先写 candidate sandbox，再进入已有 static eval、三轮 execution eval、Reviewer 和审批门禁；模型失败时保留确定性 fallback。
