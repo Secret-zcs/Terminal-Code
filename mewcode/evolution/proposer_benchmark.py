@@ -50,6 +50,7 @@ async def run_proposer_benchmark(
                 "task_family": case.task_family,
                 "baseline": baseline,
                 "status": "schema-failed",
+                "proposer_attempts": 0,
                 "elapsed_seconds": 0.0,
             }
             try:
@@ -61,8 +62,11 @@ async def run_proposer_benchmark(
                         "Cover every required term and avoid every forbidden term."
                     ),
                 )
-                _validate_create_candidate(candidate)
                 _add_usage(usage, candidate.get("usage", {}))
+                result["proposer_attempts"] = int(
+                    candidate.get("usage", {}).get("attempts", 1) or 1
+                )
+                _validate_create_candidate(candidate)
                 result["schema_passed"] = True
                 engine = EvolutionEngine(case_root)
                 proposal = engine.propose_skill(
@@ -128,6 +132,11 @@ async def run_proposer_benchmark(
                     result["status"] = "runner-failed"
                 result["error_type"] = type(exc).__name__
                 result["error"] = str(exc)[:4000]
+                if not result["proposer_attempts"]:
+                    result["proposer_attempts"] = int(
+                        getattr(exc, "attempts", 1) or 1
+                    )
+                _add_usage(usage, getattr(exc, "usage", {}))
             finally:
                 result["elapsed_seconds"] = round(
                     time.perf_counter() - started,
@@ -236,15 +245,16 @@ def render_proposer_benchmark_markdown(result: dict[str, Any]) -> str:
         "",
         "## Cases",
         "",
-        "| Case | Baseline | Status | Execution | Seconds |",
-        "|---|---|---|---|---:|",
+        "| Case | Baseline | Status | Attempts | Execution | Seconds |",
+        "|---|---|---|---:|---|---:|",
     ]
     for case in result.get("cases", []):
         execution = case.get("execution_eval", {}).get("rounds", "-")
         lines.append(
             f"| {case.get('id')} | "
             f"{'pass' if case.get('baseline', {}).get('passed') else 'fail'} | "
-            f"{case.get('status')} | {execution} | "
+            f"{case.get('status')} | {case.get('proposer_attempts', 0)} | "
+            f"{execution} | "
             f"{case.get('elapsed_seconds', 0)} |"
         )
     lines.append("")

@@ -5728,3 +5728,9 @@ PYTHONPATH=. pytest tests/test_proposer_benchmark.py tests/test_fork_skill_propo
 真实调用补充：使用当前 provider 跑 1 个 OASST1 派生 case 时，API 已返回模型内容，但首轮内容未直接解析为 JSON，因而在 schema gate 失败，结果为 `approval-ready=0/1`。本次随后增加 provider 外层文本兼容解析，并保留后续严格 schema、静态策略、3 轮 execution eval 和用户审批门禁；重跑结果待下一步验证。
 
 复测结论：正式 benchmark 后续两次单 case 仍为 `schema-failed`、`approval-ready=0/1`；独立诊断调用有一次成功解析候选，但不计入评测分数。当前 provider 已打通，候选生成的格式稳定性仍不足；下一步应增加有上限的结构化重试和原始响应分类统计，不应降低 schema 或审批门禁。
+
+有限重试实现后的单 case 正式结果：schema/static/eval 为 `1/1`，execution eval 为 `3/3`，approval-ready 为 `1/1`，实际尝试次数为 `1`。候选仅存在于 benchmark 临时 sandbox，未写入正式 Skill 或用户审批队列。
+
+扩大评测到 3 个真实脱敏样本后，schema/static/eval/execution 和 approval-ready 均为 `3/3`；三个 case 的尝试次数为 `2、2、1`，累计输入 token `468`、输出 token `4266`。本轮证明有限结构化重试能提升 provider 输出的可解析性，但尚未完成 19 个样本和真实代码仓库双跑。
+
+可观测性补丁：benchmark 在 candidate action 校验前记录 usage，并只在尚无尝试次数时从异常补值，避免合法响应在后续 gate 失败时丢失 token 或错误覆盖 attempts。相关自进化与配置测试共 `168 passed`。

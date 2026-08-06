@@ -32,6 +32,10 @@ PYTHONPATH=. python3 scripts/run_fork_skill_proposer_benchmark.py \
 
 2026-08-06 单 case 真实调用已到达模型响应阶段。正式 benchmark 多次出现 `schema-failed`，而独立诊断调用曾成功返回完整候选，说明该模型输出格式存在随机性；解析器已增加 JSON 对象提取兼容逻辑，但没有放宽 schema gate。当前仍不能据此宣称真实候选通过。
 
+增加最多 2 次结构化尝试后，单 case 重跑结果为 `approval-ready 1/1`、`attempts=1`、`execution=3/3`。该结果只代表 1 个样本，不能外推到完整数据集。
+
+随后扩大到 3 个样本：schema/static/eval/execution 均为 `3/3`，approval-ready 为 `3/3`；三个 case 的尝试次数分别为 `2、2、1`，累计输入 token `468`、输出 token `4266`。结果文件为 `.mewcode/evolution/benchmarks/proposer-real-3.{json,md}`，仍未写正式 Skill 或审批队列。
+
 ## 解释边界
 
 Execution eval 当前使用项目已有的 deterministic sandbox runner，验证 Candidate Skill 是否覆盖要求并产生 3/3 产物；它仍不等于真实 Agent 在代码仓库中修复 issue。后续更强评测应加入隔离仓库、真实测试命令和 baseline/evolved Agent 双跑。

@@ -47,7 +47,11 @@ async def test_proposer_uses_isolated_tool_free_context_and_returns_candidate() 
 
     assert result["name"] == "review-before-write"
     assert result["action"] == "patch"
-    assert result["usage"] == {"input_tokens": 80, "output_tokens": 45}
+    assert result["usage"] == {
+        "input_tokens": 80,
+        "output_tokens": 45,
+        "attempts": 1,
+    }
     assert len(calls) == 1
     assert calls[0]["tools"] == []
     assert len(calls[0]["messages"]) == 1
@@ -116,3 +120,65 @@ async def test_proposer_timeout_is_bounded() -> None:
             evidence_summary="failure",
             task_markdown="task",
         )
+
+
+@pytest.mark.asyncio
+async def test_proposer_retries_schema_failure_once_and_records_attempts() -> None:
+    from mewcode.evolution.fork_skill_proposer_agent import ForkSkillProposerAgent
+    from mewcode.tools.base import StreamEnd, TextDelta
+
+    calls = 0
+
+    class FlakyClient:
+        async def stream(self, conversation, system="", tools=None):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                yield TextDelta("not json")
+            else:
+                yield TextDelta(json.dumps(_candidate_payload()))
+            yield StreamEnd("end_turn", input_tokens=10, output_tokens=20)
+
+    result = await ForkSkillProposerAgent(
+        FlakyClient(), max_attempts=2
+    ).propose(
+        original_skill="",
+        evidence_summary="failure",
+        task_markdown="task",
+    )
+
+    assert calls == 2
+    assert result["usage"] == {
+        "input_tokens": 20,
+        "output_tokens": 40,
+        "attempts": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_proposer_stops_after_bounded_schema_retries() -> None:
+    from mewcode.evolution.fork_skill_proposer_agent import (
+        ForkSkillProposerAgent,
+        ForkSkillProposerOutputError,
+    )
+    from mewcode.tools.base import StreamEnd, TextDelta
+
+    calls = 0
+
+    class InvalidClient:
+        async def stream(self, conversation, system="", tools=None):
+            nonlocal calls
+            calls += 1
+            yield TextDelta("not json")
+            yield StreamEnd("end_turn", input_tokens=3, output_tokens=4)
+
+    with pytest.raises(ForkSkillProposerOutputError, match="2 attempts") as caught:
+        await ForkSkillProposerAgent(InvalidClient(), max_attempts=2).propose(
+            original_skill="",
+            evidence_summary="failure",
+            task_markdown="task",
+        )
+
+    assert calls == 2
+    assert caught.value.attempts == 2
+    assert caught.value.usage == {"input_tokens": 6, "output_tokens": 8}

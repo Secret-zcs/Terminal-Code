@@ -3141,6 +3141,12 @@ mewcode
 
 重跑结果：正式 benchmark 的后续两次单 case 运行仍为 `schema-failed`、`approval-ready=0/1`；一次独立诊断调用成功解析出候选，但不计入 benchmark。结论是 provider 可调用，当前真实候选生成稳定性不足，不能进入用户审批队列。
 
+加入最多 2 次结构化重试后，正式单 case 重跑通过：schema/static/eval 均为 `1/1`，execution eval 为 `3/3`，`approval-ready=1/1`，模型实际使用 `attempts=1`。候选仍只写入临时 sandbox，没有提交审批队列。
+
+扩大到 3 个 OASST1 派生样本后，四层门禁均为 `3/3`，approval-ready 为 `3/3`；尝试次数为 `2、2、1`，累计输入/输出 token 为 `468/4266`。该结果是候选生成和门禁通过率，不等于真实代码仓库修复成功率。
+
+benchmark 现在对成功和失败候选都记录尝试次数与 token；即使候选 schema 合法但 action 不符合 benchmark 约束，也不会丢失调用成本或把重试次数覆盖为 1。
+
 ## 后续真实调用
 
 配置加载验证不等于模型调用验证。真实评测应先使用 `--max-cases 1`，确认 DeepSeek 的 Anthropic 兼容端点可用，再扩大到 3 个或 19 个 case；结果只写入 `.mewcode/evolution/benchmarks/`，并记录模型输出是否通过候选 Skill 的完整门禁。

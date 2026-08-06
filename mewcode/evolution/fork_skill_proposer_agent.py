@@ -20,6 +20,7 @@ from mewcode.tools.base import (
 
 
 FORK_SKILL_PROPOSER_TIMEOUT_SECONDS = 45.0
+FORK_SKILL_PROPOSER_MAX_ATTEMPTS = 2
 _OUTPUT_FIELDS = {
     "schema_version",
     "action",
@@ -88,6 +89,17 @@ Policy boundaries:
 class ForkSkillProposerOutputError(ValueError):
     """Raised when the proposer does not return a safe candidate schema."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        attempts: int = 1,
+        usage: dict[str, int] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+        self.usage = usage or {"input_tokens": 0, "output_tokens": 0}
+
 
 class ForkSkillProposerAgent:
     """Run a tool-free model fork that proposes one candidate Skill."""
@@ -97,9 +109,11 @@ class ForkSkillProposerAgent:
         client: LLMClient,
         *,
         timeout_seconds: float = FORK_SKILL_PROPOSER_TIMEOUT_SECONDS,
+        max_attempts: int = FORK_SKILL_PROPOSER_MAX_ATTEMPTS,
     ) -> None:
         self.client = client
         self.timeout_seconds = max(0.1, float(timeout_seconds))
+        self.max_attempts = max(1, int(max_attempts))
 
     async def propose(
         self,
@@ -109,49 +123,80 @@ class ForkSkillProposerAgent:
         task_markdown: str,
         external_samples: list[str] | None = None,
     ) -> dict[str, Any]:
-        conversation = ConversationManager()
-        conversation.add_user_message(
-            _render_proposer_prompt(
-                original_skill=original_skill,
-                evidence_summary=evidence_summary,
-                task_markdown=task_markdown,
-                external_samples=external_samples or [],
-            )
+        prompt = _render_proposer_prompt(
+            original_skill=original_skill,
+            evidence_summary=evidence_summary,
+            task_markdown=task_markdown,
+            external_samples=external_samples or [],
         )
-        raw_output = ""
-        input_tokens = 0
-        output_tokens = 0
-        try:
-            async with asyncio.timeout(self.timeout_seconds):
-                async for event in self.client.stream(
-                    conversation,
-                    system=FORK_SKILL_PROPOSER_SYSTEM_PROMPT,
-                    tools=[],
-                ):
-                    if isinstance(event, TextDelta):
-                        raw_output += event.text
-                    elif isinstance(event, StreamEnd):
-                        input_tokens += int(event.input_tokens or 0)
-                        output_tokens += int(event.output_tokens or 0)
-                    elif isinstance(
-                        event,
-                        (ToolCallStart, ToolCallDelta, ToolCallComplete),
-                    ):
-                        raise ForkSkillProposerOutputError(
-                            "fork skill proposer attempted a tool call"
-                        )
-        except TimeoutError as exc:
-            raise ForkSkillProposerOutputError(
-                f"fork skill proposer timed out after "
-                f"{self.timeout_seconds:g} seconds"
-            ) from exc
+        total_input_tokens = 0
+        total_output_tokens = 0
 
-        candidate = parse_fork_skill_proposer_output(raw_output)
-        candidate["usage"] = {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-        }
-        return candidate
+        for attempt in range(1, self.max_attempts + 1):
+            conversation = ConversationManager()
+            retry_notice = "" if attempt == 1 else (
+                "\n\n# Structured Output Retry\n"
+                "Your previous response failed candidate JSON parsing. "
+                "Return exactly one raw JSON object, with no prose or Markdown fences."
+            )
+            conversation.add_user_message(prompt + retry_notice)
+            raw_output = ""
+            input_tokens = 0
+            output_tokens = 0
+            try:
+                async with asyncio.timeout(self.timeout_seconds):
+                    async for event in self.client.stream(
+                        conversation,
+                        system=FORK_SKILL_PROPOSER_SYSTEM_PROMPT,
+                        tools=[],
+                    ):
+                        if isinstance(event, TextDelta):
+                            raw_output += event.text
+                        elif isinstance(event, StreamEnd):
+                            input_tokens += int(event.input_tokens or 0)
+                            output_tokens += int(event.output_tokens or 0)
+                        elif isinstance(
+                            event,
+                            (ToolCallStart, ToolCallDelta, ToolCallComplete),
+                        ):
+                            raise ForkSkillProposerOutputError(
+                                "fork skill proposer attempted a tool call"
+                            )
+            except TimeoutError as exc:
+                raise ForkSkillProposerOutputError(
+                    f"fork skill proposer timed out after "
+                    f"{self.timeout_seconds:g} seconds",
+                    attempts=attempt,
+                    usage={
+                        "input_tokens": total_input_tokens + input_tokens,
+                        "output_tokens": total_output_tokens + output_tokens,
+                    },
+                ) from exc
+
+            total_input_tokens += input_tokens
+            total_output_tokens += output_tokens
+            try:
+                candidate = parse_fork_skill_proposer_output(raw_output)
+            except ForkSkillProposerOutputError as exc:
+                if attempt < self.max_attempts:
+                    continue
+                raise ForkSkillProposerOutputError(
+                    f"{exc} after {attempt} attempts",
+                    attempts=attempt,
+                    usage={
+                        "input_tokens": total_input_tokens,
+                        "output_tokens": total_output_tokens,
+                    },
+                ) from exc
+
+            candidate["usage"] = {
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "attempts": attempt,
+            }
+            return candidate
+
+        raise AssertionError("proposer attempt loop exited without a result")
 
 
 async def run_fork_skill_proposer_agent(
@@ -162,11 +207,13 @@ async def run_fork_skill_proposer_agent(
     task_markdown: str,
     external_samples: list[str] | None = None,
     timeout_seconds: float = FORK_SKILL_PROPOSER_TIMEOUT_SECONDS,
+    max_attempts: int = FORK_SKILL_PROPOSER_MAX_ATTEMPTS,
 ) -> dict[str, Any]:
     """Convenience wrapper for callers that already own an LLM client."""
     return await ForkSkillProposerAgent(
         client,
         timeout_seconds=timeout_seconds,
+        max_attempts=max_attempts,
     ).propose(
         original_skill=original_skill,
         evidence_summary=evidence_summary,
