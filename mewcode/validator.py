@@ -55,8 +55,23 @@ class ConfigError(Exception):
     pass
 
 
-def validate_providers(raw_providers: list) -> list[dict]:
-    """校验 providers 列表，返回清洗后的 provider 字典列表。"""
+def validate_providers(
+    raw_providers: list | dict,
+    default_name: str | None = None,
+) -> list[dict]:
+    """校验 providers，并兼容旧版的 ``name: config`` 映射格式。"""
+    if isinstance(raw_providers, dict):
+        entries = []
+        for name, entry in raw_providers.items():
+            if not isinstance(name, str) or not isinstance(entry, dict):
+                raise ConfigError("Provider mapping entries must be named mappings")
+            normalized = dict(entry)
+            normalized.setdefault("name", name)
+            entries.append(normalized)
+        if default_name:
+            entries.sort(key=lambda entry: entry["name"] != default_name)
+        raw_providers = entries
+
     if not isinstance(raw_providers, list) or len(raw_providers) == 0:
         raise ConfigError("At least one provider must be configured")
 
@@ -308,10 +323,10 @@ def validate_config_structure(raw: object) -> dict:
         teammate_mode、enable_coordinator_mode、self_evolution
     """
     if not isinstance(raw, dict) or "providers" not in raw:
-        raise ConfigError("Config must contain a 'providers' list")
+        raise ConfigError("Config must contain a 'providers' list or named mapping")
 
     return {
-        "providers": validate_providers(raw["providers"]),
+        "providers": validate_providers(raw["providers"], raw.get("default")),
         "permission_mode": validate_permission_mode(raw.get("permission_mode", "default")),
         "mcp_servers": validate_mcp_servers(raw.get("mcp_servers")),
         "hooks": validate_hooks(raw.get("hooks")),

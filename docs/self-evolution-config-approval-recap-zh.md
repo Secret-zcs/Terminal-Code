@@ -3108,3 +3108,29 @@ headless 测试覆盖了两种情况：正常顺序为 `proposer -> complete -> 
 新增真实 provider benchmark runner 后，模型生成的测试候选只写入临时目录。Runner 不调用 `submit_skill_approval_request()`、`resolve_skill_approval_request()` 或 `promote()`，因此 benchmark 的 `approval-ready` 只表示通过全部前置门禁，不会产生真实 pending request，也不会写正式 Skill。
 
 当前机器未配置 provider，真实模型运行被配置校验阻断；Fake Client 的测试结果只用于验证 runner。真实运行仍必须显式配置 provider/API key，并通过单独脚本启动，不会因为 `self_evolution.enabled=true` 自动消费整个数据集或产生模型费用。
+
+# 2026-08-06 配置文件与 API Provider 接入留档
+
+## 本次修改
+
+新增项目本地配置 `.mewcode/config.local.yaml`，用于通过 Anthropic 协议接入 `deepseek-v4-flash`。自进化默认开启，Skill 审批模式为 `manual`；API 密钥使用 `${DEEPSEEK_API_KEY}` 占位符，真实密钥不写入文件、不提交 Git。
+
+修复 `ProviderConfig.resolve_api_key()`：配置中的环境变量占位符现在会被解析，缺失的占位符会按未配置密钥处理，避免把 `${DEEPSEEK_API_KEY}` 当作真实密钥发送给 provider。
+
+同时兼容旧版 `providers: {name: {...}}` 配置格式，并遵循 `default` 字段将默认 provider 放到第一位。这样用户已有的 `~/.mewcode/config.yaml` 不会阻断项目级配置加载。
+
+## 验证
+
+- API key 占位符存在时可解析为环境变量值：通过。
+- API key 占位符缺失时解析为空：通过。
+- 旧版命名映射可归一化，`default` provider 排在首位：通过。
+- 当前项目配置可加载，Anthropic 协议和 `deepseek-v4-flash` 被正确识别：通过。
+
+## 使用
+
+```bash
+export DEEPSEEK_API_KEY="你的真实密钥"
+mewcode
+```
+
+关闭自进化或调整审批模式时，编辑 `.mewcode/config.local.yaml` 的 `self_evolution` 段即可。该文件属于本机运行配置，禁止提交真实密钥。

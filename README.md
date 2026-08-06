@@ -137,6 +137,19 @@ providers:
 
 本地项目配置、会话、checkpoint、evolution 记录等默认写入 `.mewcode/`。该目录已在 `.gitignore` 中忽略。
 
+推荐把项目私有配置写入 `.mewcode/config.local.yaml`，并用环境变量提供密钥。例如，使用 DeepSeek 的 Anthropic 兼容协议：
+
+```yaml
+providers:
+  - name: deepseek-v4-flash
+    protocol: anthropic
+    base_url: https://api.deepseek.com/anthropic
+    model: deepseek-v4-flash
+    api_key: ${DEEPSEEK_API_KEY}
+```
+
+然后在启动 MewCode 前执行 `export DEEPSEEK_API_KEY="你的密钥"`。`config.local.yaml` 已被忽略，不会进入 Git。旧版 `providers: {name: {...}}` 配置也会被兼容读取，并将 `default` 指定的 provider 放在首位。
+
 `self_evolution.enabled` 是用户侧唯一的自进化开关；`skill_approval_mode` 支持 `manual` 和 `deferred`。两种模式都要求用户审批 candidate skill，不存在自动 promote。
 
 ---

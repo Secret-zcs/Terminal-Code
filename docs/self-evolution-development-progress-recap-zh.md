@@ -5714,3 +5714,13 @@ PYTHONPATH=. pytest tests/test_proposer_benchmark.py tests/test_fork_skill_propo
 真实运行检查：当前机器 `load_config()` 返回 `At least one provider must be configured`，所以没有真实模型结果。本次没有把 Fake Client 的 `1/1 approval-ready` 当作模型效果；该结果仅验证评测器能把候选正确送入四层 gate。复现与配置方法见 `docs/fork-skill-proposer-real-benchmark-guide-zh.md`。
 
 下一步：配置一个真实 provider 后先运行 1 至 3 个 case，记录 schema pass、3/3 execution eval、token 和耗时；随后再扩展到 19 个 case，并增加真实代码仓库任务的 baseline/evolved 双跑。
+
+## 124. 最新推进记录：Anthropic 兼容 Provider 配置
+
+日期：2026-08-06
+
+本次为 DeepSeek Anthropic 兼容协议增加了项目私有配置示例 `.mewcode/config.local.yaml`，模型为 `deepseek-v4-flash`。密钥只通过 `${DEEPSEEK_API_KEY}` 引用，文件被 `.gitignore` 忽略，避免把本地凭据提交到仓库。
+
+同时修复 provider API key 环境变量解析，并兼容旧版 `providers: {name: {...}}` 配置格式。旧格式中的 `default` provider 会被放到列表首位，以适配当前 CLI/TUI 使用 `config.providers[0]` 的选择逻辑。
+
+验证结果：配置单测 4 项通过；在 `DEEPSEEK_API_KEY=test-secret` 下成功加载 `deepseek-v4-flash`、`anthropic`、自进化开启和 `manual` 审批模式。关联 MCP 测试仍有既有的映射格式不兼容和缺少可选 `mcp` 包问题，未归因于本次改动。
