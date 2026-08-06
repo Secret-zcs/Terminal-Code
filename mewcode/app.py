@@ -64,6 +64,9 @@ from mewcode.evolution.fork_reviewer_agent import (
     persist_fork_reviewer_opinion,
     run_fork_reviewer_agent,
 )
+from mewcode.evolution.fork_skill_proposer_flow import (
+    run_fork_skill_proposer_for_usage,
+)
 from mewcode.hooks import HookContext, HookEngine, load_hooks
 from mewcode.conversation import ConversationManager, Message
 from mewcode.mcp import MCPManager
@@ -2225,6 +2228,18 @@ class MewCodeApp(App):
         project_root: str,
         review_run_id: str,
     ) -> None:
+        proposer_result: dict = {}
+        if self.client is not None:
+            try:
+                proposer_result = await run_fork_skill_proposer_for_usage(
+                    self.client,
+                    project_root,
+                    review_run_id=review_run_id,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.debug("Self-evolution fork Skill proposer failed: %s", exc)
         try:
             result = await asyncio.to_thread(
                 complete_fork_reviewer_run,
@@ -2237,6 +2252,8 @@ class MewCodeApp(App):
         except Exception as exc:
             self._show_self_evolution_review_failure(exc)
             return
+        if proposer_result:
+            result["fork_skill_proposer"] = proposer_result
         await self._run_fork_agent_review(project_root, result)
         self._handle_self_evolution_review_result(result, project_root)
 

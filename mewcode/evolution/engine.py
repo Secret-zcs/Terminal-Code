@@ -442,7 +442,7 @@ class EvolutionEngine:
             source="skill-usage",
             metadata={"skill": clean_name, "summaries": summaries},
         )
-        return self.propose_skill_patch(
+        proposal = self.propose_skill_patch(
             name=clean_name,
             description=existing.description,
             body=body,
@@ -452,6 +452,13 @@ class EvolutionEngine:
             rationale="Usage feedback generated a conservative skill patch proposal.",
             evidence_ids=[evidence.id],
         )
+        manifest = self._load_candidate_manifest(proposal.id)
+        manifest["generation_source"] = "deterministic-usage-patch"
+        self.candidate_manifest_path(proposal.id).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return proposal
 
     def validate(self, proposal: EvolutionProposal) -> EvolutionValidation:
         errors: list[str] = []
@@ -2061,11 +2068,52 @@ class EvolutionEngine:
             "approval_requested_at": existing.get("approval_requested_at", 0.0),
             "approval_blocked_reason": existing.get("approval_blocked_reason", ""),
             "approval_blocked_at": existing.get("approval_blocked_at", 0.0),
+            "generation_source": existing.get("generation_source", ""),
+            "proposer_review_run_id": existing.get("proposer_review_run_id", ""),
+            "proposer_output": existing.get("proposer_output", ""),
+            "proposer_usage": existing.get("proposer_usage", {}),
         }
         self.candidate_manifest_path(proposal.id).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+
+    def record_candidate_generation_metadata(
+        self,
+        proposal_id: str,
+        *,
+        source: str,
+        review_run_id: str,
+        proposer_output: dict,
+    ) -> Path:
+        proposal = self.store.get_proposal(proposal_id)
+        if proposal is None or proposal.target != "skill":
+            raise ValueError(f"skill proposal {proposal_id} not found")
+        manifest = self._load_candidate_manifest(proposal_id)
+        if not manifest:
+            raise ValueError(f"candidate manifest {proposal_id} not found")
+        candidate_dir = self.candidate_dir(proposal_id).resolve()
+        root = self.project_root.resolve()
+        if not candidate_dir.is_relative_to(root):
+            raise ValueError("candidate directory escapes project root")
+        output_path = candidate_dir / "proposer_output.json"
+        output_path.write_text(
+            json.dumps(proposer_output, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        usage = proposer_output.get("usage", {})
+        manifest["generation_source"] = source.strip()
+        manifest["proposer_review_run_id"] = review_run_id.strip()
+        manifest["proposer_output"] = str(output_path)
+        manifest["proposer_usage"] = {
+            "input_tokens": int(usage.get("input_tokens", 0) or 0),
+            "output_tokens": int(usage.get("output_tokens", 0) or 0),
+        }
+        self.candidate_manifest_path(proposal_id).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return output_path
 
     def _update_candidate_manifest(
         self,

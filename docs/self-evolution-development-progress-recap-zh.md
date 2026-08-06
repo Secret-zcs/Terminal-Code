@@ -5553,3 +5553,61 @@ git diff --check
 ```
 
 当前边界：Proposer 已可独立调用，但尚未接入自动 review 主流程，因此现阶段运行时仍由确定性 usage patch 生成候选。下一逻辑单元会把 Proposer 输出交给 `EvolutionEngine.propose_skill_patch()`，先写 candidate sandbox，再进入已有 static eval、三轮 execution eval、Reviewer 和审批门禁；模型失败时保留确定性 fallback。
+
+## 120. 最新推进记录：Fork Proposer 接入 TUI 自进化闭环
+
+日期：2026-08-06
+
+本次新增 `mewcode/evolution/fork_skill_proposer_flow.py`，并把 TUI 后台 review 顺序调整为：
+
+```text
+负向 Skill usage
+  -> Fork Skill Proposer Agent
+  -> candidate sandbox
+  -> deterministic eval case gate
+  -> 3 轮 execution eval
+  -> Fork Reviewer Agent
+  -> 用户审批
+  -> 正式 Skill
+```
+
+关键实现：
+
+- Proposer 最多处理一轮中的 3 个 Skill，避免后台模型调用无上限增长。
+- patch 必须保持原 Skill 的 name、mode、context 和 allowedTools，模型不能借自进化扩大工具权限或改变执行方式。
+- 模型输出只写 `.mewcode/evolution/candidates/<proposal-id>/`，正式 `.mewcode/skills/` 在审批前保持不变。
+- candidate manifest 新增 `generation_source`、`proposer_review_run_id`、`proposer_output` 和 `proposer_usage`。
+- review run 新增 `skill_proposer.json` 与 `skill_proposer.md`；模型输出、token 用量和失败原因均可审计。
+- complete 会识别 `generation_source=fork-skill-proposer` 的候选并交给现有 eval/execution eval 流程，不再同时生成重复的确定性 patch。
+- Proposer 超时、schema 不合法、目标名称不匹配或权限范围变化时不落模型候选，随后由原 deterministic usage patch fallback。
+- TUI 顺序已锁定为 `Proposer -> complete -> Reviewer -> approval card`。
+
+TDD 与验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_fork_skill_proposer_flow.py -q
+2 failed  # 红灯：协调器模块不存在
+
+PYTHONPATH=. pytest tests/test_fork_skill_proposer_flow.py -q
+1 failed, 1 passed  # 首次实现后确定性 fallback 缺 generation_source
+
+PYTHONPATH=. pytest tests/test_evolution.py -k background_review_persists_fork_agent_opinion_before_approval -q
+1 failed  # 红灯：TUI 尚未调用 Fork Skill Proposer
+
+PYTHONPATH=. pytest tests/test_fork_skill_proposer_flow.py -q
+2 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py -k 'background_review_persists_fork_agent_opinion_before_approval or background_review_completes_full_skill_loop' -q
+2 passed
+
+PYTHONPATH=. pytest tests/test_fork_skill_proposer_agent.py tests/test_fork_skill_proposer_flow.py tests/test_evolution.py tests/test_self_evolution_dialog.py -q
+170 passed
+
+python3 -m py_compile mewcode/app.py mewcode/evolution/fork_skill_proposer_flow.py mewcode/evolution/engine.py mewcode/evolution/auto_review.py
+通过
+
+git diff --check
+通过
+```
+
+当前边界：交互式 TUI 已由真正的 Fork Proposer 负责候选正文生成；无模型候选时确定性 patch 只作为可审计 fallback。`mewcode -p` 的 headless 入口仍走同步 deterministic review，下一逻辑单元需把相同的 Proposer/Reviewer 顺序接入该入口。公开真实对话数据集下载、脱敏派生和前后对比评测尚未开始实现。

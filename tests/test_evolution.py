@@ -4099,14 +4099,35 @@ class TestEvolutionEngine:
 
         class FakeForkReviewerClient:
             async def stream(self, conversation, system="", tools=None):
-                yield TextDelta(json.dumps({
-                    "schema_version": 1,
-                    "recommendation": "ready-for-user-review",
-                    "summary": "独立模型确认三轮执行评测通过。",
-                    "risks": ["仅覆盖当前任务族"],
-                    "evidence": ["execution eval 3/3 passed"],
-                    "recommended_actions": ["由用户确认适用范围"],
-                }, ensure_ascii=False))
+                if "skill proposer" in system.lower():
+                    payload = {
+                        "schema_version": 1,
+                        "action": "patch",
+                        "name": "review-loop",
+                        "description": "Review flow with explicit verification",
+                        "mode": "inline",
+                        "context": "recent",
+                        "allowedTools": [],
+                        "body": (
+                            "# Review\n\n"
+                            "## Usage Feedback Patch Notes\n\n"
+                            "- 错误地跳过复盘文档。\n"
+                            "- 用户纠正：遗漏验证。\n\n"
+                            "## Required Patch Behavior\n\n"
+                            "更新复盘文档后运行验证并展示证据。"
+                        ),
+                        "rationale": "两次真实反馈均指出流程缺少复盘和验证。",
+                    }
+                else:
+                    payload = {
+                        "schema_version": 1,
+                        "recommendation": "ready-for-user-review",
+                        "summary": "独立模型确认三轮执行评测通过。",
+                        "risks": ["仅覆盖当前任务族"],
+                        "evidence": ["execution eval 3/3 passed"],
+                        "recommended_actions": ["由用户确认适用范围"],
+                    }
+                yield TextDelta(json.dumps(payload, ensure_ascii=False))
                 yield StreamEnd(
                     "end_turn",
                     input_tokens=100,
@@ -4131,6 +4152,12 @@ class TestEvolutionEngine:
         requests = completed_engine.store.load_skill_approval_requests()
         assert len(proposals) == 1
         assert len(requests) == 1
+        manifest = json.loads(
+            completed_engine.candidate_manifest_path(proposals[0].id).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert manifest["generation_source"] == "fork-skill-proposer"
         assert opened == [requests[0].id]
         assert skill_path.read_text(encoding="utf-8") == original_skill
         eval_case_lines = completed_engine.eval_cases_path("review-loop").read_text(
@@ -4422,7 +4449,21 @@ class TestEvolutionEngine:
         def fake_persist(*_args, **_kwargs):
             order.append("persist")
 
+        async def fake_skill_proposer(*_args, **_kwargs):
+            order.append("skill-proposer")
+            return {
+                "status": "generated",
+                "generated_candidates": ["proposal_1"],
+                "failures": [],
+                "outputs": [],
+            }
+
         monkeypatch.setattr(app_module, "complete_fork_reviewer_run", fake_complete)
+        monkeypatch.setattr(
+            app_module,
+            "run_fork_skill_proposer_for_usage",
+            fake_skill_proposer,
+        )
         monkeypatch.setattr(app_module, "run_fork_reviewer_agent", fake_agent_review)
         monkeypatch.setattr(app_module, "persist_fork_reviewer_opinion", fake_persist)
         monkeypatch.setattr(
@@ -4449,6 +4490,7 @@ class TestEvolutionEngine:
         await asyncio.wait_for(task, timeout=5.0)
 
         assert order == [
+            "skill-proposer",
             "complete",
             "agent-review",
             "persist",

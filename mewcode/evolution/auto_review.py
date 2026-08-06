@@ -372,6 +372,12 @@ def _review_enabled_skill_candidates(
                 "reason": f"status is {proposal.status}",
             })
             continue
+        manifest = engine._load_candidate_manifest(proposal.id)
+        if (
+            manifest.get("generation_source") == "fork-skill-proposer"
+            and manifest.get("execution_eval_status") != "passed"
+        ):
+            continue
         if engine.store.get_pending_skill_approval_request(proposal.id) is not None:
             continue
         try:
@@ -385,16 +391,21 @@ def _review_enabled_skill_candidates(
             continue
         requests.append(request)
 
-    generated_candidates, generated_candidate_reviews = (
-        _generate_usage_patch_candidates(
-            engine,
-            suppressed_skills=(
-                _trusted_auto_managed_skill_names(engine)
-                if approval_mode == "trusted-auto"
-                else set()
-            ),
-        )
+    generated_candidates = _pending_fork_proposer_candidates(engine)
+    generated_candidate_reviews = [
+        engine.review_eval_case_suggestions(proposal_id)
+        for proposal_id in generated_candidates
+    ]
+    fallback_candidates, fallback_reviews = _generate_usage_patch_candidates(
+        engine,
+        suppressed_skills=(
+            _trusted_auto_managed_skill_names(engine)
+            if approval_mode == "trusted-auto"
+            else set()
+        ),
     )
+    generated_candidates.extend(fallback_candidates)
+    generated_candidate_reviews.extend(fallback_reviews)
     generated_eval_cases = _materialize_safe_eval_suggestions(
         engine,
         generated_candidate_reviews,
@@ -956,6 +967,22 @@ def _generate_usage_patch_candidates(
         generated.append(proposal.id)
         reviews.append(engine.review_eval_case_suggestions(proposal.id))
     return generated, reviews
+
+
+def _pending_fork_proposer_candidates(engine: EvolutionEngine) -> list[str]:
+    proposal_ids: list[str] = []
+    for proposal in engine.store.load_proposals():
+        if proposal.target != "skill" or proposal.status != "proposed":
+            continue
+        manifest = engine._load_candidate_manifest(proposal.id)
+        if manifest.get("generation_source") != "fork-skill-proposer":
+            continue
+        if manifest.get("approval_status") == "pending":
+            continue
+        if manifest.get("execution_eval_status") == "passed":
+            continue
+        proposal_ids.append(proposal.id)
+    return proposal_ids
 
 
 def _has_open_patch_candidate(engine: EvolutionEngine, skill_name: str) -> bool:

@@ -3068,3 +3068,19 @@ PYTHONPATH=. pytest tests/test_self_evolution_dialog.py tests/test_evolution.py 
 审批链路没有放宽：Proposer 输出只是未落地的候选数据。后续接入主流程时，必须先由 Engine 写入 `.mewcode/evolution/candidates/<proposal-id>/`，依次通过 schema/static policy、eval case、至少三轮 execution eval 和独立 Reviewer；`manual` 模式最终仍由用户批准后才能写入 `.mewcode/skills/`。
 
 当前实现已经验证：隔离单消息上下文、`tools=[]`、严格字段集合、非法名称拒绝、危险下载执行命令拒绝和 45 秒默认超时。目标测试 `tests/test_fork_skill_proposer_agent.py` 为 `4 passed`，编译和 `git diff --check` 通过。当前尚未修改 approval mode 语义，也尚未把模型输出接入自动 candidate 生成。
+
+## Fork Proposer 接入后的审批语义
+
+日期：2026-08-06
+
+TUI 后台自进化现在会先调用 Fork Proposer 生成候选，再由确定性门禁评测，最后调用独立 Reviewer。Proposer 和 Reviewer 是两个独立单轮模型角色，均不继承主对话历史且固定 `tools=[]`；前者只能提出候选，后者只能给出复核意见。
+
+该接入没有放宽审批：
+
+- `manual` 模式下，模型候选通过 3 轮 execution eval 后只创建 pending request，用户批准前正式 Skill 不变。
+- `deferred` 继续排队等待用户处理。
+- `trusted-auto` 仍受已有 same-pass、完整评测和失败回滚策略约束；本次没有把单次模型 verdict 变成授权。
+- Proposer 不得改变已有 Skill 的 `allowedTools`、`mode` 或 `context`，也不得改名。
+- 模型失败时 deterministic fallback 会标记 `generation_source=deterministic-usage-patch`；模型成功时标记 `generation_source=fork-skill-proposer`，用户和审计报告可以区分来源。
+
+审计产物包括 candidate 内的 `proposer_output.json`、manifest 的 token usage，以及 review run 的 `skill_proposer.json`/`skill_proposer.md`。相关回归共 `170 passed`。当前 TUI 已接入，headless `mewcode -p` 尚待下一阶段接入。
