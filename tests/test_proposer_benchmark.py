@@ -213,3 +213,36 @@ async def test_proposer_benchmark_accepts_negated_forbidden_behavior(
     )
 
     assert result["cases"][0]["status"] == "approval-ready"
+
+
+@pytest.mark.asyncio
+async def test_proposer_benchmark_records_candidate_coverage_before_eval_failure(
+    tmp_path: Path,
+) -> None:
+    from mewcode.evolution.proposer_benchmark import run_proposer_benchmark
+
+    class PartialClient:
+        async def stream(self, conversation, system="", tools=None):
+            yield TextDelta(json.dumps({
+                "schema_version": 1,
+                "action": "create",
+                "name": "partial-follow-up",
+                "description": "Incomplete follow-up flow.",
+                "mode": "inline",
+                "context": "recent",
+                "allowedTools": [],
+                "body": "阅读相关文件。记录用户反馈。回归测试。",
+                "rationale": "Deliberately omits one required behavior.",
+            }, ensure_ascii=False))
+            yield StreamEnd("end_turn", input_tokens=3, output_tokens=4)
+
+    result = await run_proposer_benchmark(
+        PartialClient(),
+        "benchmarks/oasst1_derived_cases.jsonl",
+        max_cases=1,
+        workspace_root=tmp_path,
+    )
+
+    case = result["cases"][0]
+    assert case["status"] == "eval-failed"
+    assert case["candidate"]["missing_required"] == ["验证报告"]

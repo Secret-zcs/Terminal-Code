@@ -40,6 +40,8 @@ PYTHONPATH=. python3 scripts/run_fork_skill_proposer_benchmark.py \
 
 自然语言 benchmark 使用 `forbidden_match_mode=non_negated`，允许“禁止跳过测试”这类安全否定表达，但仍拒绝“可以跳过测试”。该模式会写入 execution eval 的 task、input、result 和报告；生产与用户手工 eval case 默认保持 `literal`，不会自动放宽。
 
+除 OASST1 单任务族外，可使用 `benchmarks/self_evolution_seed_cases.jsonl` 运行 6 个不同任务族。Benchmark 在 schema 通过后立即记录 candidate coverage，因此后续 gate 失败不会丢失必需项和禁止项诊断。
+
 ## 解释边界
 
 Execution eval 当前使用项目已有的 deterministic sandbox runner，验证 Candidate Skill 是否覆盖要求并产生 3/3 产物；它仍不等于真实 Agent 在代码仓库中修复 issue。后续更强评测应加入隔离仓库、真实测试命令和 baseline/evolved Agent 双跑。

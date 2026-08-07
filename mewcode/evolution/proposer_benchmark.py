@@ -92,6 +92,13 @@ async def run_proposer_benchmark(
                 )
                 _validate_create_candidate(candidate)
                 result["schema_passed"] = True
+                result["candidate"] = score_skill_text(
+                    case,
+                    candidate["body"],
+                    forbidden_match_mode=(
+                        PROPOSER_BENCHMARK_FORBIDDEN_MATCH_MODE
+                    ),
+                )
                 engine = EvolutionEngine(case_root)
                 proposal = engine.propose_skill(
                     name=candidate["name"],
@@ -143,13 +150,6 @@ async def run_proposer_benchmark(
                     ),
                     "runner": report.get("runner", ""),
                 }
-                result["candidate"] = score_skill_text(
-                    case,
-                    candidate["body"],
-                    forbidden_match_mode=(
-                        PROPOSER_BENCHMARK_FORBIDDEN_MATCH_MODE
-                    ),
-                )
                 if not execution_ok:
                     result["status"] = "execution-eval-failed"
                     continue

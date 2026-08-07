@@ -44,6 +44,12 @@ schema 失败样本在两次尝试后仍生成了非法 Skill 名称。两个 ev
 
 修复后分别重跑历史两个 eval-failed case，结果均为 schema/static/eval/execution `1/1`、approval-ready `1/1`、attempts `1`。若用这两次定向复测替换历史语义误判，有效状态为 `18/19 approval-ready`、`1/19 schema-failed`。该数字由多次运行合并，不是一次完整 19-case 单跑通过率。
 
+## 多任务族评测
+
+使用 `benchmarks/self_evolution_seed_cases.jsonl` 对 6 个不同任务族运行真实 Fork Proposer：SWE-bench issue 修复、仓库补丁、AgentBench 工具恢复、rewind 安全、MBPP 测试生成和 HumanEval 代码生成。结果为 schema/static `6/6`、eval/execution/approval-ready `5/6`、provider failure `0/6`；全部候选一次生成成功，输入 token `1108`、输出 token `6570`。
+
+唯一失败来自 `long_horizon_agent_safety`：候选未命中必需短语“不覆盖用户修改”，因此停在 eval gate。该结果保持为失败，不通过重复抽样提高分数。Benchmark 随后调整为在 schema 通过后立即保存 candidate coverage，使 static/eval/execution 失败也能展示 required hits、missing required 和 forbidden hits。
+
 ## 结论与边界
 
 有限结构化重试明显改善了 DeepSeek 输出的可解析性；加入样本间隔后，provider 网络失败从 `11/12` 降为 `0/12`。合并有效通过率为 `84.21%`，但 19 个派生 case 使用相同任务族和关键词，execution runner 也是 deterministic sandbox，因此结果不等于真实代码修复成功率。下一阶段应增加多任务族、隔离真实仓库测试和 baseline/evolved Agent 双跑。
