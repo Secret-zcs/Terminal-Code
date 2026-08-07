@@ -35,6 +35,10 @@ from mewcode.evolution.models import (
     SkillApprovalStatus,
     new_evolution_id,
 )
+from mewcode.evolution.eval_matching import (
+    VALID_FORBIDDEN_MATCH_MODES,
+    contains_forbidden_term,
+)
 from mewcode.evolution.store import EvolutionStore
 from mewcode.skills.parser import (
     VALID_CONTEXTS,
@@ -518,6 +522,7 @@ class EvolutionEngine:
         scripted_agent_turns: list[dict] | None = None,
         expected_files: dict[str, str] | None = None,
         execution_runner: str = "deterministic_replay",
+        forbidden_match_mode: str = "literal",
         case_id: str | None = None,
     ) -> str:
         proposal = self.store.get_proposal(proposal_id)
@@ -547,6 +552,12 @@ class EvolutionEngine:
                 "execution_runner must be one of "
                 f"{sorted(SUPPORTED_EXECUTION_RUNNERS)}"
             )
+        match_mode = forbidden_match_mode.strip() or "literal"
+        if match_mode not in VALID_FORBIDDEN_MATCH_MODES:
+            raise ValueError(
+                "forbidden_match_mode must be one of "
+                f"{sorted(VALID_FORBIDDEN_MATCH_MODES)}"
+            )
 
         eval_case = {
             "id": case_id or new_evolution_id("case"),
@@ -555,6 +566,7 @@ class EvolutionEngine:
             "task": clean_task,
             "must_contain": required,
             "must_not_contain": forbidden,
+            "forbidden_match_mode": match_mode,
             "execution_runner": runner,
             "created_at": time.time(),
         }
@@ -1011,6 +1023,10 @@ class EvolutionEngine:
                 "errors": base_result["errors"],
                 "must_contain": eval_case["must_contain"],
                 "must_not_contain": eval_case.get("must_not_contain", []),
+                "forbidden_match_mode": eval_case.get(
+                    "forbidden_match_mode",
+                    "literal",
+                ),
                 "sandbox_dir": str(round_dir),
                 "artifacts": {
                     "task": str(round_dir / "task.md"),
@@ -2334,6 +2350,8 @@ class EvolutionEngine:
             "## Must not contain",
             "",
             *(f"- {term}" for term in eval_case.get("must_not_contain", [])),
+            "",
+            f"Forbidden match mode: {eval_case.get('forbidden_match_mode', 'literal')}",
         ]
         (round_dir / "task.md").write_text(
             "\n".join(task_lines).rstrip() + "\n",
@@ -2363,6 +2381,7 @@ class EvolutionEngine:
             "checks": {
                 "must_contain": round_record["must_contain"],
                 "must_not_contain": round_record["must_not_contain"],
+                "forbidden_match_mode": round_record["forbidden_match_mode"],
             },
             "fork_agent": fork_agent,
         }
@@ -2409,6 +2428,10 @@ class EvolutionEngine:
             "rendered_prompt": rendered,
             "must_contain": eval_case["must_contain"],
             "must_not_contain": eval_case.get("must_not_contain", []),
+            "forbidden_match_mode": eval_case.get(
+                "forbidden_match_mode",
+                "literal",
+            ),
             "workspace_files": eval_case.get("workspace_files", {}),
             "scripted_tool_calls": eval_case.get("scripted_tool_calls", []),
             "scripted_agent_turns": eval_case.get("scripted_agent_turns", []),
@@ -2516,6 +2539,7 @@ class EvolutionEngine:
             f"- Status: `{round_record['status']}`",
             f"- Required terms: {', '.join(round_record['must_contain'])}",
             f"- Forbidden terms: {', '.join(round_record['must_not_contain']) or '(none)'}",
+            f"- Forbidden match mode: {round_record['forbidden_match_mode']}",
             "",
             "## Scripted Tool Calls",
             "",
@@ -2934,6 +2958,7 @@ class EvolutionEngine:
                 f"- Canary Skill: `{round_.get('artifacts', {}).get('canary_skill', '(none)')}`",
                 f"- Must contain: {', '.join(round_['must_contain'])}",
                 f"- Must not contain: {', '.join(round_['must_not_contain']) or '(none)'}",
+                f"- Forbidden match mode: {round_.get('forbidden_match_mode', 'literal')}",
                 f"- Result: {round_['execution_summary']}",
             ])
             if round_["errors"]:
@@ -2984,6 +3009,12 @@ class EvolutionEngine:
             isinstance(term, str) and term.strip() for term in forbidden
         ):
             return f"eval case {data.get('id', line_no)} has invalid must_not_contain"
+        match_mode = data.get("forbidden_match_mode", "literal")
+        if match_mode not in VALID_FORBIDDEN_MATCH_MODES:
+            return (
+                f"eval case {data.get('id', line_no)} has invalid "
+                "forbidden_match_mode"
+            )
         runner = data.get("execution_runner", "deterministic_replay")
         if runner not in SUPPORTED_EXECUTION_RUNNERS:
             return (
@@ -3000,7 +3031,11 @@ class EvolutionEngine:
             if term.lower() not in text:
                 errors.append(f"must contain '{term}'")
         for term in eval_case.get("must_not_contain", []):
-            if term.lower() in text:
+            if contains_forbidden_term(
+                text,
+                term,
+                mode=eval_case.get("forbidden_match_mode", "literal"),
+            ):
                 errors.append(f"must not contain '{term}'")
         return {
             "id": eval_case["id"],

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import time
@@ -15,7 +16,14 @@ from mewcode.evolution.benchmark import (
     score_skill_text,
 )
 from mewcode.evolution.engine import EvolutionEngine
-from mewcode.evolution.fork_skill_proposer_agent import ForkSkillProposerAgent
+from mewcode.evolution.fork_skill_proposer_agent import (
+    PROVIDER_FAILURE_REASONS,
+    ForkSkillProposerAgent,
+    classify_fork_skill_proposer_error,
+)
+
+
+PROPOSER_BENCHMARK_FORBIDDEN_MATCH_MODE = "non_negated"
 
 
 async def run_proposer_benchmark(
@@ -23,10 +31,15 @@ async def run_proposer_benchmark(
     dataset_path: str | Path,
     *,
     max_cases: int = 10,
+    case_offset: int = 0,
+    inter_case_delay: float = 0.0,
     workspace_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run model-generated candidates through the same gates used in production."""
-    cases = load_benchmark_cases(dataset_path)[: max(0, int(max_cases))]
+    offset = max(0, int(case_offset))
+    cases = load_benchmark_cases(dataset_path)[offset:]
+    cases = cases[: max(0, int(max_cases))]
+    delay = max(0.0, float(inter_case_delay))
     own_workspace = workspace_root is None
     temporary = (
         tempfile.TemporaryDirectory(prefix="mewcode-proposer-benchmark-")
@@ -39,10 +52,17 @@ async def run_proposer_benchmark(
     case_results: list[dict[str, Any]] = []
     usage = {"input_tokens": 0, "output_tokens": 0}
     try:
-        for index, case in enumerate(cases, 1):
-            case_root = root / f"case_{index:04d}"
+        for local_index, case in enumerate(cases):
+            if local_index and delay:
+                await asyncio.sleep(delay)
+            dataset_index = offset + local_index + 1
+            case_root = root / f"case_{dataset_index:04d}"
             case_root.mkdir(parents=True, exist_ok=True)
-            baseline = score_skill_text(case, DEFAULT_BASELINE_SKILL)
+            baseline = score_skill_text(
+                case,
+                DEFAULT_BASELINE_SKILL,
+                forbidden_match_mode=PROPOSER_BENCHMARK_FORBIDDEN_MATCH_MODE,
+            )
             started = time.perf_counter()
             result: dict[str, Any] = {
                 "id": case.id,
@@ -51,6 +71,7 @@ async def run_proposer_benchmark(
                 "baseline": baseline,
                 "status": "schema-failed",
                 "proposer_attempts": 0,
+                "retry_reasons": [],
                 "elapsed_seconds": 0.0,
             }
             try:
@@ -65,6 +86,9 @@ async def run_proposer_benchmark(
                 _add_usage(usage, candidate.get("usage", {}))
                 result["proposer_attempts"] = int(
                     candidate.get("usage", {}).get("attempts", 1) or 1
+                )
+                result["retry_reasons"] = list(
+                    candidate.get("diagnostics", {}).get("retry_reasons", [])
                 )
                 _validate_create_candidate(candidate)
                 result["schema_passed"] = True
@@ -95,6 +119,9 @@ async def run_proposer_benchmark(
                         ),
                         must_contain=list(case.required_terms),
                         must_not_contain=list(case.forbidden_terms),
+                        forbidden_match_mode=(
+                            PROPOSER_BENCHMARK_FORBIDDEN_MATCH_MODE
+                        ),
                     )
                 eval_ok, eval_message = engine.evaluate(proposal.id)
                 result["eval_passed"] = eval_ok
@@ -119,19 +146,30 @@ async def run_proposer_benchmark(
                 result["candidate"] = score_skill_text(
                     case,
                     candidate["body"],
+                    forbidden_match_mode=(
+                        PROPOSER_BENCHMARK_FORBIDDEN_MATCH_MODE
+                    ),
                 )
                 if not execution_ok:
                     result["status"] = "execution-eval-failed"
                     continue
                 result["status"] = "approval-ready"
             except Exception as exc:
-                if not result.get("schema_passed"):
+                error_category = classify_fork_skill_proposer_error(exc)
+                if error_category in PROVIDER_FAILURE_REASONS:
+                    result["schema_passed"] = False
+                    result["status"] = "provider-failed"
+                elif not result.get("schema_passed"):
                     result["schema_passed"] = False
                     result["status"] = "schema-failed"
                 else:
                     result["status"] = "runner-failed"
                 result["error_type"] = type(exc).__name__
                 result["error"] = str(exc)[:4000]
+                result["error_category"] = error_category
+                result["retry_reasons"] = list(
+                    getattr(exc, "retry_reasons", []) or []
+                )
                 if not result["proposer_attempts"]:
                     result["proposer_attempts"] = int(
                         getattr(exc, "attempts", 1) or 1
@@ -167,12 +205,24 @@ async def run_proposer_benchmark(
         "baseline_passed": sum(
             1 for item in case_results if item.get("baseline", {}).get("passed")
         ),
+        "provider_failed": sum(
+            1 for item in case_results if item.get("status") == "provider-failed"
+        ),
     }
+    failure_categories = _count_case_values(case_results, "error_category")
+    retry_reasons = _count_list_values(case_results, "retry_reasons")
     return {
         "dataset": str(dataset_path),
+        "case_offset": offset,
+        "inter_case_delay": delay,
+        "forbidden_match_mode": PROPOSER_BENCHMARK_FORBIDDEN_MATCH_MODE,
         "method": "real_fork_skill_proposer_then_deterministic_gates",
         "summary": summary,
         "usage": usage,
+        "diagnostics": {
+            "failure_categories": failure_categories,
+            "retry_reasons": retry_reasons,
+        },
         "cases": case_results,
     }
 
@@ -201,6 +251,28 @@ def _add_usage(total: dict[str, int], usage: object) -> None:
     total["output_tokens"] += int(usage.get("output_tokens", 0) or 0)
 
 
+def _count_case_values(cases: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for case in cases:
+        value = str(case.get(key, "")).strip()
+        if value:
+            counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _count_list_values(cases: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for case in cases:
+        values = case.get(key, [])
+        if not isinstance(values, list):
+            continue
+        for raw in values:
+            value = str(raw).strip()
+            if value:
+                counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
 def _read_execution_summary(engine: EvolutionEngine, proposal_id: str) -> dict:
     path = engine.execution_eval_report_path(proposal_id)
     if not path.exists():
@@ -220,6 +292,7 @@ def _read_execution_summary(engine: EvolutionEngine, proposal_id: str) -> dict:
 def render_proposer_benchmark_markdown(result: dict[str, Any]) -> str:
     summary = result.get("summary", {})
     usage = result.get("usage", {})
+    diagnostics = result.get("diagnostics", {})
     lines = [
         "# Fork Skill Proposer Benchmark",
         "",
@@ -233,6 +306,9 @@ def render_proposer_benchmark_markdown(result: dict[str, Any]) -> str:
         "## Summary",
         "",
         f"- Dataset: `{result.get('dataset', '')}`",
+        f"- Case offset: `{result.get('case_offset', 0)}`",
+        f"- Inter-case delay: `{result.get('inter_case_delay', 0)}` seconds",
+        f"- Forbidden match mode: `{result.get('forbidden_match_mode', 'literal')}`",
         f"- Cases: `{summary.get('total_cases', 0)}`",
         f"- Schema passed: `{summary.get('schema_passed', 0)}`",
         f"- Static policy passed: `{summary.get('static_policy_passed', 0)}`",
@@ -240,8 +316,11 @@ def render_proposer_benchmark_markdown(result: dict[str, Any]) -> str:
         f"- Execution eval passed: `{summary.get('execution_eval_passed', 0)}`",
         f"- Approval ready: `{summary.get('approval_ready', 0)}`",
         f"- Baseline passed: `{summary.get('baseline_passed', 0)}`",
+        f"- Provider failed: `{summary.get('provider_failed', 0)}`",
         f"- Input tokens: `{usage.get('input_tokens', 0)}`",
         f"- Output tokens: `{usage.get('output_tokens', 0)}`",
+        f"- Failure categories: `{json.dumps(diagnostics.get('failure_categories', {}), ensure_ascii=False, sort_keys=True)}`",
+        f"- Retry reasons: `{json.dumps(diagnostics.get('retry_reasons', {}), ensure_ascii=False, sort_keys=True)}`",
         "",
         "## Cases",
         "",

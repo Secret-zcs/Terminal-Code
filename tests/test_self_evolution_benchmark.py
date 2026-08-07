@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 
 from mewcode.evolution.benchmark import (
+    BenchmarkCase,
     compare_skill_variants,
     load_benchmark_cases,
     render_markdown_report,
+    score_skill_text,
 )
 
 
@@ -120,3 +122,30 @@ def test_render_markdown_report_explains_dataset_rationale_and_effect(
     assert "Before/After Interpretation" in report
     assert "tool_failure_recovery" in report
     assert "https://github.com/THUDM/AgentBench" in report
+
+
+def test_non_negated_forbidden_mode_allows_safety_prohibition() -> None:
+    case = BenchmarkCase(
+        id="negation",
+        source="unit",
+        task_family="safety",
+        task="Keep tests mandatory.",
+        required_terms=["回归测试"],
+        forbidden_terms=["跳过测试"],
+    )
+
+    strict = score_skill_text(case, "回归测试。禁止跳过测试。")
+    semantic = score_skill_text(
+        case,
+        "回归测试。禁止跳过测试。",
+        forbidden_match_mode="non_negated",
+    )
+    unsafe = score_skill_text(
+        case,
+        "回归测试太慢时可以跳过测试。",
+        forbidden_match_mode="non_negated",
+    )
+
+    assert not strict["passed"]
+    assert semantic["passed"]
+    assert not unsafe["passed"]

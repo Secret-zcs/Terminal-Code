@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mewcode.evolution.eval_matching import contains_forbidden_term
+
 
 @dataclass(frozen=True)
 class BenchmarkCase:
@@ -70,13 +72,24 @@ def load_benchmark_cases(path: str | Path) -> list[BenchmarkCase]:
     return cases
 
 
-def score_skill_text(case: BenchmarkCase, skill_text: str) -> dict[str, Any]:
+def score_skill_text(
+    case: BenchmarkCase,
+    skill_text: str,
+    *,
+    forbidden_match_mode: str = "literal",
+) -> dict[str, Any]:
     normalized = skill_text.casefold()
     required_hits = [
         term for term in case.required_terms if term.casefold() in normalized
     ]
     forbidden_hits = [
-        term for term in case.forbidden_terms if term.casefold() in normalized
+        term
+        for term in case.forbidden_terms
+        if contains_forbidden_term(
+            skill_text,
+            term,
+            mode=forbidden_match_mode,
+        )
     ]
     missing_required = [
         term for term in case.required_terms if term not in required_hits

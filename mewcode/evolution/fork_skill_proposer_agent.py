@@ -7,7 +7,13 @@ import json
 import re
 from typing import Any
 
-from mewcode.client import LLMClient
+from mewcode.client import (
+    AuthenticationError,
+    LLMClient,
+    LLMError,
+    NetworkError,
+    RateLimitError,
+)
 from mewcode.conversation import ConversationManager
 from mewcode.skills.parser import VALID_CONTEXTS, VALID_MODES, VALID_NAME_RE
 from mewcode.tools.base import (
@@ -21,6 +27,14 @@ from mewcode.tools.base import (
 
 FORK_SKILL_PROPOSER_TIMEOUT_SECONDS = 45.0
 FORK_SKILL_PROPOSER_MAX_ATTEMPTS = 2
+_RETRYABLE_OUTPUT_REASONS = {"invalid-json", "schema"}
+PROVIDER_FAILURE_REASONS = {
+    "authentication",
+    "network",
+    "provider-api",
+    "rate-limit",
+    "timeout",
+}
 _OUTPUT_FIELDS = {
     "schema_version",
     "action",
@@ -95,10 +109,29 @@ class ForkSkillProposerOutputError(ValueError):
         *,
         attempts: int = 1,
         usage: dict[str, int] | None = None,
+        reason: str = "schema",
+        retry_reasons: list[str] | None = None,
     ) -> None:
         super().__init__(message)
         self.attempts = attempts
         self.usage = usage or {"input_tokens": 0, "output_tokens": 0}
+        self.reason = reason
+        self.retry_reasons = list(retry_reasons or [])
+
+
+def classify_fork_skill_proposer_error(exc: Exception) -> str:
+    reason = str(getattr(exc, "reason", "")).strip()
+    if reason:
+        return reason
+    if isinstance(exc, AuthenticationError):
+        return "authentication"
+    if isinstance(exc, RateLimitError):
+        return "rate-limit"
+    if isinstance(exc, NetworkError):
+        return "network"
+    if isinstance(exc, LLMError):
+        return "provider-api"
+    return "runner"
 
 
 class ForkSkillProposerAgent:
@@ -131,6 +164,7 @@ class ForkSkillProposerAgent:
         )
         total_input_tokens = 0
         total_output_tokens = 0
+        retry_reasons: list[str] = []
 
         for attempt in range(1, self.max_attempts + 1):
             conversation = ConversationManager()
@@ -160,7 +194,9 @@ class ForkSkillProposerAgent:
                             (ToolCallStart, ToolCallDelta, ToolCallComplete),
                         ):
                             raise ForkSkillProposerOutputError(
-                                "fork skill proposer attempted a tool call"
+                                "fork skill proposer attempted a tool call",
+                                attempts=attempt,
+                                reason="tool-call",
                             )
             except TimeoutError as exc:
                 raise ForkSkillProposerOutputError(
@@ -171,6 +207,8 @@ class ForkSkillProposerAgent:
                         "input_tokens": total_input_tokens + input_tokens,
                         "output_tokens": total_output_tokens + output_tokens,
                     },
+                    reason="timeout",
+                    retry_reasons=retry_reasons,
                 ) from exc
 
             total_input_tokens += input_tokens
@@ -178,21 +216,34 @@ class ForkSkillProposerAgent:
             try:
                 candidate = parse_fork_skill_proposer_output(raw_output)
             except ForkSkillProposerOutputError as exc:
-                if attempt < self.max_attempts:
+                retry_reasons.append(exc.reason)
+                if (
+                    exc.reason in _RETRYABLE_OUTPUT_REASONS
+                    and attempt < self.max_attempts
+                ):
                     continue
+                message = str(exc)
+                if exc.reason in _RETRYABLE_OUTPUT_REASONS:
+                    message = f"{message} after {attempt} attempts"
                 raise ForkSkillProposerOutputError(
-                    f"{exc} after {attempt} attempts",
+                    message,
                     attempts=attempt,
                     usage={
                         "input_tokens": total_input_tokens,
                         "output_tokens": total_output_tokens,
                     },
+                    reason=exc.reason,
+                    retry_reasons=retry_reasons,
                 ) from exc
 
             candidate["usage"] = {
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
                 "attempts": attempt,
+            }
+            candidate["diagnostics"] = {
+                "attempts": attempt,
+                "retry_reasons": retry_reasons,
             }
             return candidate
 
@@ -227,7 +278,8 @@ def parse_fork_skill_proposer_output(raw_output: str) -> dict[str, Any]:
     data = _decode_json_object(text)
     if data is None:
         raise ForkSkillProposerOutputError(
-            "fork skill proposer output must be a valid JSON object"
+            "fork skill proposer output must be a valid JSON object",
+            reason="invalid-json",
         )
     unknown = set(data) - _OUTPUT_FIELDS
     missing = _OUTPUT_FIELDS - set(data)
@@ -270,11 +322,13 @@ def parse_fork_skill_proposer_output(raw_output: str) -> dict[str, Any]:
     for pattern in _DANGEROUS_PATTERNS:
         if pattern.lower() in lower_body:
             raise ForkSkillProposerOutputError(
-                f"candidate body contains dangerous command pattern: {pattern}"
+                f"candidate body contains dangerous command pattern: {pattern}",
+                reason="safety-policy",
             )
     if _DANGEROUS_COMMAND_RE.search(body):
         raise ForkSkillProposerOutputError(
-            "candidate body contains dangerous download-and-execute command"
+            "candidate body contains dangerous download-and-execute command",
+            reason="safety-policy",
         )
     return data
 

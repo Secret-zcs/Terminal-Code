@@ -22,6 +22,8 @@ def main() -> int:
         default="benchmarks/oasst1_derived_cases.jsonl",
     )
     parser.add_argument("--max-cases", type=int, default=10)
+    parser.add_argument("--case-offset", type=int, default=0)
+    parser.add_argument("--inter-case-delay", type=float, default=0.0)
     parser.add_argument("--config", default="")
     parser.add_argument("--provider-index", type=int, default=0)
     parser.add_argument("--json-output", default="")
@@ -44,6 +46,8 @@ def main() -> int:
         client,
         args.dataset,
         max_cases=args.max_cases,
+        case_offset=args.case_offset,
+        inter_case_delay=args.inter_case_delay,
     ))
     rendered = render_proposer_benchmark_markdown(result)
     if args.json_output:

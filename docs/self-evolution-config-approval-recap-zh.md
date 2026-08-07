@@ -3147,6 +3147,10 @@ mewcode
 
 benchmark 现在对成功和失败候选都记录尝试次数与 token；即使候选 schema 合法但 action 不符合 benchmark 约束，也不会丢失调用成本或把重试次数覆盖为 1。
 
+完整 19 样本运行暴露 11 个网络连接失败。新增 provider failure 分类后，网络、认证、限流、provider API 和 timeout 不再被误标成 schema failure；断点重跑后 12 个样本在 2 秒间隔下 provider failure 为 `0/12`。合并有效结果为 `16/19 approval-ready`，候选仍未自动进入审批队列。
+
+审批证据新增 forbidden match mode。自然语言 benchmark 可显式使用 `non_negated` 消除安全否定表达误判，且每轮 artifact 都展示实际模式；正式 Skill eval 默认仍为 `literal`，只有调用方明确选择时才使用新模式。
+
 ## 后续真实调用
 
 配置加载验证不等于模型调用验证。真实评测应先使用 `--max-cases 1`，确认 DeepSeek 的 Anthropic 兼容端点可用，再扩大到 3 个或 19 个 case；结果只写入 `.mewcode/evolution/benchmarks/`，并记录模型输出是否通过候选 Skill 的完整门禁。

@@ -5734,3 +5734,9 @@ PYTHONPATH=. pytest tests/test_proposer_benchmark.py tests/test_fork_skill_propo
 扩大评测到 3 个真实脱敏样本后，schema/static/eval/execution 和 approval-ready 均为 `3/3`；三个 case 的尝试次数为 `2、2、1`，累计输入 token `468`、输出 token `4266`。本轮证明有限结构化重试能提升 provider 输出的可解析性，但尚未完成 19 个样本和真实代码仓库双跑。
 
 可观测性补丁：benchmark 在 candidate action 校验前记录 usage，并只在尚无尝试次数时从异常补值，避免合法响应在后续 gate 失败时丢失 token 或错误覆盖 attempts。相关自进化与配置测试共 `168 passed`。
+
+完整 19 样本真实评测：原始连续运行只有 `5/19 approval-ready`，但包含 1 次 timeout 和 11 次网络连接失败。新增 provider failure 分类、`case_offset` 和 `inter_case_delay` 后，断点重跑后 12 个样本得到 `11/12 approval-ready`、`0/12 provider failure`。按原始前 7 个和重跑后 12 个合并，有效结果为 `16/19 approval-ready`、1 个 schema 失败、2 个 eval 失败。详细结果见 `docs/fork-skill-proposer-real-benchmark-results-zh.md`。
+
+最终验证：Fork Proposer、生产 flow、benchmark、provider 配置和 EvolutionEngine 相关测试共 `173 passed`；修改文件通过 `py_compile` 和 `git diff --check`。
+
+2026-08-07 评测语义修复：新增共享 forbidden-term matcher 和显式 `literal/non_negated` 模式。生产 eval case 默认 `literal`；Fork Proposer 自然语言 benchmark 显式选择 `non_negated`，避免把“禁止跳过测试”误判为鼓励跳过测试。匹配模式已写入 execution task/input/result/report，相关 Fork Proposer、provider、benchmark 与 EvolutionEngine 聚合测试 `181 passed`。历史 19 样本结果不追溯修改。

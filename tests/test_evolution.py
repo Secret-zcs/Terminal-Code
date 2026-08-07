@@ -176,6 +176,50 @@ def _add_debug_eval_case(engine: EvolutionEngine, proposal_id: str) -> str:
     )
 
 
+def test_eval_case_non_negated_forbidden_mode_is_explicit_opt_in(tmp_path) -> None:
+    engine = EvolutionEngine(tmp_path)
+    proposal = engine.propose_skill(
+        name="safe-test-policy",
+        description="测试安全策略",
+        body="执行回归测试。禁止跳过测试。",
+        allowed_tools=[],
+        context="recent",
+    )
+    engine.add_eval_case(
+        proposal.id,
+        task="如何确保测试完整？",
+        must_contain=["回归测试"],
+        must_not_contain=["跳过测试"],
+        forbidden_match_mode="non_negated",
+    )
+
+    ok, message = engine.evaluate(proposal.id)
+
+    assert ok, message
+
+
+def test_eval_case_forbidden_mode_remains_literal_by_default(tmp_path) -> None:
+    engine = EvolutionEngine(tmp_path)
+    proposal = engine.propose_skill(
+        name="strict-test-policy",
+        description="严格测试策略",
+        body="执行回归测试。禁止跳过测试。",
+        allowed_tools=[],
+        context="recent",
+    )
+    engine.add_eval_case(
+        proposal.id,
+        task="如何确保测试完整？",
+        must_contain=["回归测试"],
+        must_not_contain=["跳过测试"],
+    )
+
+    ok, message = engine.evaluate(proposal.id)
+
+    assert not ok
+    assert "must not contain '跳过测试'" in message
+
+
 def _add_debug_eval_cases(engine: EvolutionEngine, proposal_id: str) -> list[str]:
     return [
         engine.add_eval_case(

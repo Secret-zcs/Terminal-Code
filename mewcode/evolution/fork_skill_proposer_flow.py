@@ -8,7 +8,10 @@ from typing import Any
 
 from mewcode.client import LLMClient
 from mewcode.evolution.engine import EvolutionEngine
-from mewcode.evolution.fork_skill_proposer_agent import ForkSkillProposerAgent
+from mewcode.evolution.fork_skill_proposer_agent import (
+    ForkSkillProposerAgent,
+    classify_fork_skill_proposer_error,
+)
 
 
 MAX_FORK_SKILL_PROPOSALS_PER_RUN = 3
@@ -27,7 +30,7 @@ async def run_fork_skill_proposer_for_usage(
     review_run = _load_running_review_run(engine, review_run_id)
     tasks = _collect_usage_patch_tasks(engine)[: max(0, int(max_proposals))]
     generated: list[str] = []
-    failures: list[dict[str, str]] = []
+    failures: list[dict[str, Any]] = []
     outputs: list[dict[str, Any]] = []
     agent = ForkSkillProposerAgent(client)
 
@@ -82,6 +85,11 @@ async def run_fork_skill_proposer_for_usage(
             failures.append({
                 "skill_name": skill_name,
                 "error_type": type(exc).__name__,
+                "error_category": classify_fork_skill_proposer_error(exc),
+                "attempts": int(getattr(exc, "attempts", 1) or 1),
+                "retry_reasons": list(
+                    getattr(exc, "retry_reasons", []) or []
+                ),
                 "error": str(exc)[:4000],
             })
 

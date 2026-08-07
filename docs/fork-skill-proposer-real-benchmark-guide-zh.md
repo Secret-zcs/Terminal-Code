@@ -36,6 +36,10 @@ PYTHONPATH=. python3 scripts/run_fork_skill_proposer_benchmark.py \
 
 随后扩大到 3 个样本：schema/static/eval/execution 均为 `3/3`，approval-ready 为 `3/3`；三个 case 的尝试次数分别为 `2、2、1`，累计输入 token `468`、输出 token `4266`。结果文件为 `.mewcode/evolution/benchmarks/proposer-real-3.{json,md}`，仍未写正式 Skill 或审批队列。
 
+完整 19 个样本及断点重跑结果见 `docs/fork-skill-proposer-real-benchmark-results-zh.md`。Runner 支持 `--case-offset` 和 `--inter-case-delay`，用于跳过已完成样本并降低连续调用导致的 provider 连接失败。
+
+自然语言 benchmark 使用 `forbidden_match_mode=non_negated`，允许“禁止跳过测试”这类安全否定表达，但仍拒绝“可以跳过测试”。该模式会写入 execution eval 的 task、input、result 和报告；生产与用户手工 eval case 默认保持 `literal`，不会自动放宽。
+
 ## 解释边界
 
 Execution eval 当前使用项目已有的 deterministic sandbox runner，验证 Candidate Skill 是否覆盖要求并产生 3/3 产物；它仍不等于真实 Agent 在代码仓库中修复 issue。后续更强评测应加入隔离仓库、真实测试命令和 baseline/evolved Agent 双跑。
