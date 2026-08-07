@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from mewcode.tools.base import Tool, ToolResult
+from mewcode.tools.workspace import resolve_workspace_path
 
 if TYPE_CHECKING:
     from mewcode.cache import FileCache
@@ -31,13 +32,19 @@ class ReadFile(Tool):
     is_concurrency_safe = True
 
 
-    def __init__(self, file_cache: FileCache | None = None, file_state_cache: FileStateCache | None = None) -> None:
+    def __init__(
+        self,
+        file_cache: FileCache | None = None,
+        file_state_cache: FileStateCache | None = None,
+        work_dir: str | Path | None = None,
+    ) -> None:
         self._cache = file_cache
         self._state_cache = file_state_cache
+        self.work_dir = work_dir
 
 
     async def execute(self, params: Params) -> ToolResult:
-        path = Path(params.file_path)
+        path = resolve_workspace_path(self.work_dir, params.file_path)
         if not path.exists():
             return ToolResult(output=f"Error: file not found: {params.file_path}", is_error=True)
         if not path.is_file():

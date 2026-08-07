@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from mewcode.tools.base import Tool, ToolResult
+from mewcode.tools.workspace import resolve_command_cwd
 
 MAX_TIMEOUT = 600
 
@@ -25,6 +27,8 @@ class Bash(Tool):
     params_model = Params
     category = "command"
 
+    def __init__(self, work_dir: str | Path | None = None) -> None:
+        self.work_dir = work_dir
 
     async def execute(self, params: Params) -> ToolResult:
         timeout = min(params.timeout, MAX_TIMEOUT)
@@ -34,6 +38,7 @@ class Bash(Tool):
                 params.command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=resolve_command_cwd(self.work_dir),
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -53,4 +58,3 @@ class Bash(Tool):
 
         output = "\n".join(parts)
         return ToolResult(output=output, is_error=proc.returncode != 0)
-

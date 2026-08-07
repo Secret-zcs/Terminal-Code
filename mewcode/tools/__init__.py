@@ -4,6 +4,7 @@
 # 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mewcode.tools.base import Tool
@@ -141,7 +142,11 @@ class ToolRegistry:
         return schemas
 
 
-def create_default_registry(file_cache: FileCache | None = None, file_history: Any = None) -> ToolRegistry:
+def create_default_registry(
+    file_cache: FileCache | None = None,
+    file_history: Any = None,
+    work_dir: str | Path | None = None,
+) -> ToolRegistry:
     from mewcode.tools.bash import Bash
     from mewcode.tools.edit_file import EditFile
     from mewcode.tools.file_state_cache import FileStateCache
@@ -153,10 +158,30 @@ def create_default_registry(file_cache: FileCache | None = None, file_history: A
     file_state_cache = FileStateCache()
 
     registry = ToolRegistry()
-    registry.register(ReadFile(file_cache=file_cache, file_state_cache=file_state_cache))
-    registry.register(WriteFile(file_cache=file_cache, file_history=file_history, file_state_cache=file_state_cache))
-    registry.register(EditFile(file_cache=file_cache, file_history=file_history, file_state_cache=file_state_cache))
-    registry.register(Bash())
-    registry.register(Glob())
-    registry.register(Grep())
+    registry.register(
+        ReadFile(
+            file_cache=file_cache,
+            file_state_cache=file_state_cache,
+            work_dir=work_dir,
+        )
+    )
+    registry.register(
+        WriteFile(
+            file_cache=file_cache,
+            file_history=file_history,
+            file_state_cache=file_state_cache,
+            work_dir=work_dir,
+        )
+    )
+    registry.register(
+        EditFile(
+            file_cache=file_cache,
+            file_history=file_history,
+            file_state_cache=file_state_cache,
+            work_dir=work_dir,
+        )
+    )
+    registry.register(Bash(work_dir=work_dir))
+    registry.register(Glob(work_dir=work_dir))
+    registry.register(Grep(work_dir=work_dir))
     return registry
