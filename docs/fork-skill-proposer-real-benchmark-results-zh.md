@@ -42,6 +42,8 @@ schema 失败样本在两次尝试后仍生成了非法 Skill 名称。两个 ev
 
 2026-08-07 后续修复增加了显式 `forbidden_match_mode=non_negated`，仅供自然语言 benchmark 区分安全否定表达；生产 eval case 默认仍为严格 `literal`。本页 `16/19` 是修复前的历史结果，没有被追溯改写，采用新模式的结果必须通过重新运行产生。
 
+修复后分别重跑历史两个 eval-failed case，结果均为 schema/static/eval/execution `1/1`、approval-ready `1/1`、attempts `1`。若用这两次定向复测替换历史语义误判，有效状态为 `18/19 approval-ready`、`1/19 schema-failed`。该数字由多次运行合并，不是一次完整 19-case 单跑通过率。
+
 ## 结论与边界
 
 有限结构化重试明显改善了 DeepSeek 输出的可解析性；加入样本间隔后，provider 网络失败从 `11/12` 降为 `0/12`。合并有效通过率为 `84.21%`，但 19 个派生 case 使用相同任务族和关键词，execution runner 也是 deterministic sandbox，因此结果不等于真实代码修复成功率。下一阶段应增加多任务族、隔离真实仓库测试和 baseline/evolved Agent 双跑。

@@ -5740,3 +5740,5 @@ PYTHONPATH=. pytest tests/test_proposer_benchmark.py tests/test_fork_skill_propo
 最终验证：Fork Proposer、生产 flow、benchmark、provider 配置和 EvolutionEngine 相关测试共 `173 passed`；修改文件通过 `py_compile` 和 `git diff --check`。
 
 2026-08-07 评测语义修复：新增共享 forbidden-term matcher 和显式 `literal/non_negated` 模式。生产 eval case 默认 `literal`；Fork Proposer 自然语言 benchmark 显式选择 `non_negated`，避免把“禁止跳过测试”误判为鼓励跳过测试。匹配模式已写入 execution task/input/result/report，相关 Fork Proposer、provider、benchmark 与 EvolutionEngine 聚合测试 `181 passed`。历史 19 样本结果不追溯修改。
+
+真实定向复测：数据集第 7、14 条历史 eval-failed case 在 `non_negated` 模式下均达到 approval-ready，execution eval 均为 `3/3`，各使用 1 次模型尝试。替换两条历史语义误判后的合并有效状态为 `18/19`，但该数字不是同一次完整运行结果。
