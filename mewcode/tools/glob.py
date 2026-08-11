@@ -34,11 +34,15 @@ class Glob(Tool):
             return ToolResult(output=f"Error: path not found: {params.path}", is_error=True)
 
         try:
-            matches = sorted(
-                str(p.relative_to(base))
-                for p in base.glob(params.pattern)
-                if p.is_file() and not any(part in SKIP_DIRS for part in p.parts)
-            )
+            matches: list[str] = []
+            for path in base.glob(params.pattern):
+                if not path.is_file():
+                    continue
+                relative = path.relative_to(base)
+                if any(part in SKIP_DIRS for part in relative.parts):
+                    continue
+                matches.append(str(relative))
+            matches.sort()
         except Exception as e:
             return ToolResult(output=f"Error: {e}", is_error=True)
 

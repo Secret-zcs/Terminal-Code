@@ -48,7 +48,8 @@ class Grep(Tool):
         for file_path in sorted(base.glob(glob_pattern)):
             if not file_path.is_file():
                 continue
-            if any(part in SKIP_DIRS for part in file_path.parts):
+            relative = file_path.relative_to(base)
+            if any(part in SKIP_DIRS for part in relative.parts):
                 continue
             try:
                 text = file_path.read_text(encoding="utf-8", errors="ignore")
@@ -56,8 +57,7 @@ class Grep(Tool):
                 continue
             for line_num, line in enumerate(text.splitlines(), 1):
                 if regex.search(line):
-                    rel = file_path.relative_to(base)
-                    results.append(f"{rel}:{line_num}:{line}")
+                    results.append(f"{relative}:{line_num}:{line}")
 
         if not results:
             return ToolResult(output="No matches found.")

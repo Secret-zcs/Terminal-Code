@@ -63,6 +63,26 @@ async def test_glob_and_grep_use_workspace_root_for_relative_paths(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_glob_and_grep_ignore_skipped_workspace_ancestors(tmp_path: Path) -> None:
+    repo = tmp_path / "node_modules" / "repo"
+    repo.mkdir(parents=True)
+    (repo / "input.txt").write_text("before\n", encoding="utf-8")
+    registry = create_default_registry(work_dir=repo)
+
+    glob_tool = registry.get("Glob")
+    glob_result = await glob_tool.execute(
+        glob_tool.params_model(pattern="*.txt", path=".")
+    )
+    assert glob_result.output == "input.txt"
+
+    grep_tool = registry.get("Grep")
+    grep_result = await grep_tool.execute(
+        grep_tool.params_model(pattern="before", path=".", include="*.txt")
+    )
+    assert grep_result.output == "input.txt:1:before"
+
+
+@pytest.mark.asyncio
 async def test_write_and_edit_track_workspace_paths(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
