@@ -5,6 +5,17 @@ from pathlib import Path
 import pytest
 
 from mewcode.tools import create_default_registry
+from mewcode.tools.edit_file import EditFile, Params as EditFileParams
+from mewcode.tools.write_file import Params as WriteFileParams
+from mewcode.tools.write_file import WriteFile
+
+
+class RecordingFileHistory:
+    def __init__(self) -> None:
+        self.paths: list[str] = []
+
+    def track_edit(self, file_path: str) -> None:
+        self.paths.append(file_path)
 
 
 @pytest.mark.asyncio
@@ -49,3 +60,29 @@ async def test_glob_and_grep_use_workspace_root_for_relative_paths(tmp_path: Pat
         grep_tool.params_model(pattern="before", path=".", include="*.txt")
     )
     assert grep_result.output == "input.txt:1:before"
+
+
+@pytest.mark.asyncio
+async def test_write_and_edit_track_workspace_paths(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "input.txt").write_text("before\n", encoding="utf-8")
+    file_history = RecordingFileHistory()
+
+    write_result = await WriteFile(file_history=file_history, work_dir=repo).execute(
+        WriteFileParams(file_path="output.txt", content="created\n")
+    )
+    edit_result = await EditFile(file_history=file_history, work_dir=repo).execute(
+        EditFileParams(
+            file_path="input.txt",
+            old_string="before",
+            new_string="after",
+        )
+    )
+
+    assert not write_result.is_error
+    assert not edit_result.is_error
+    assert file_history.paths == [
+        str((repo / "output.txt").resolve()),
+        str((repo / "input.txt").resolve()),
+    ]
