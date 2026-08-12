@@ -418,6 +418,7 @@ class ScriptedRepositoryClient(LLMClient):
         self.responses = responses
         self.call_index = 0
         self.system_prompts: list[str] = []
+        self.conversations: list[list[str]] = []
 
     async def stream(
         self,
@@ -426,6 +427,9 @@ class ScriptedRepositoryClient(LLMClient):
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         self.system_prompts.append(system)
+        self.conversations.append(
+            [message.content for message in conversation.get_messages()]
+        )
         events = self.responses[self.call_index]
         self.call_index += 1
         for event in events:
@@ -505,7 +509,12 @@ async def test_run_repository_case_drives_real_agent_without_changing_fixture(
                 ToolCallComplete(
                     "bash",
                     "Bash",
-                    {"command": f"{sys.executable} -m pytest test_calc.py -q"},
+                    {
+                        "command": (
+                            f'{sys.executable} -c "from calc import add; '
+                            'assert add(2, 3) == 5"'
+                        )
+                    },
                 ),
                 StreamEnd("end_turn", input_tokens=30, output_tokens=4),
             ],
@@ -547,7 +556,10 @@ async def test_run_repository_case_drives_real_agent_without_changing_fixture(
     assert result["input_tokens"] == 100
     assert result["output_tokens"] == 14
     assert result["final_text"] == "Fixed and verified."
-    assert "Use a focused repair loop." in client.system_prompts[0]
+    assert any(
+        "Use a focused repair loop." in message
+        for message in client.conversations[0]
+    )
 
 
 @pytest.mark.asyncio
