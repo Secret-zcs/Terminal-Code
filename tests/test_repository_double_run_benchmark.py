@@ -23,6 +23,7 @@ from mewcode.evolution.repository_benchmark import (
 )
 from mewcode.tools import create_default_registry
 from mewcode.tools.base import StreamEnd, StreamEvent, TextDelta, ToolCallComplete
+from mewcode.tools.bash import Bash, Params as BashParams
 from mewcode.tools.edit_file import EditFile, Params as EditFileParams
 from mewcode.tools.write_file import Params as WriteFileParams
 from mewcode.tools.write_file import WriteFile
@@ -57,6 +58,28 @@ async def test_default_registry_tools_use_workspace_root(tmp_path: Path, monkeyp
     assert not bash_result.is_error
     assert (repo / "output.txt").read_text(encoding="utf-8") == "after"
     assert not (tmp_path / "output.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_bash_repeated_execution_avoids_asyncio_child_watcher(
+    tmp_path: Path,
+) -> None:
+    bash = Bash(work_dir=tmp_path)
+
+    for index in range(10):
+        expected = f"run-{index}"
+        result = await asyncio.wait_for(
+            bash.execute(
+                BashParams(
+                    command=f"printf '{expected}' > output.txt; printf '{expected}'"
+                )
+            ),
+            timeout=2,
+        )
+
+        assert not result.is_error
+        assert result.output == f"STDOUT:\n{expected}"
+        assert (tmp_path / "output.txt").read_text(encoding="utf-8") == expected
 
 
 @pytest.mark.asyncio
