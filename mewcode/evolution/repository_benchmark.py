@@ -2,11 +2,35 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
+import stat
+import subprocess
+import time
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any
+from typing import Any, Callable
+
+from mewcode.agent import Agent
+from mewcode.client import LLMClient
+from mewcode.permissions import (
+    DangerousCommandDetector,
+    PathSandbox,
+    PermissionChecker,
+    PermissionMode,
+    RuleEngine,
+)
+from mewcode.tools import create_default_registry
+
+
+ClientFactory = Callable[[Path, bool], LLMClient]
+
+_IGNORED_SNAPSHOT_DIRECTORIES = frozenset(
+    {".git", ".pytest_cache", "__pycache__", ".mypy_cache", ".mewcode"}
+)
+_COMMAND_OUTPUT_LIMIT = 10_000
 
 
 @dataclass(frozen=True)
@@ -19,6 +43,255 @@ class RepositoryFixture:
     expected_tests: tuple[str, ...]
     allowed_paths: tuple[str, ...]
     forbidden_paths: tuple[str, ...]
+
+
+def snapshot_repository(root: str | Path) -> dict[str, str]:
+    """Read regular repository files into a stable relative-path snapshot."""
+    repository_root = Path(root)
+    snapshot: dict[str, str] = {}
+    for directory, directory_names, file_names in os.walk(repository_root):
+        directory_names[:] = sorted(
+            name
+            for name in directory_names
+            if name not in _IGNORED_SNAPSHOT_DIRECTORIES
+        )
+        current_directory = Path(directory)
+        for file_name in sorted(file_names):
+            path = current_directory / file_name
+            try:
+                if not stat.S_ISREG(path.lstat().st_mode):
+                    continue
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            relative_path = path.relative_to(repository_root).as_posix()
+            snapshot[relative_path] = content
+    return dict(sorted(snapshot.items()))
+
+
+def compare_snapshots(
+    before: dict[str, str],
+    after: dict[str, str],
+    allowed_paths: tuple[str, ...] | list[str],
+    forbidden_paths: tuple[str, ...] | list[str] = (),
+) -> dict[str, Any]:
+    """Compare snapshots and report changed paths, scope violations, and line counts."""
+    changed_paths = sorted(
+        path
+        for path in before.keys() | after.keys()
+        if before.get(path) != after.get(path)
+    )
+    out_of_scope_changes = [
+        path
+        for path in changed_paths
+        if not any(fnmatch(path, rule) for rule in allowed_paths)
+    ]
+    forbidden_changes = [
+        path
+        for path in changed_paths
+        if any(fnmatch(path, rule) for rule in forbidden_paths)
+    ]
+
+    added = 0
+    removed = 0
+    for path in changed_paths:
+        diff = difflib.unified_diff(
+            before.get(path, "").splitlines(keepends=True),
+            after.get(path, "").splitlines(keepends=True),
+            fromfile=path,
+            tofile=path,
+        )
+        for line in diff:
+            if line.startswith("--- ") or line.startswith("+++ "):
+                continue
+            if line.startswith("+"):
+                added += 1
+            elif line.startswith("-"):
+                removed += 1
+
+    return {
+        "changed_paths": changed_paths,
+        "out_of_scope_changes": out_of_scope_changes,
+        "forbidden_changes": forbidden_changes,
+        "patch_size": {
+            "added": added,
+            "removed": removed,
+            "total": added + removed,
+        },
+    }
+
+
+def _normalize_command_output(output: str | bytes | None) -> str:
+    if output is None:
+        return ""
+    if isinstance(output, bytes):
+        output = output.decode("utf-8", errors="replace")
+    return output[-_COMMAND_OUTPUT_LIMIT:]
+
+
+def run_local_command(
+    command: str,
+    cwd: str | Path,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """Run a benchmark command and normalize its result."""
+    started_at = time.perf_counter()
+    try:
+        completed = subprocess.run(
+            command,
+            shell=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+        status = "passed" if completed.returncode == 0 else "failed"
+        exit_code: int | None = completed.returncode
+        stdout = completed.stdout
+        stderr = completed.stderr
+    except subprocess.TimeoutExpired as exc:
+        status = "timeout"
+        exit_code = None
+        stdout = exc.stdout
+        stderr = exc.stderr
+
+    return {
+        "status": status,
+        "exit_code": exit_code,
+        "stdout": _normalize_command_output(stdout),
+        "stderr": _normalize_command_output(stderr),
+        "elapsed_seconds": time.perf_counter() - started_at,
+    }
+
+
+async def run_repository_case(
+    fixture: RepositoryFixture,
+    repository_root: Path,
+    *,
+    evolved: bool,
+    candidate_skill: str,
+    client_factory: ClientFactory,
+    protocol: str,
+    max_iterations: int,
+    test_timeout_seconds: float,
+) -> dict[str, Any]:
+    """Run one side of a repository benchmark in its isolated repository."""
+    started_at = time.perf_counter()
+    before = snapshot_repository(repository_root)
+    status = "completed"
+    error_type = ""
+    error = ""
+    final_text = ""
+    tool_call_count = 0
+    permission_denied = 0
+    rewind_used = False
+    agent: Agent | None = None
+
+    try:
+        client = client_factory(repository_root, evolved)
+        checker = PermissionChecker(
+            detector=DangerousCommandDetector(),
+            sandbox=PathSandbox(str(repository_root)),
+            rule_engine=RuleEngine(),
+            mode=PermissionMode.DONT_ASK,
+        )
+        registry = create_default_registry(work_dir=repository_root)
+        agent = Agent(
+            client,
+            registry,
+            protocol,
+            work_dir=repository_root,
+            max_iterations=max_iterations,
+            permission_checker=checker,
+        )
+        if evolved:
+            agent.activate_skill("candidate", candidate_skill)
+
+        original_execute = agent._execute_tool_noninteractive
+
+        async def execute_and_track(tool_call: Any) -> Any:
+            nonlocal permission_denied
+            result = await original_execute(tool_call)
+            if result.is_error and result.output.startswith("Permission denied:"):
+                permission_denied += 1
+            return result
+
+        agent._execute_tool_noninteractive = execute_and_track  # type: ignore[method-assign]
+
+        def record_event(event: dict[str, Any]) -> None:
+            nonlocal tool_call_count, rewind_used
+            if event.get("type") != "tool_use":
+                return
+            tool_call_count += 1
+            tool_name = str(event.get("toolName", ""))
+            if "rewind" in tool_name.casefold():
+                rewind_used = True
+
+        final_text = await agent.run_to_completion(
+            fixture.issue,
+            event_callback=record_event,
+        )
+    except Exception as exc:
+        status = "provider-failed"
+        error_type = type(exc).__name__
+        error = str(exc)
+
+    regression_result = (
+        run_local_command(
+            fixture.regression_command,
+            repository_root,
+            test_timeout_seconds,
+        )
+        if fixture.regression_command
+        else None
+    )
+    test_result = run_local_command(
+        fixture.test_command,
+        repository_root,
+        test_timeout_seconds,
+    )
+    after = snapshot_repository(repository_root)
+    comparison = compare_snapshots(
+        before,
+        after,
+        fixture.allowed_paths,
+        fixture.forbidden_paths,
+    )
+
+    tests_passed = test_result["status"] == "passed"
+    regression_free = (
+        regression_result is None or regression_result["status"] == "passed"
+    )
+    expected_tests_present = all(
+        (repository_root / path).is_file() for path in fixture.expected_tests
+    )
+    task_success = (
+        status == "completed"
+        and tests_passed
+        and expected_tests_present
+        and not comparison["forbidden_changes"]
+        and not comparison["out_of_scope_changes"]
+    )
+
+    return {
+        "status": status,
+        "task_success": task_success,
+        "tests_passed": tests_passed,
+        "regression_free": regression_free,
+        "expected_tests_present": expected_tests_present,
+        **comparison,
+        "input_tokens": agent.total_input_tokens if agent is not None else 0,
+        "output_tokens": agent.total_output_tokens if agent is not None else 0,
+        "elapsed_seconds": time.perf_counter() - started_at,
+        "tool_call_count": tool_call_count,
+        "permission_denied": permission_denied,
+        "rewind_used": rewind_used,
+        "regression_result": regression_result,
+        "test_result": test_result,
+        "final_text": final_text,
+        "error_type": error_type,
+        "error": error,
+    }
 
 
 def load_repository_fixtures(root: str | Path) -> list[RepositoryFixture]:
