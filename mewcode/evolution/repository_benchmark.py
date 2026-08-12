@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 
@@ -39,7 +40,14 @@ def load_repository_fixtures(root: str | Path) -> list[RepositoryFixture]:
         case_id = case_directory.name
         try:
             fixtures.append(_load_repository_fixture(case_directory))
-        except (json.JSONDecodeError, OSError, TypeError, ValueError, UnicodeError) as exc:
+        except (
+            json.JSONDecodeError,
+            OSError,
+            RecursionError,
+            TypeError,
+            ValueError,
+            UnicodeError,
+        ) as exc:
             raise ValueError(f"invalid repository fixture {case_id}: {exc}") from exc
     return fixtures
 
@@ -49,12 +57,21 @@ def _load_repository_fixture(case_directory: Path) -> RepositoryFixture:
     issue_path = case_directory / "issue.md"
     expected_path = case_directory / "expected.json"
 
+    if case_directory.is_symlink():
+        raise ValueError("case directory cannot be a symlink")
+    if repository.is_symlink():
+        raise ValueError("repository/ cannot be a symlink")
     if not repository.is_dir():
         raise ValueError("repository/ must be a directory")
+    if issue_path.is_symlink():
+        raise ValueError("issue.md cannot be a symlink")
     if not issue_path.is_file():
         raise ValueError("issue.md must be a file")
+    if expected_path.is_symlink():
+        raise ValueError("expected.json cannot be a symlink")
     if not expected_path.is_file():
         raise ValueError("expected.json must be a file")
+    _reject_repository_symlinks(repository)
 
     issue = issue_path.read_text(encoding="utf-8").strip()
     if not issue:
@@ -79,6 +96,21 @@ def _load_repository_fixture(case_directory: Path) -> RepositoryFixture:
         allowed_paths=_path_rules(expected, "allowed_paths", require_nonempty=True),
         forbidden_paths=_path_rules(expected, "forbidden_paths", require_nonempty=False),
     )
+
+
+def _reject_repository_symlinks(repository: Path) -> None:
+    pending = [repository]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.is_symlink():
+                    relative_path = Path(entry.path).relative_to(repository)
+                    raise ValueError(
+                        f"repository entry cannot be a symlink: {relative_path}"
+                    )
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(Path(entry.path))
 
 
 def _required_nonempty_string(data: dict[str, Any], field: str) -> str:
@@ -113,9 +145,15 @@ def _path_rules(
             raise TypeError(f"{field} entries must be strings")
         rule = value.strip()
         path = PurePosixPath(rule)
+        windows_path = PureWindowsPath(rule)
         if not rule:
             raise ValueError(f"{field} entries cannot be empty")
-        if "\\" in rule or path.is_absolute() or ".." in path.parts:
+        if (
+            "\\" in rule
+            or path.is_absolute()
+            or ".." in path.parts
+            or windows_path.drive
+        ):
             raise ValueError(f"{field} entry must be a relative POSIX path: {value!r}")
         rules.append(rule)
     return tuple(rules)

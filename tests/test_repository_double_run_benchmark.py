@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from mewcode.evolution import repository_benchmark
 from mewcode.tools import create_default_registry
 from mewcode.tools.edit_file import EditFile, Params as EditFileParams
 from mewcode.tools.write_file import Params as WriteFileParams
@@ -168,7 +169,15 @@ def test_load_repository_fixtures_sorts_cases_by_id(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "invalid_path",
-    ["", "/tmp/test_parser.py", "tests/../secret.py"],
+    [
+        "",
+        "/tmp/test_parser.py",
+        "tests/../secret.py",
+        "C:/outside",
+        "C:outside",
+        "//server/share/outside.py",
+        "\\\\server\\share\\outside.py",
+    ],
 )
 @pytest.mark.parametrize(
     "field",
@@ -255,6 +264,60 @@ def test_load_repository_fixtures_rejects_invalid_json(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="bad-json"):
         load_repository_fixtures(tmp_path)
+
+
+def test_load_repository_fixtures_wraps_json_recursion_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_repository_fixture(tmp_path, "recursive-json")
+
+    def raise_recursion_error(_: str) -> object:
+        raise RecursionError("nested too deeply")
+
+    monkeypatch.setattr(repository_benchmark.json, "loads", raise_recursion_error)
+
+    with pytest.raises(ValueError, match="recursive-json"):
+        load_repository_fixtures(tmp_path)
+
+
+@pytest.mark.parametrize("target", ["case", "repository", "issue.md", "expected.json"])
+def test_load_repository_fixtures_rejects_fixture_symlinks(
+    tmp_path: Path,
+    target: str,
+) -> None:
+    fixture_root = tmp_path / "fixtures"
+    case = _write_repository_fixture(fixture_root, "linked-case")
+    if target == "case":
+        real_case = tmp_path / "real-case"
+        case.rename(real_case)
+        case.symlink_to(real_case, target_is_directory=True)
+    elif target == "repository":
+        repository = case / "repository"
+        repository.rmdir()
+        external_repository = tmp_path / "external-repository"
+        external_repository.mkdir()
+        repository.symlink_to(external_repository, target_is_directory=True)
+    else:
+        metadata = case / target
+        external_metadata = tmp_path / f"external-{target}"
+        metadata.rename(external_metadata)
+        metadata.symlink_to(external_metadata)
+
+    with pytest.raises(ValueError, match="linked-case"):
+        load_repository_fixtures(fixture_root)
+
+
+def test_load_repository_fixtures_rejects_repository_internal_symlink(
+    tmp_path: Path,
+) -> None:
+    case = _write_repository_fixture(tmp_path / "fixtures", "internal-link")
+    external_file = tmp_path / "outside.txt"
+    external_file.write_text("secret", encoding="utf-8")
+    (case / "repository" / "linked.txt").symlink_to(external_file)
+
+    with pytest.raises(ValueError, match="internal-link"):
+        load_repository_fixtures(tmp_path / "fixtures")
 
 
 def test_load_repository_fixtures_rejects_missing_root(tmp_path: Path) -> None:
