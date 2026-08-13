@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import threading
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -33,21 +34,38 @@ class Bash(Tool):
 
     async def execute(self, params: Params) -> ToolResult:
         timeout = min(params.timeout, MAX_TIMEOUT)
+        done = threading.Event()
+        holder: dict[str, subprocess.CompletedProcess[bytes] | BaseException] = {}
 
-        try:
-            completed = await asyncio.to_thread(
-                subprocess.run,
-                params.command,
-                shell=True,
-                cwd=resolve_command_cwd(self.work_dir),
-                capture_output=True,
-                timeout=timeout,
-                text=False,
-            )
-        except subprocess.TimeoutExpired:
-            return ToolResult(output=f"Error: command timed out after {timeout}s", is_error=True)
-        except Exception as e:
-            return ToolResult(output=f"Error executing command: {e}", is_error=True)
+        def run_command() -> None:
+            try:
+                holder["result"] = subprocess.run(
+                    params.command,
+                    shell=True,
+                    cwd=resolve_command_cwd(self.work_dir),
+                    capture_output=True,
+                    timeout=timeout,
+                    text=False,
+                )
+            except BaseException as error:
+                holder["error"] = error
+            finally:
+                done.set()
+
+        threading.Thread(target=run_command, daemon=True).start()
+        while not done.is_set():
+            await asyncio.sleep(0.01)
+
+        error = holder.get("error")
+        if error is not None:
+            if isinstance(error, subprocess.TimeoutExpired):
+                return ToolResult(output=f"Error: command timed out after {timeout}s", is_error=True)
+            if isinstance(error, Exception):
+                return ToolResult(output=f"Error executing command: {error}", is_error=True)
+            raise error
+
+        completed = holder["result"]
+        assert isinstance(completed, subprocess.CompletedProcess)
 
         parts: list[str] = []
         stdout = completed.stdout

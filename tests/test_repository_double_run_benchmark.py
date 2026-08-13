@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import subprocess
 import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -80,6 +81,29 @@ async def test_bash_repeated_execution_avoids_asyncio_child_watcher(
         assert not result.is_error
         assert result.output == f"STDOUT:\n{expected}"
         assert (tmp_path / "output.txt").read_text(encoding="utf-8") == expected
+
+
+@pytest.mark.asyncio
+async def test_bash_reports_subprocess_timeout_without_asyncio_executor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_timeout(*args: object, **kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+    async def reject_to_thread(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Bash must not use the asyncio executor")
+
+    monkeypatch.setattr(subprocess, "run", raise_timeout)
+    monkeypatch.setattr(asyncio, "to_thread", reject_to_thread)
+
+    result = await asyncio.wait_for(
+        Bash(work_dir=tmp_path).execute(BashParams(command="blocked", timeout=7)),
+        timeout=1,
+    )
+
+    assert result.is_error
+    assert result.output == "Error: command timed out after 7s"
 
 
 @pytest.mark.asyncio
