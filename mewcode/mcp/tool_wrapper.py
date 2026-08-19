@@ -45,11 +45,22 @@ def _json_type_to_python(json_type: str) -> type:
 def _extract_text(content: list[Any]) -> str:
     parts: list[str] = []
     for block in content:
-        if isinstance(block, mcp_types.TextContent):
+        text_type = getattr(mcp_types, "TextContent", None)
+        image_type = getattr(mcp_types, "ImageContent", None)
+        resource_type = getattr(mcp_types, "EmbeddedResource", None)
+        if (
+            (text_type is not None and isinstance(block, text_type))
+            or getattr(block, "type", "") == "text"
+        ) and hasattr(block, "text"):
             parts.append(block.text)
-        elif isinstance(block, mcp_types.ImageContent):
+        elif (
+            (image_type is not None and isinstance(block, image_type))
+            or getattr(block, "type", "") == "image"
+        ) and hasattr(block, "mimeType"):
             parts.append(f"[image: {block.mimeType}]")
-        elif isinstance(block, mcp_types.EmbeddedResource):
+        elif (
+            resource_type is not None and isinstance(block, resource_type)
+        ) or hasattr(block, "resource"):
             resource = block.resource
             if hasattr(resource, "text"):
                 parts.append(resource.text)

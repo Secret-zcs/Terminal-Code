@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -24,6 +25,14 @@ from mewcode.memory.instructions import (
     load_instructions,
     process_includes,
 )
+from mewcode.memory.layered import (
+    list_memory_documents,
+    parse_memory_document,
+    render_memory_documents,
+    select_relevant_memory_documents,
+    write_memory_document,
+)
+from mewcode.memory.recall import find_relevant_memories
 from mewcode.memory.session import (
     RecordType,
     ResumeResult,
@@ -37,6 +46,7 @@ from mewcode.memory.session import (
     records_to_messages,
     validate_message_chain,
 )
+from mewcode.tools.base import StreamEnd, TextDelta
 
 # =========================================================================
 # A. 指令文件（MEWCODE.md）
@@ -651,6 +661,439 @@ class TestMemoryManager:
         assert "uses PostgreSQL" in project_content
         assert "docs at example.com" in project_content
         assert "use spaces" not in project_content
+
+    def test_write_layered_memory_document_roundtrip(self, tmp_path: Path) -> None:
+        path = write_memory_document(
+            tmp_path,
+            name="Pytest 失败复现流程",
+            description="修复 Python 缺陷时先运行失败测试",
+            background="用户多次要求先复现失败再修改源码。",
+            content="处理 pytest 失败时，先运行目标测试，再做最小源码修改。",
+            memory_type="project",
+            scope="project",
+            tags=["pytest", "repair"],
+            now="2026-08-17T00:00:00+00:00",
+        )
+
+        assert path is not None
+        doc = parse_memory_document(path, scope="project")
+        assert doc is not None
+        assert doc.name == "Pytest 失败复现流程"
+        assert doc.description == "修复 Python 缺陷时先运行失败测试"
+        assert doc.background == "用户多次要求先复现失败再修改源码。"
+        assert "pytest" in doc.tags
+        assert "最小源码修改" in doc.content
+
+    def test_load_relevant_selects_task_specific_layered_memories(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        mgr = MemoryManager(str(tmp_path / "project"))
+        write_memory_document(
+            mgr.project_mem_dir,
+            name="Pytest 失败复现流程",
+            description="修复 Python 缺陷时先运行 pytest 目标测试",
+            background="来自项目调试对话。",
+            content="先运行失败测试，再做最小源码修改，最后跑回归测试。",
+            memory_type="project",
+            scope="project",
+            tags=["pytest", "repair"],
+        )
+        write_memory_document(
+            mgr.project_mem_dir,
+            name="React 组件样式约定",
+            description="前端组件使用 lucide 图标",
+            background="来自 UI 任务对话。",
+            content="按钮优先使用图标按钮，不要堆叠卡片。",
+            memory_type="project",
+            scope="project",
+            tags=["react", "ui"],
+        )
+
+        result = mgr.load_relevant("请修复 pytest 失败并跑回归")
+        assert "Pytest 失败复现流程" in result
+        assert "React 组件样式约定" not in result
+
+    def test_load_relevant_does_not_use_misplaced_project_memory_from_user_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        mgr = MemoryManager(str(tmp_path / "project"))
+        write_memory_document(
+            mgr.user_mem_dir,
+            name="Other Project Pytest Flow",
+            description="pytest 失败优先复现",
+            background="另一个项目的调试任务沉淀。",
+            content="另一个项目使用 pytest-xdist 的特殊流程。",
+            memory_type="project",
+            scope="project",
+            tags=["pytest"],
+        )
+
+        result = mgr.load_relevant("pytest 失败")
+        assert "Other Project Pytest Flow" not in result
+
+    def test_write_memories_also_creates_layered_markdown(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        mgr = MemoryManager(str(tmp_path / "project"))
+        mgr._write_memories(
+            "### 用户偏好\n- 以后回答使用中文\n\n"
+            "### 项目知识\n- 项目测试使用 pytest\n"
+        )
+
+        docs = list_memory_documents(mgr.user_mem_dir, mgr.project_mem_dir)
+        rendered = render_memory_documents(docs)
+        assert len(docs) == 2
+        assert "以后回答使用中文" in rendered
+        assert "项目测试使用 pytest" in rendered
+
+    @pytest.mark.asyncio
+    async def test_find_relevant_memories_skips_misplaced_project_memory_in_user_dir(
+        self, tmp_path: Path
+    ) -> None:
+        path = write_memory_document(
+            tmp_path,
+            name="Other Project Pytest Flow",
+            description="pytest 失败优先复现",
+            background="另一个项目的调试任务沉淀。",
+            content="另一个项目使用 pytest-xdist 的特殊流程。",
+            memory_type="project",
+            scope="project",
+            tags=["pytest"],
+        )
+        assert path is not None
+
+        result = await find_relevant_memories(
+            query="pytest 失败",
+            user_mem_dir=tmp_path,
+            project_mem_dir=None,
+            recent_tools=None,
+            already_surfaced=None,
+            selector=None,
+        )
+
+        assert result == []
+
+    def test_relevant_memory_selector_prefers_matching_document(
+        self, tmp_path: Path
+    ) -> None:
+        pytest_path = write_memory_document(
+            tmp_path,
+            name="Pytest 修复策略",
+            description="pytest 失败优先复现",
+            background="调试任务沉淀。",
+            content="运行目标测试，定位失败断言。",
+            memory_type="project",
+            scope="project",
+            tags=["pytest"],
+        )
+        ui_path = write_memory_document(
+            tmp_path,
+            name="UI 样式策略",
+            description="React 页面视觉约定",
+            background="前端任务沉淀。",
+            content="使用图标按钮和紧凑布局。",
+            memory_type="project",
+            scope="project",
+            tags=["react"],
+        )
+        assert pytest_path is not None
+        assert ui_path is not None
+        docs = [
+            doc for doc in (
+                parse_memory_document(pytest_path, scope="project"),
+                parse_memory_document(ui_path, scope="project"),
+            ) if doc is not None
+        ]
+
+        selected = select_relevant_memory_documents("pytest 测试失败", docs, top_k=1)
+        assert [doc.name for doc in selected] == ["Pytest 修复策略"]
+
+    @pytest.mark.asyncio
+    async def test_find_relevant_memories_accepts_absolute_selector_path(
+        self, tmp_path: Path
+    ) -> None:
+        path = write_memory_document(
+            tmp_path,
+            name="Pytest 修复策略",
+            description="pytest 失败优先复现",
+            background="调试任务沉淀。",
+            content="运行目标测试，定位失败断言。",
+            memory_type="project",
+            scope="project",
+            tags=["pytest"],
+        )
+        assert path is not None
+
+        async def selector(system_prompt: str, user_message: str) -> str:
+            return json.dumps({"selected_memories": [str(path.resolve())]})
+
+        result = await find_relevant_memories(
+            query="pytest 失败",
+            user_mem_dir=None,
+            project_mem_dir=tmp_path,
+            recent_tools=None,
+            already_surfaced=None,
+            selector=selector,
+        )
+
+        assert len(result) == 1
+        assert result[0].path == str(path.resolve())
+
+    @pytest.mark.asyncio
+    async def test_find_relevant_memories_prefilters_before_model_rerank(
+        self, tmp_path: Path
+    ) -> None:
+        for i in range(6):
+            write_memory_document(
+                tmp_path,
+                name=f"Pytest 修复策略 {i}",
+                description="pytest 失败优先复现",
+                background="调试任务沉淀。",
+                content="运行目标测试，定位失败断言。",
+                memory_type="project",
+                scope="project",
+                tags=["pytest"],
+            )
+        write_memory_document(
+            tmp_path,
+            name="React 样式策略",
+            description="React 页面视觉约定",
+            background="前端任务沉淀。",
+            content="使用图标按钮和紧凑布局。",
+            memory_type="project",
+            scope="project",
+            tags=["react"],
+        )
+
+        seen_messages: list[str] = []
+
+        async def selector(system_prompt: str, user_message: str) -> str:
+            seen_messages.append(user_message)
+            return json.dumps({"selected_memories": []})
+
+        result = await find_relevant_memories(
+            query="pytest 失败",
+            user_mem_dir=None,
+            project_mem_dir=tmp_path,
+            recent_tools=None,
+            already_surfaced=None,
+            selector=selector,
+            rough_top_k=3,
+        )
+
+        assert result == []
+        assert len(seen_messages) == 1
+        assert seen_messages[0].count("- [project-scope]") == 3
+        assert "React 样式策略" not in seen_messages[0]
+
+    @pytest.mark.asyncio
+    async def test_find_relevant_memories_falls_back_to_local_when_selector_fails(
+        self, tmp_path: Path
+    ) -> None:
+        path = write_memory_document(
+            tmp_path,
+            name="Pytest 修复策略",
+            description="pytest 失败优先复现",
+            background="调试任务沉淀。",
+            content="运行目标测试，定位失败断言。",
+            memory_type="project",
+            scope="project",
+            tags=["pytest"],
+        )
+        assert path is not None
+
+        async def selector(system_prompt: str, user_message: str) -> str:
+            raise RuntimeError("selector unavailable")
+
+        result = await find_relevant_memories(
+            query="pytest 失败",
+            user_mem_dir=None,
+            project_mem_dir=tmp_path,
+            recent_tools=None,
+            already_surfaced=None,
+            selector=selector,
+        )
+
+        assert len(result) == 1
+        assert result[0].path == str(path.resolve())
+
+    @pytest.mark.asyncio
+    async def test_find_relevant_memories_can_run_local_only(
+        self, tmp_path: Path
+    ) -> None:
+        path = write_memory_document(
+            tmp_path,
+            name="Pytest 修复策略",
+            description="pytest 失败优先复现",
+            background="调试任务沉淀。",
+            content="运行目标测试，定位失败断言。",
+            memory_type="project",
+            scope="project",
+            tags=["pytest"],
+        )
+        assert path is not None
+
+        result = await find_relevant_memories(
+            query="pytest 失败",
+            user_mem_dir=None,
+            project_mem_dir=tmp_path,
+            recent_tools=None,
+            already_surfaced=None,
+            selector=None,
+        )
+
+        assert len(result) == 1
+        assert result[0].path == str(path.resolve())
+
+    def test_clear_removes_layered_memory_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        mgr = MemoryManager(str(tmp_path / "project"))
+        path = write_memory_document(
+            mgr.project_mem_dir,
+            name="pytest 策略",
+            description="pytest 失败优先复现",
+            background="调试任务沉淀。",
+            content="先运行目标测试。",
+            memory_type="project",
+            scope="project",
+            tags=["pytest"],
+        )
+        assert path is not None and path.exists()
+
+        mgr.clear()
+        assert not path.exists()
+
+    def test_schedule_fork_extraction_writes_layered_memory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        class FakeClient:
+            async def stream(self, conversation: ConversationManager, system: str = ""):
+                yield TextDelta(
+                    "### 用户偏好\n- 以后回答使用中文\n\n"
+                    "### 项目知识\n- 项目测试使用 pytest\n"
+                )
+                yield StreamEnd(stop_reason="stop")
+
+        mgr = MemoryManager(str(tmp_path / "project"))
+        conv = ConversationManager()
+        conv.add_user_message("记住：以后回答使用中文，项目测试使用 pytest")
+        conv.add_assistant_message("好的")
+
+        thread = mgr.schedule_fork_extraction(
+            FakeClient(), conv, protocol="anthropic", delay_seconds=0.01
+        )
+        assert thread is not None
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+
+        docs = list_memory_documents(mgr.user_mem_dir, mgr.project_mem_dir)
+        rendered = render_memory_documents(docs)
+        assert "以后回答使用中文" in rendered
+        assert "项目测试使用 pytest" in rendered
+
+    @pytest.mark.asyncio
+    async def test_schedule_fork_extraction_uses_supplied_event_loop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        expected_loop = asyncio.get_running_loop()
+
+        class LoopCheckingClient:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def stream(self, conversation: ConversationManager, system: str = ""):
+                assert asyncio.get_running_loop() is expected_loop
+                self.calls += 1
+                yield TextDelta("### 用户偏好\n- 以后回答使用中文\n")
+                yield StreamEnd(stop_reason="stop")
+
+        client = LoopCheckingClient()
+        mgr = MemoryManager(str(tmp_path / "project"))
+        conv = ConversationManager()
+        conv.add_user_message("记住：以后回答使用中文")
+        conv.add_assistant_message("好的")
+
+        thread = mgr.schedule_fork_extraction(
+            client,
+            conv,
+            protocol="anthropic",
+            delay_seconds=0,
+            loop=expected_loop,
+        )
+        assert thread is not None
+        await asyncio.to_thread(thread.join, 2)
+
+        rendered = ""
+        for _ in range(20):
+            docs = list_memory_documents(mgr.user_mem_dir, mgr.project_mem_dir)
+            rendered = render_memory_documents(docs)
+            if "以后回答使用中文" in rendered:
+                break
+            await asyncio.sleep(0.01)
+
+        assert client.calls == 1
+        assert "以后回答使用中文" in rendered
+
+    def test_concurrent_fork_extraction_runs_only_one_model_call(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        class SlowFakeClient:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def stream(self, conversation: ConversationManager, system: str = ""):
+                self.calls += 1
+                await asyncio.sleep(0.05)
+                yield TextDelta("### 用户偏好\n- 以后回答使用中文\n")
+                yield StreamEnd(stop_reason="stop")
+
+        client = SlowFakeClient()
+        mgr = MemoryManager(str(tmp_path / "project"))
+        conv = ConversationManager()
+        conv.add_user_message("记住：以后回答使用中文")
+        conv.add_assistant_message("好的")
+
+        first = mgr.schedule_fork_extraction(
+            client, conv, protocol="anthropic", delay_seconds=0
+        )
+        second = mgr.schedule_fork_extraction(
+            client, conv, protocol="anthropic", delay_seconds=0
+        )
+        assert first is not None
+        assert second is not None
+        first.join(timeout=2)
+        second.join(timeout=2)
+
+        assert client.calls == 1
 
 # =========================================================================
 # H. 会话注入长期记忆 inject_long_term_memory

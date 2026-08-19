@@ -33,8 +33,10 @@ async def handle_memory(ctx: CommandContext) -> None:
     elif sub == "edit":
         ctx.ui.add_system_message(
             f"编辑记忆文件：\n"
-            f"  用户级: {mm.user_path}\n"
-            f"  项目级: {mm.project_path}"
+            f"  用户级旧文件: {mm.user_path}\n"
+            f"  项目级旧文件: {mm.project_path}\n"
+            f"  用户级分层目录: {mm.user_mem_dir}\n"
+            f"  项目级分层目录: {mm.project_mem_dir}"
         )
 
     else:
@@ -50,4 +52,3 @@ MEMORY_COMMAND = Command(
     type=CommandType.LOCAL,
     handler=handle_memory,
 )
-

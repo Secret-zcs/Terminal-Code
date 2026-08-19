@@ -54,6 +54,7 @@ ASYNC_AGENT_ALLOWED_TOOLS: frozenset[str] = frozenset({
 
 TEAMMATE_COORDINATION_TOOLS: frozenset[str] = frozenset({
     "TaskCreate",
+    "TaskClaim",
     "TaskGet",
     "TaskList",
     "TaskUpdate",
@@ -142,6 +143,7 @@ def build_teammate_tools(
 ) -> ToolRegistry:
     from mewcode.teams.models import BackendType
     from mewcode.tools.send_message import SendMessageTool
+    from mewcode.tools.task_claim import TaskClaimTool
     from mewcode.tools.task_create import TaskCreateTool
     from mewcode.tools.task_get import TaskGetTool
     from mewcode.tools.task_list import TaskListTool
@@ -174,6 +176,7 @@ def build_teammate_tools(
 
     coordination_tools = [
         TaskCreateTool(team_manager, team_name, agent_name),
+        TaskClaimTool(team_manager, team_name, agent_name),
         TaskGetTool(team_manager, team_name),
         TaskListTool(team_manager, team_name),
         TaskUpdateTool(team_manager, team_name),

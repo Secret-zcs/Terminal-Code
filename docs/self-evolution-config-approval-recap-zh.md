@@ -3158,3 +3158,100 @@ benchmark 现在对成功和失败候选都记录尝试次数与 token；即使�
 ## 后续真实调用
 
 配置加载验证不等于模型调用验证。真实评测应先使用 `--max-cases 1`，确认 DeepSeek 的 Anthropic 兼容端点可用，再扩大到 3 个或 19 个 case；结果只写入 `.mewcode/evolution/benchmarks/`，并记录模型输出是否通过候选 Skill 的完整门禁。
+
+## Repository Double-Run 审批边界
+
+日期：2026-08-15
+
+新增 repository double-run benchmark 后，自进化评测多了一个更接近真实代码任务的量化面：同一 fixture 被复制成 baseline/evolved 两份隔离仓库，baseline 不注入候选 Skill，evolved 注入候选 Skill，然后比较测试通过、回归通过、scope violation、patch size、token、耗时、工具调用和权限拒绝。
+
+审批边界保持不变：
+
+- `run_repository_double_run_benchmark()` 只运行隔离评测，不调用 `submit_skill_approval_request()`、`resolve_skill_approval_request()` 或 `promote()`。
+- `render_repository_benchmark_markdown()` 的 `evolved_success` 只是双跑 runner 的任务成功谓词，不等于 approval-ready，不等于用户批准，也不等于正式 Skill 已启用。
+- CLI `scripts/run_repository_double_run_benchmark.py` 默认读取候选 Skill 文本或演示 SOP，只输出 JSON/Markdown/summary；`--from-json` 只离线重渲染已有结果；无论 `self_evolution.skill_approval_mode` 如何设置，都不会修改正式 `.mewcode/skills/`。
+- 真实 provider 运行必须显式提供配置和 API key；`--help` 不触发 provider 初始化，避免无意产生模型费用。
+
+本阶段验证已随第二个 repository fixture 更新：`tests/test_repository_double_run_benchmark.py` 为 `65 passed`，自进化相关聚合含 repository benchmark 为 `294 passed`。内置样本覆盖 `calculator-zero` 和 `slugify-punctuation` 两类 failure mode；前者初始全量测试 `1 failed, 2 passed`、回归子集 `2 passed, 1 deselected`，后者初始全量测试 `2 failed, 2 passed`、回归子集 `2 passed, 2 deselected`，用于证明 fixture 初始状态确实需要代码修复且回归面可独立验证。
+
+## 2026-08-15 全量回归状态
+
+Repository double-run benchmark 接入并扩展到两个内置仓库样本后，全仓回归已收口：`PYTHONPATH=. pytest -q` 结果为 `870 passed, 1 xfailed`。同步验证了 `py_compile`；最新文档同步后继续以 `git diff --check` 做收尾检查。
+
+后续补充：repository benchmark 已新增 `metrics` 摘要层，报告会展示 baseline/evolved 成功率、成功率提升百分点、回归通过率、provider failure run rate、token delta、平均耗时差和 patch-size delta。`--from-json` 可以在不重新调用 provider 的情况下给旧 JSON 补写这些指标，`--summary-output` 可以生成可复制的 impact summary。该层只派生隔离评测结果，不审批、不 promote、不写正式 Skill。
+
+## 2026-08-15 Repository Double-Run 真实调用结果
+
+已使用默认 provider `deepseek-v4-flash` 的 Anthropic 兼容端点执行真实 repository double-run。先跑 `--max-cases 1`，再跑完整 `--max-cases 2`；产物写入 `.mewcode/evolution/benchmarks/repository-real-max1-20260815-210815.*` 和 `.mewcode/evolution/benchmarks/repository-real-max2-20260815-210913.*`。
+
+完整 2-case 结果：baseline 成功率 `100.00%`，evolved 成功率 `100.00%`，成功率提升 `0.00 pp / 0 cases`，evolved 回归通过率 `100.00%`，provider/runner/test timeout 失败率均为 `0.00%`，out-of-scope case rate 为 `0.00%`。成本侧，evolved 相比 baseline 多 `+1572` input tokens、`+1244` output tokens、平均耗时 `+5.70s`、补丁规模 `+10` 行。
+
+审批边界没有变化：这次真实调用只证明 runner 和 endpoint 可用，并给默认候选 Skill 产出首轮真实效果指标；它不会提交审批请求，不会 promote，也不会修改正式 `.mewcode/skills/`。本轮结论不能写成“自进化提升了任务成功率”，更准确的口径是“真实 provider repository double-run 已跑通，首轮默认候选 Skill 未带来成功率提升，但保持 100% 回归通过且无 provider failure / scope violation”。
+
+## 2026-08-15 SWE-bench Lite 11-case 扩样结果
+
+在修正默认候选 Skill SOP 和 repository benchmark snapshot 规则后，真实 provider repository double-run 已扩样到 11 个可执行 SWE-bench Lite case、22 次隔离 agent run。所有筛入 case 均先验证为目标测试失败、回归子集通过；环境不稳定或 test id 无法可靠映射的候选不计入效果指标。
+
+扩样结果：baseline 成功率 `9.09%`，evolved 成功率 `27.27%`，成功率提升 `+18.18 pp / +2 cases`；evolved 回归通过率 `100.00%`；provider failure、runner failure、test timeout 均为 `0.00%`；out-of-scope case rate 为 `36.36%`。成本侧，evolved 相比 baseline 多 `+15232` input tokens、`+13599` output tokens，平均耗时增加 `+17.43s`，补丁规模减少 `-16` 行。
+
+审批边界仍不变：这些结果只用于 canary 和量化评估，不会自动提交审批、不自动 promote、不写正式 Skill。当前可以进入对外材料的谨慎口径是“在 11 个 SWE-bench Lite 真实仓库任务上，自进化候选带来 `+18.18pp` 成功率提升，同时暴露成本和 scope 风险；因此把 before/after 成功率、回归通过率、越权修改率、token 和耗时纳入晋升门禁”。
+
+## 2026-08-16 Repository Canary Gate 复测结果
+
+已进一步把 repository benchmark 从效果统计升级为候选晋升 canary gate。新指标区分 baseline/evolved 各自的 out-of-scope rate，并在满足以下条件时才允许 gate pass：成功 case 数正向提升、evolved 回归通过率 `100%`、evolved 越权修改率 `0%`、provider/runner/test timeout 失败率均为 `0%`。
+
+同一 11 个 SWE-bench Lite case 在约束注入后复测：baseline 成功率 `63.64%`，evolved 成功率 `90.91%`，成功率提升 `+27.27 pp / +3 cases`；evolved 回归通过率 `100.00%`，evolved out-of-scope case rate `0.00%`，provider/runner/test timeout 失败率均为 `0.00%`，canary gate 结果为 `pass (positive lift with clean evolved runs)`。成本侧，evolved 多 `+12554` input tokens、`+7692` output tokens，但平均耗时减少 `19.63s`。
+
+审批边界仍保持：canary gate pass 只表示候选 Skill 满足离线晋升门槛，不等于已经写入正式 `.mewcode/skills/`；最终 promotion 仍由现有审批策略和用户确认控制。
+
+## 2026-08-16 SWE-bench Lite 20-case 扩样与门禁拦截
+
+为增强简历和项目复盘的数据支撑，repository double-run 继续扩展到 20 个可执行 SWE-bench Lite case、40 次隔离 agent run。新增 9 个 SymPy case 均先通过预检：目标测试初始失败、回归子集初始通过；未稳定复现或回归子集失败的候选不计入指标。
+
+20-case 结果：baseline 成功率 `75.00%`，evolved 成功率 `75.00%`，成功率提升 `0.00 pp / 0 cases`；evolved 回归通过率 `100.00%`，evolved out-of-scope case rate `0.00%`，provider/runner/test timeout 失败率均为 `0.00%`。成本侧，evolved 多 `+10758` input tokens、`+29070` output tokens，平均耗时增加 `18.11s`，patch 规模增加 `+13` 行。
+
+本轮 canary gate 结果为 `fail (no positive task-success lift)`，因此不会提交审批、不会 promote、不会写正式 Skill。该结果说明 gate 不只记录正向收益，也能在扩样后没有成功率提升时阻断候选晋升，避免把小样本偶然收益或负迁移 SOP 推到正式运行路径。
+
+同时验证了两版更激进/更精简的 evolved SOP，均在 5-case 失败子集上出现 `-40.00 pp` 成功率变化，已回退，不进入正式候选。对外口径应区分两类数据：11-case constrained run 是当前最佳正向效果证据；20-case expanded run 是稳健性和晋升门禁证据。
+
+## 2026-08-16 Evolved 专属预算实验
+
+repository benchmark 新增 `--evolved-max-iterations`，允许只给 evolved 候选更多执行轮次，用来验证自进化候选是否因为预算不足而没有完成补丁。该参数默认关闭；不传时 baseline/evolved 仍使用相同 `max_iterations`，历史结果可比性不变。
+
+真实 5-case 失败子集复测使用 baseline `20` 轮、evolved `35` 轮。结果：baseline 成功率 `40.00%`，evolved 成功率 `40.00%`，成功率提升 `0.00 pp / 0 cases`；evolved 回归通过率 `100.00%`，越权修改率 `0.00%`，provider/runner/test timeout 失败率均为 `0.00%`。成本侧，evolved 多 `+24183` input tokens、`+55323` output tokens，平均耗时增加 `86.60s`。
+
+结论：单纯增加 evolved 预算不是有效优化，不能作为默认策略，也不能绕过 canary gate。该参数保留为显式实验开关，用于后续量化“额外预算是否真的带来成功率收益”；没有正向 lift 时仍不提交审批、不 promote、不写正式 Skill。
+
+## 2026-08-16 Baseline 复用与评测成本优化
+
+repository benchmark 新增 `--reuse-baseline-json`，用于候选 Skill 迭代时复用已有 JSON 中的 baseline 结果，只重新运行 evolved 侧。该能力默认关闭；开启后仍会按相同 case id 计算 baseline/evolved delta、回归通过率、越权修改率、provider/runner/test timeout failure 和 canary gate，不会跳过晋升门禁。
+
+真实 smoke 使用 20-case JSON 作为 baseline 来源，只跑 `max_cases=1` 的 evolved 侧，结果显示 comparable run count 为 `2`、actual executed run count 为 `1`，provider run reduction rate 为 `50.00%`。该优化不改变候选行为，只减少重复 baseline provider 调用；在同一 20-case fixture 集合上迭代候选时，预期可把每轮真实 provider run 从 `40` 降到 `20`。
+
+审批边界保持不变：baseline 复用只降低评测成本，不会提交审批、不 promote、不写正式 Skill；若复用后没有正向成功率提升或出现回归/scope/provider failure，canary gate 仍会失败。
+
+## 2026-08-16 定向 Case 复测
+
+repository benchmark 新增 `--case-id` 和 `--case-ids-file`，可以只复测失败、回退或高风险 case，并继续复用已有 baseline。该能力适合候选 Skill 迭代中的低成本预筛；完整晋升仍应回到完整 fixture 集或明确的 canary set。
+
+真实 targeted canary 选择 20-case fixture 集中的 2 个问题样例，并复用 20-case 历史 JSON baseline，只运行 evolved 侧。结果：完整 fixture 可比 run 数为 `40`，实际 provider run 数为 `2`，full-fixture provider run reduction rate 为 `95.00%`；baseline/evolved 成功率均为 `50.00%`，成功率提升 `0.00 pp / 0 cases`，evolved 回归通过率 `100.00%`，越权修改率 `0.00%`，provider/runner/test timeout 失败率均为 `0.00%`，canary gate 因无正向 lift 失败。
+
+审批边界：定向复测只用于快速发现候选是否值得进入更大 canary；它不会提交审批、不 promote、不写正式 Skill，也不能单独证明完整 20-case 或 11-case 指标。
+
+## 2026-08-16 Failure Taxonomy 与 Strategy Router 审批边界
+
+repository benchmark 新增 failure taxonomy，可离线把已有 JSON 分类为 task family、outcome、baseline/evolved failure type，并生成 targeted buckets。该分析不触发 provider，可用于选择下一轮 `--case-id` 复测样例。
+
+20-case 离线归因显示：`both_success=14`、`lift=1`、`regression=1`、`both_failed=4`；evolved 失败类型集中在 `tests_failed_no_patch=5`。这说明当前瓶颈不是 scope 或回归，而是部分失败 case 没有形成有效源码补丁。
+
+同时新增实验性 `--strategy-router`，只在 evolved 侧按任务族追加短策略提示，默认关闭。真实 targeted canary 在 2 个问题 case 上验证该 router：baseline 成功率 `50.00%`，evolved 成功率 `0.00%`，成功率变化 `-50.00 pp / -1 case`；回归和 scope 仍干净，但 canary gate 因负向 lift 失败。
+
+审批边界：failure taxonomy 可作为候选迭代和 case 选择依据；当前 strategy router 已被真实评测证明负迁移，不能默认启用、不能提交审批、不能 promote。只有后续 router 版本在 targeted canary 和完整 canary 上同时产生正向 lift 并满足回归/scope/failure gate，才可进入候选晋升流程。
+
+## 2026-08-16 Failure Bucket 自动复测
+
+repository benchmark 新增 `--case-bucket`，可以直接从 `--reuse-baseline-json` 的 failure taxonomy 中展开 targeted bucket。例如 `--case-bucket regression` 会自动选中历史 JSON 中的 regression case，无需人工复制 case id。
+
+真实 smoke 使用 20-case JSON 的 `regression` bucket，自动展开为 `swebench_sympy__sympy-11400`，复用 baseline，只运行 evolved 侧。结果：完整 fixture 可比 run 数为 `40`，实际 provider run 数为 `1`，full-fixture provider run reduction rate 为 `97.50%`；baseline/evolved 成功率均为 `100.00%`，回归通过率 `100.00%`，越权修改率 `0.00%`，provider/runner/test timeout 失败率均为 `0.00%`。
+
+审批边界：`--case-bucket` 是低成本预筛和复测入口，不等于完整 canary。它不会提交审批、不 promote、不写正式 Skill；若 bucket 复测发现正向 lift，仍需要回到更大的 canary set 验证泛化。

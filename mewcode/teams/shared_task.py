@@ -9,6 +9,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - 非 POSIX（Windows）无 fcntl
+    fcntl = None
+
 
 @dataclass
 class SharedTask:
@@ -133,3 +138,30 @@ class SharedTaskStore:
         self._tasks.clear()
         self._next_id = 1
         self._save()
+
+    def claim(self, task_id: str, agent_name: str) -> bool:
+        """原子地认领一个 pending 任务。
+
+        用 fcntl.flock 独占文件锁保护整个"读-判-写"序列，跨进程/线程保证
+        同一任务只会被一个认领者置为 in_progress。任务不存在或已被认领
+        （status != pending）时返回 False，不产生任何修改。
+        """
+        lock_path = self._path.with_suffix(self._path.suffix + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("w") as lock_file:
+            if fcntl is not None:
+                fcntl.flock(lock_file, fcntl.LOCK_EX)
+            try:
+                self._load()
+                task = self._tasks.get(task_id)
+                if task is None:
+                    return False
+                if task.status != "pending":
+                    return False
+                task.status = "in_progress"
+                task.assignee = agent_name
+                self._save()
+                return True
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lock_file, fcntl.LOCK_UN)

@@ -1,0 +1,7 @@
+{
+  "test_command": "python -m pytest -q",
+  "regression_command": "python -m pytest -q -k 'not divide_by_zero'",
+  "expected_tests": ["tests/test_calculator.py"],
+  "allowed_paths": ["calculator.py", "tests/test_calculator.py"],
+  "forbidden_paths": [".mewcode/**", "secrets/**"]
+}

@@ -247,6 +247,124 @@ class TestSharedTaskStore:
         assert len(tasks) == 1
         assert tasks[0].title == "Persisted task"
 
+    @pytest.mark.asyncio
+    @pytest.mark.xfail(
+        strict=False,
+        reason="已知缺陷：基于 update() 的读-判-写认领存在竞态，请改用原子 claim()",
+    )
+    async def test_naive_check_then_act_claim_has_race(self, tmp_dir):
+        """演示 bug：即使加了"先查 pending 再认领"的检查，读-判-写之间仍有竞态窗口。
+
+        两个协程会同时读到 pending、双双通过检查、双双把任务改成自己认领。
+        期望只有一个人成功——当前 update() 无锁无 CAS，这里两个都返回 True。
+        """
+        store = SharedTaskStore(Path(tmp_dir) / "tasks.json")
+        store.init_empty()
+        task = store.create(title="Refactor auth")
+
+        async def claimer(agent: str) -> bool:
+            # 朴素认领：先读状态再改；读与写之间用 sleep 强制制造竞态窗口
+            current = store.get(task.id)
+            await asyncio.sleep(0)  # 竞态窗口：另一个协程此刻也读到了 pending
+            if current.status != "pending":
+                return False
+            store.update(task.id, status="in_progress", assignee=agent)
+            return True
+
+        results = await asyncio.gather(claimer("alice"), claimer("bob"))
+
+        # 正确行为：同一任务只能有一个认领者
+        assert results.count(True) == 1
+
+    @pytest.mark.asyncio
+    async def test_claim_is_atomic_across_threads(self, tmp_dir):
+        """修复验证：新增原子 claim()（基于 fcntl 文件锁），并发认领同一任务只有一个成功。"""
+        store = SharedTaskStore(Path(tmp_dir) / "tasks.json")
+        store.init_empty()
+        task = store.create(title="Refactor auth")
+
+        async def claimer(agent: str) -> bool:
+            # 模拟跨进程并发：to_thread 用独立线程（各自打开锁文件 → flock 串行化）
+            return await asyncio.to_thread(store.claim, task.id, agent)
+
+        results = await asyncio.gather(claimer("alice"), claimer("bob"))
+
+        assert results.count(True) == 1
+
+        winner = "alice" if results[0] else "bob"
+        final = store.get(task.id)
+        assert final.status == "in_progress"
+        assert final.assignee == winner
+
+    def test_claim_edge_cases(self, tmp_dir):
+        """claim() 边界：已认领的任务拒绝再认领；不存在的任务返回 False。"""
+        store = SharedTaskStore(Path(tmp_dir) / "tasks.json")
+        store.init_empty()
+        task = store.create(title="Refactor auth")
+
+        # 第一次认领成功
+        assert store.claim(task.id, "alice") is True
+
+        # 已被认领（in_progress）→ 拒绝
+        assert store.claim(task.id, "bob") is False
+
+        # 不存在的任务 → False
+        assert store.claim("999", "bob") is False
+
+        # 完成态任务也拒绝认领
+        store.update(task.id, status="completed")
+        assert store.claim(task.id, "carol") is False
+
+# =====================================================================
+# 2.5 TaskClaimTool（原子认领工具）
+# =====================================================================
+
+class TestTaskClaimTool:
+    def _make(self, tmp_dir):
+        from mewcode.teams.manager import TeamManager
+        tm = TeamManager()
+        store = SharedTaskStore(Path(tmp_dir) / "tasks.json")
+        store.init_empty()
+        tm._task_stores["test-team"] = store
+        return tm, store
+
+    @pytest.mark.asyncio
+    async def test_claims_pending_task(self, tmp_dir):
+        from mewcode.tools.task_claim import TaskClaimParams, TaskClaimTool
+        tm, store = self._make(tmp_dir)
+        task = store.create(title="Refactor auth")
+        tool = TaskClaimTool(tm, "test-team", agent_name="alice")
+        result = await tool.execute(TaskClaimParams(task_id=task.id))
+        assert result.is_error is False
+        claimed = store.get(task.id)
+        assert claimed.status == "in_progress"
+        assert claimed.assignee == "alice"
+
+    @pytest.mark.asyncio
+    async def test_rejects_double_claim(self, tmp_dir):
+        from mewcode.tools.task_claim import TaskClaimParams, TaskClaimTool
+        tm, store = self._make(tmp_dir)
+        task = store.create(title="Refactor auth")
+        store.claim(task.id, "alice")
+        tool = TaskClaimTool(tm, "test-team", agent_name="bob")
+        result = await tool.execute(TaskClaimParams(task_id=task.id))
+        assert result.is_error is True
+        assert store.get(task.id).assignee == "alice"
+
+    def test_claim_in_coordination_tools(self):
+        assert "TaskClaim" in TEAMMATE_COORDINATION_TOOLS
+        assert "TaskClaim" in IN_PROCESS_TEAMMATE_ALLOWED_TOOLS
+
+    def test_teammate_registry_has_task_claim(self, tmp_dir):
+        tm, store = self._make(tmp_dir)
+        base = make_registry("ReadFile", "Grep")
+        teammate_reg = build_teammate_tools(
+            base, tm, "test-team", agent_id="a1",
+            agent_name="alice", backend_type="in-process",
+        )
+        names = {t.name for t in teammate_reg.list_tools()}
+        assert "TaskClaim" in names
+
 # =====================================================================
 # 3. Mailbox
 # =====================================================================

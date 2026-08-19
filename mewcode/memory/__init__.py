@@ -6,6 +6,14 @@
 
 from mewcode.memory.auto_memory import MemoryManager
 from mewcode.memory.instructions import load_instructions, process_includes
+from mewcode.memory.layered import (
+    MemoryDocument,
+    list_memory_documents,
+    parse_memory_document,
+    render_memory_documents,
+    select_relevant_memory_documents,
+    write_memory_document,
+)
 from mewcode.memory.recall import (
     RelevantMemory,
     find_relevant_memories,
@@ -26,6 +34,7 @@ from mewcode.memory.session import (
 
 __all__ = [
     "MemoryManager",
+    "MemoryDocument",
     "RelevantMemory",
     "ResumeResult",
     "Session",
@@ -35,10 +44,14 @@ __all__ = [
     "find_relevant_memories",
     "generate_session_summary",
     "load_instructions",
+    "list_memory_documents",
     "make_compact_boundary",
+    "parse_memory_document",
     "parse_compact_boundary",
     "process_includes",
+    "render_memory_documents",
     "render_reminder",
+    "select_relevant_memory_documents",
     "validate_message_chain",
+    "write_memory_document",
 ]
-

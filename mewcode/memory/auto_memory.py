@@ -4,10 +4,20 @@
 # 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
+import asyncio
+import copy
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
 from mewcode.conversation import ConversationManager, Message
+from mewcode.memory.layered import (
+    list_memory_documents,
+    render_memory_documents,
+    select_relevant_memory_documents,
+    write_legacy_memory_documents,
+)
 
 USER_MEMORIES_RELPATH = ".mewcode/memories.md"
 PROJECT_MEMORIES_RELPATH = ".mewcode/memories.md"
@@ -49,6 +59,8 @@ class MemoryManager:
         self._user_path = Path.home() / USER_MEMORIES_RELPATH
         self._project_path = Path(project_root) / PROJECT_MEMORIES_RELPATH
         self._last_extraction_msg_count = 0
+        self._extraction_lock = threading.Lock()
+        self._io_lock = threading.RLock()
 
 
     @property
@@ -81,21 +93,51 @@ class MemoryManager:
         return self._project_path.parent / "memory"
 
     def load(self) -> str:
-        sections: list[str] = []
+        with self._io_lock:
+            sections: list[str] = []
 
-        if self._user_path.exists():
-            content = self._user_path.read_text(encoding="utf-8").strip()
+            content = self._read_text(self._user_path)
             if content:
                 sections.append(content)
 
-        if self._project_path.exists():
-            content = self._project_path.read_text(encoding="utf-8").strip()
+            content = self._read_text(self._project_path)
             if content:
                 sections.append(content)
 
-        return "\n\n".join(sections)
+            return "\n\n".join(sections)
+
+    def load_relevant(self, query: str, top_k: int = 5) -> str:
+        """Return task-relevant layered memories, with legacy fallback.
+
+        New memory is stored as one Markdown file per memory under the user and
+        project memory directories. If no layered document is relevant yet, fall
+        back to the old flat memories.md files so existing users do not lose
+        context before their memories are migrated.
+        """
+        query = query.strip()
+        with self._io_lock:
+            if query:
+                docs = list_memory_documents(self.user_mem_dir, self.project_mem_dir)
+                selected = select_relevant_memory_documents(query, docs, top_k=top_k)
+                rendered = render_memory_documents(selected)
+                if rendered:
+                    return rendered
+            return self.load()
 
     async def extract(
+        self,
+        client: Any,
+        conversation: ConversationManager,
+        protocol: str,
+    ) -> None:
+        if not self._extraction_lock.acquire(blocking=False):
+            return
+        try:
+            await self._extract_once(client, conversation, protocol)
+        finally:
+            self._extraction_lock.release()
+
+    async def _extract_once(
         self,
         client: Any,
         conversation: ConversationManager,
@@ -149,9 +191,69 @@ class MemoryManager:
         if not collected:
             return
 
-        self._write_memories(collected)
+        context_excerpt = "\n".join(conv_lines[-6:])[:1000]
+        background_note = (
+            "最近对话片段：\n" + context_excerpt if context_excerpt else ""
+        )
+        self._write_memories(collected, background_note=background_note)
 
-    def _write_memories(self, content: str) -> None:
+    def schedule_fork_extraction(
+        self,
+        client: Any,
+        conversation: ConversationManager,
+        protocol: str,
+        delay_seconds: float = 15.0,
+        loop: asyncio.AbstractEventLoop | None = None,
+    ) -> threading.Thread | None:
+        """Run memory extraction in a delayed daemon thread.
+
+        This mirrors the Claude-Code style end-of-conversation background fork:
+        the foreground response is not blocked, a snapshot of the conversation is
+        handed to a delayed background worker, and the existing extractor writes
+        layered Markdown memories when it finishes. When a running event loop is
+        supplied, the worker only handles the delay and schedules extraction back
+        on that loop so async provider clients are not used from a different
+        event loop.
+        """
+        if not conversation.history:
+            return None
+
+        snapshot = ConversationManager()
+        snapshot.history = copy.deepcopy(conversation.history)
+        snapshot.env_injected = conversation.env_injected
+        snapshot.ltm_injected = conversation.ltm_injected
+        snapshot.last_input_tokens = conversation.last_input_tokens
+        snapshot.baseline_tokens = conversation.baseline_tokens
+        snapshot.anchor_count = conversation.anchor_count
+
+        def runner() -> None:
+            try:
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
+                if loop is not None and loop.is_running():
+                    loop.call_soon_threadsafe(
+                        lambda: asyncio.create_task(
+                            self.extract(client, snapshot, protocol)
+                        )
+                    )
+                    return
+                asyncio.run(self.extract(client, snapshot, protocol))
+            except Exception:
+                return
+
+        thread = threading.Thread(
+            target=runner,
+            name="mewcode-memory-fork",
+            daemon=True,
+        )
+        thread.start()
+        return thread
+
+    def _write_memories(self, content: str, background_note: str = "") -> None:
+        with self._io_lock:
+            self._write_memories_locked(content, background_note=background_note)
+
+    def _write_memories_locked(self, content: str, background_note: str = "") -> None:
         user_sections: list[str] = []
         project_sections: list[str] = []
 
@@ -175,16 +277,23 @@ class MemoryManager:
             )
 
         if user_sections:
-            self._user_path.parent.mkdir(parents=True, exist_ok=True)
-            self._user_path.write_text(
-                "\n".join(user_sections).strip() + "\n", encoding="utf-8"
+            self._write_text_atomic(
+                self._user_path,
+                "\n".join(user_sections).strip() + "\n",
             )
 
         if project_sections:
-            self._project_path.parent.mkdir(parents=True, exist_ok=True)
-            self._project_path.write_text(
-                "\n".join(project_sections).strip() + "\n", encoding="utf-8"
+            self._write_text_atomic(
+                self._project_path,
+                "\n".join(project_sections).strip() + "\n",
             )
+
+        write_legacy_memory_documents(
+            content,
+            user_mem_dir=self.user_mem_dir,
+            project_mem_dir=self.project_mem_dir,
+            source_context=background_note,
+        )
 
     @staticmethod
     def _is_placeholder(line: str) -> bool:
@@ -217,25 +326,67 @@ class MemoryManager:
 
 
     def clear(self) -> None:
-        if self._user_path.exists():
-            self._user_path.write_text("", encoding="utf-8")
-        if self._project_path.exists():
-            self._project_path.write_text("", encoding="utf-8")
+        with self._io_lock:
+            if self._user_path.exists():
+                self._write_text_atomic(self._user_path, "")
+            if self._project_path.exists():
+                self._write_text_atomic(self._project_path, "")
+            for directory in (self.user_mem_dir, self.project_mem_dir):
+                if not directory.is_dir():
+                    continue
+                for fp in directory.rglob("*.md"):
+                    if fp.is_file():
+                        try:
+                            fp.unlink()
+                        except OSError:
+                            pass
 
     def get_display_text(self) -> str:
-        parts: list[str] = []
+        with self._io_lock:
+            parts: list[str] = []
 
-        if self._user_path.exists():
-            content = self._user_path.read_text(encoding="utf-8").strip()
+            layered = list_memory_documents(self.user_mem_dir, self.project_mem_dir)
+            if layered:
+                lines = ["[分层记忆 Markdown]"]
+                for doc in layered:
+                    desc = f" - {doc.description}" if doc.description else ""
+                    lines.append(f"{doc.scope}/{doc.type}: {doc.path}{desc}")
+                parts.append("\n".join(lines))
+
+            content = self._read_text(self._user_path)
             if content:
                 parts.append(f"[用户级] {self._user_path}\n{content}")
 
-        if self._project_path.exists():
-            content = self._project_path.read_text(encoding="utf-8").strip()
+            content = self._read_text(self._project_path)
             if content:
                 parts.append(f"[项目级] {self._project_path}\n{content}")
 
-        if not parts:
-            return "当前没有任何自动记忆。"
+            if not parts:
+                return "当前没有任何自动记忆。"
 
-        return "\n\n".join(parts)
+            return "\n\n".join(parts)
+
+    @staticmethod
+    def _read_text(path: Path) -> str:
+        try:
+            if path.exists():
+                return path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+        return ""
+
+    @staticmethod
+    def _write_text_atomic(path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(
+            f".{path.name}.{threading.get_ident()}.{time.time_ns()}.tmp"
+        )
+        try:
+            tmp.write_text(content, encoding="utf-8")
+            tmp.replace(path)
+        finally:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass

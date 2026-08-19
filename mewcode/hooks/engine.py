@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass
 
 from mewcode.hooks.executors import execute_action
@@ -47,9 +48,29 @@ class HookEngine:
         for hook in matched:
             hook.mark_executed()
             if hook.async_exec:
-                asyncio.ensure_future(self._run_single(hook, ctx))
+                thread = threading.Thread(
+                    target=self._run_single_in_background,
+                    args=(hook, ctx),
+                    daemon=True,
+                )
+                thread.start()
             else:
                 await self._run_single(hook, ctx)
+
+
+    def _run_single_in_background(self, hook: Hook, ctx: HookContext) -> None:
+        try:
+            asyncio.run(self._run_single(hook, ctx))
+        except Exception as e:
+            log.warning("Hook '%s' background execution error: %s", hook.id, e)
+            self._notifications.append(
+                HookNotification(
+                    hook_id=hook.id,
+                    event=hook.event,
+                    output=str(e),
+                    success=False,
+                )
+            )
 
 
     async def _run_single(self, hook: Hook, ctx: HookContext) -> None:

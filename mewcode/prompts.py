@@ -53,6 +53,8 @@ IDENTITY_SECTION = PromptSection(
     ),
 )
 
+BASE_PERSONA = IDENTITY_SECTION.content
+
 SYSTEM_SECTION = PromptSection(
     name="System",
     priority=10,
@@ -203,6 +205,7 @@ _PLAN_MODE_SPARSE_REMINDER = (
     "Plan mode still active (see full instructions earlier in conversation). "
     "Read-only except plan file ({plan_path}). Follow 5-phase workflow."
 )
+PLAN_MODE_INSTRUCTIONS = "Plan mode is active. You may only take read-only actions except for the plan file."
 
 _REMINDER_INTERVAL = 5
 
@@ -239,6 +242,7 @@ def build_plan_mode_reminder(
 
 def build_system_prompt(
     hook_prompts: list[str] | None = None,
+    plan_mode: bool = False,
     coordinator_mode: bool = False,
     agent_catalog: list[tuple[str, str]] | None = None,
     custom_instructions: str = "",
@@ -259,6 +263,13 @@ def build_system_prompt(
     b.add(TONE_STYLE_SECTION)
     b.add(TEXT_OUTPUT_SECTION)
     b.add(environment_section(work_dir))
+
+    if plan_mode:
+        b.add(PromptSection(
+            name="PlanMode",
+            priority=75,
+            content=PLAN_MODE_INSTRUCTIONS,
+        ))
 
     if custom_instructions:
         b.add(PromptSection(

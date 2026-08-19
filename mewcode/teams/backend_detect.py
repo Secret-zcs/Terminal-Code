@@ -34,15 +34,7 @@ def detect_backend(
     teammate_mode: str = "",
     is_interactive: bool = True,
 ) -> BackendType:
-    """Default to in-process for real-time progress tracking."""
-    return BackendType.IN_PROCESS
-
-
-def detect_pane_backend(
-    teammate_mode: str = "",
-    is_interactive: bool = True,
-) -> BackendType:
-    """Detect pane backend when user explicitly requests tmux."""
+    """Detect the best available teammate backend."""
     if teammate_mode == "in-process" or not is_interactive:
         return BackendType.IN_PROCESS
 
@@ -62,3 +54,11 @@ def detect_pane_backend(
         "  - iTerm2 + it2 CLI: https://iterm2.com/utilities/it2check\n"
         "Or set 'teammate_mode: \"in-process\"' in config.yaml to use in-process backend."
     )
+
+
+def detect_pane_backend(
+    teammate_mode: str = "",
+    is_interactive: bool = True,
+) -> BackendType:
+    """Detect pane backend when user explicitly requests tmux."""
+    return detect_backend(teammate_mode, is_interactive)

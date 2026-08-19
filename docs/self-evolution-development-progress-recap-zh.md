@@ -5744,3 +5744,841 @@ PYTHONPATH=. pytest tests/test_proposer_benchmark.py tests/test_fork_skill_propo
 真实定向复测：数据集第 7、14 条历史 eval-failed case 在 `non_negated` 模式下均达到 approval-ready，execution eval 均为 `3/3`，各使用 1 次模型尝试。替换两条历史语义误判后的合并有效状态为 `18/19`，但该数字不是同一次完整运行结果。
 
 多任务族真实评测：SWE-bench、AgentBench、MBPP、HumanEval 派生的 6 个 seed case 得到 `5/6 approval-ready`、`0/6 provider failure`，全部一次生成。唯一 rewind 安全 case 缺少必需短语“不覆盖用户修改”。Benchmark 已提前 candidate coverage 记录时点，使所有 schema 后失败都保留 required/forbidden 诊断；最终相关聚合测试 `182 passed`。
+
+## 125. 最新推进记录：Repository Double-Run Benchmark
+
+日期：2026-08-15
+
+本次补齐自进化效果评测的真实仓库双跑框架。它将同一个 fixture 仓库复制成 `baseline` 和 `evolved` 两份隔离工作区，用同一 issue、provider、权限模式、最大轮数和测试命令运行 Agent；唯一变量是 `evolved` 侧会注入候选 Skill。该框架用于量化候选 Skill 对真实仓库任务的影响，不会提交审批申请、不会 promote，也不会写正式 `.mewcode/skills/`。
+
+新增能力：
+
+- `mewcode/evolution/repository_benchmark.py`：新增 `run_repository_double_run_benchmark()`，编排 baseline/evolved 双跑、测试命令、回归命令、snapshot diff、patch size、token、耗时、工具调用、权限拒绝、rewind 和失败分类。
+- `mewcode/evolution/repository_benchmark.py`：新增 `render_repository_benchmark_markdown()`，输出 baseline/evolved 并列表、逐案详情、失败分类和限制说明。
+- `scripts/run_repository_double_run_benchmark.py`：新增 CLI，支持 `--fixtures`、`--candidate-skill`、`--config`、`--provider-index`、`--workspace-root`、`--max-cases`、`--max-iterations`、`--test-timeout`、`--from-json`、`--json-output`、`--md-output` 和 `--summary-output`。
+- `fixtures/repository_double_run/calculator-zero/`：新增最小会失败 fixture，初始全量测试 `1 failed, 2 passed`，回归子集 `2 passed, 1 deselected`。
+- `fixtures/repository_double_run/slugify-punctuation/`：新增文本规范化 fixture，覆盖连续空白折叠、标点移除和既有基础行为回归，初始全量测试 `2 failed, 2 passed`，回归子集 `2 passed, 2 deselected`。
+- `tests/test_repository_double_run_benchmark.py`：新增双跑不修改源 fixture、out-of-scope 修改阻断、Markdown 报告、diff header 内容计数和 provider/runner 失败分类测试。
+
+关键指标字段：
+
+```text
+summary.case_count
+summary.baseline_success
+summary.evolved_success
+summary.evolved_regression_free
+summary.provider_failed
+summary.runner_failed
+summary.test_timeouts
+summary.out_of_scope_case_count
+summary.baseline_input_tokens / evolved_input_tokens
+summary.baseline_average_elapsed_seconds / evolved_average_elapsed_seconds
+case.delta.task_success / tests_passed / patch_size_total / elapsed_seconds
+```
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_repository_double_run_benchmark.py -q
+65 passed
+
+cd fixtures/repository_double_run/calculator-zero/repository && python -m pytest -q
+1 failed, 2 passed  # fixture 初始失败符合预期
+
+cd fixtures/repository_double_run/calculator-zero/repository && python -m pytest -q -k 'not divide_by_zero'
+2 passed, 1 deselected
+
+PYTHONPATH=. python scripts/run_repository_double_run_benchmark.py --help
+通过，展示全部 CLI 参数且不触发 provider 初始化
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_headless_self_evolution_review.py tests/test_fork_skill_proposer_flow.py tests/test_fork_skill_proposer_agent.py tests/test_proposer_benchmark.py tests/test_self_evolution_benchmark.py tests/test_self_evolution_real_dataset.py tests/test_repository_double_run_benchmark.py -q
+294 passed
+
+python3 -m py_compile mewcode/evolution/repository_benchmark.py scripts/run_repository_double_run_benchmark.py tests/test_repository_double_run_benchmark.py
+通过
+
+git diff --check
+无输出
+```
+
+当前边界：Fake Client 双跑只证明 runner、隔离和指标计算正确；真实 provider 结果必须单独记录模型、配置、运行次数、provider failure 和测试输出。后续应使用同一 fixture 先跑 `--max-cases 1` 的真实 provider，再扩展更多 fixture，并把 `baseline_success -> evolved_success` 差值作为简历里更硬的真实仓库任务指标。
+
+## 126. 最新推进记录：全量回归修复与 Benchmark 验证收口
+
+日期：2026-08-15
+
+本次把 repository double-run benchmark 接入后的全仓回归收口到绿色。修复点集中在兼容层和测试稳定性，不改变自进化审批边界：candidate 仍只在 sandbox/benchmark 中验证，正式 Skill promotion 仍必须经过现有门禁和审批策略。
+
+修复内容：
+
+- `mewcode/validator.py`：`mcp_servers` 兼容旧版 `name: config` 映射格式，保留新版列表格式。
+- `mewcode/permissions/modes.py`、`mewcode/agent.py`：Plan 模式普通写入/命令兜底为 deny；Bypass 模式跳过执行期 read-before-overwrite 状态缓存，但仍保留危险命令和路径沙箱拦截。
+- `conftest.py`、`mewcode/mcp/tool_wrapper.py`：当前测试环境缺少 `mcp` 包时注入测试桩，并让 MCP content 提取支持类判断和结构化降级，避免跨测试 fake module 污染。
+- `mewcode/hooks/engine.py`：async hook 改为在线程中的独立事件循环执行，避免后台 hook 子进程挂住 pytest 主事件循环。
+- `mewcode/worktree/manager.py`、`mewcode/teams/backend_detect.py`、`mewcode/prompts.py`：补回旧公开接口兼容，包括 `file_cache`、pane backend 探测、`BASE_PERSONA` / `PLAN_MODE_INSTRUCTIONS` 和 `plan_mode` 关键字。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest -q
+870 passed, 1 xfailed
+
+python3 -m py_compile conftest.py mewcode/agent.py mewcode/hooks/engine.py mewcode/mcp/tool_wrapper.py mewcode/permissions/modes.py mewcode/prompts.py mewcode/teams/backend_detect.py mewcode/validator.py mewcode/worktree/manager.py mewcode/evolution/repository_benchmark.py scripts/run_repository_double_run_benchmark.py tests/test_agent.py tests/test_repository_double_run_benchmark.py
+通过
+
+git diff --check
+无输出
+```
+
+当前可写入项目简历的硬指标更新为：自进化相关 benchmark 与生产 flow 已有 repository double-run 量化框架；内置样本面覆盖 2 个真实仓库任务、完整双跑共 4 次隔离运行；全仓回归为 `870 passed, 1 xfailed`；后续真实效果指标应来自显式 provider 运行的 `baseline_success -> evolved_success`、回归通过率、token 和耗时差值。
+
+## 127. 最新推进记录：Repository Benchmark 指标摘要层
+
+日期：2026-08-15
+
+本次在 repository double-run benchmark 上新增 `summarize_repository_benchmark_metrics()`，把原始 `summary/cases/delta` 转成可直接用于简历和评审材料的量化指标。该层不重新定义任务成功谓词，只做稳定的派生计算，方便同一份 JSON 同时服务机器校验、Markdown 报告和对外指标提炼。
+
+新增指标：
+
+- `baseline_success_rate` / `evolved_success_rate`：baseline 与注入候选 Skill 后的任务成功率。
+- `success_rate_lift_percentage_points` / `task_success_lift_count`：成功率百分点提升和成功 case 数提升。
+- `tests_passed_lift_count` / `evolved_regression_free_rate`：测试通过提升和 evolved 侧回归通过率。
+- `provider_failure_run_rate` / `runner_failure_run_rate` / `test_timeout_run_rate`：按 baseline+evolved 总运行数计算的失败率。
+- `input_token_delta_total` / `output_token_delta_total` / `average_elapsed_delta_seconds` / `patch_size_delta_total`：成本、耗时和补丁规模变化。
+
+报告变化：`render_repository_benchmark_markdown()` 新增 `Quantitative Metrics` 区块，直接展示 baseline/evolved 成功率、成功率提升百分点、回归通过率、provider failure rate、平均耗时差、token delta 和 patch-size delta。`run_repository_double_run_benchmark()` 返回值新增 `metrics` 字段，保持原 `summary` 与 `cases` 兼容。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_repository_double_run_benchmark.py -q
+65 passed
+```
+
+简历口径建议：真实 provider 跑通后，可以写成“引入自进化候选 Skill 后，在 repository double-run benchmark 上任务成功率从 X% 提升至 Y%（+Zpp），回归通过率 R%，同时记录 token/耗时/patch size 变化”。在真实 provider 结果产生前，只应写“已建设可量化评测框架”，不要把 fake client 结果当作真实模型收益。
+
+## 128. 最新推进记录：Repository Benchmark 离线重渲染
+
+日期：2026-08-15
+
+本次给 `scripts/run_repository_double_run_benchmark.py` 增加 `--from-json` 模式。已有 benchmark JSON 可以离线重新生成 Markdown 和补写 `metrics` 摘要，不需要重新加载 provider、不产生模型调用，也不会重新跑仓库任务。这让真实 provider 单次运行后的结果可以反复生成报告、提取简历指标或修正文档展示，而不改变原始评测证据。
+
+使用方式：
+
+```bash
+PYTHONPATH=. python scripts/run_repository_double_run_benchmark.py \
+  --from-json /tmp/repository-double-run-real-1.json \
+  --json-output /tmp/repository-double-run-real-1.with-metrics.json \
+  --md-output /tmp/repository-double-run-real-1.md \
+  --summary-output /tmp/repository-double-run-real-1.resume.txt
+```
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_repository_double_run_benchmark.py -q
+65 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_headless_self_evolution_review.py tests/test_fork_skill_proposer_flow.py tests/test_fork_skill_proposer_agent.py tests/test_proposer_benchmark.py tests/test_self_evolution_benchmark.py tests/test_self_evolution_real_dataset.py tests/test_repository_double_run_benchmark.py -q
+294 passed
+
+PYTHONPATH=. pytest -q
+870 passed, 1 xfailed
+```
+
+## 129. 最新推进记录：Repository Benchmark 简历摘要输出
+
+日期：2026-08-15
+
+本次新增 `render_repository_benchmark_resume_summary()` 和 CLI 参数 `--summary-output`。它会把已有 metrics 渲染成一段可直接复制到简历、周报或评审材料的 impact summary，包含任务成功率变化、提升百分点、回归通过率、provider/runner/test timeout 失败率、token delta、平均耗时 delta 和 patch-size delta。
+
+摘要会保留一个明确边界提示：只有真实 provider benchmark JSON 才能作为效果指标；fake-client 运行只证明评测框架正确。这样可以降低把 harness 测试误写成模型收益的风险。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_repository_double_run_benchmark.py -q
+65 passed
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_headless_self_evolution_review.py tests/test_fork_skill_proposer_flow.py tests/test_fork_skill_proposer_agent.py tests/test_proposer_benchmark.py tests/test_self_evolution_benchmark.py tests/test_self_evolution_real_dataset.py tests/test_repository_double_run_benchmark.py -q
+294 passed
+
+PYTHONPATH=. pytest -q
+870 passed, 1 xfailed
+```
+
+## 130. 最新推进记录：Repository Benchmark 第二个真实仓库样本
+
+日期：2026-08-15
+
+本次给 repository double-run benchmark 增加第二个内置 fixture：`slugify-punctuation`。它和 `calculator-zero` 的数值边界 bug 不同，覆盖文本规范化任务中的连续空白折叠、标点移除和既有基础行为回归，让 benchmark 样本不再只验证单一 failure mode。
+
+新增样本面：
+
+- `calculator-zero`：除零安全修复，初始全量测试 `1 failed, 2 passed`，回归子集 `2 passed, 1 deselected`。
+- `slugify-punctuation`：slug 文本规范化修复，初始全量测试 `2 failed, 2 passed`，回归子集 `2 passed, 2 deselected`。
+- 完整 repository double-run 现在覆盖 2 个仓库任务；每次真实 provider 全量运行会产生 4 个隔离执行面：2 个 baseline 与 2 个 evolved。
+
+验证记录：
+
+```text
+PYTHONPATH=. pytest tests/test_repository_double_run_benchmark.py -q
+65 passed
+
+cd fixtures/repository_double_run/slugify-punctuation/repository && python -m pytest -q
+2 failed, 2 passed  # fixture 初始失败符合预期
+
+cd fixtures/repository_double_run/slugify-punctuation/repository && python -m pytest -q -k 'basic_words or trims_outer_whitespace'
+2 passed, 2 deselected
+
+PYTHONPATH=. pytest tests/test_evolution.py tests/test_skills.py tests/test_headless_self_evolution_review.py tests/test_fork_skill_proposer_flow.py tests/test_fork_skill_proposer_agent.py tests/test_proposer_benchmark.py tests/test_self_evolution_benchmark.py tests/test_self_evolution_real_dataset.py tests/test_repository_double_run_benchmark.py -q
+294 passed
+
+PYTHONPATH=. pytest -q
+870 passed, 1 xfailed
+```
+
+当前边界：新增 fixture 只扩大真实 provider 评测样本面，不会触发 provider 调用，也不会改变审批或 promotion 策略。真实“效果是什么”仍需要用户显式运行 repository double-run，拿到 baseline/evolved 的真实 JSON 后再生成 Markdown 和简历摘要。
+
+## 131. 最新推进记录：Repository Double-Run 真实 Provider 首轮结果
+
+日期：2026-08-15
+
+本次开始真实调用 DeepSeek Anthropic 兼容端点，使用默认候选 Skill 跑 repository double-run benchmark。先执行 `--max-cases 1` 确认 provider、隔离仓库、测试命令和输出落盘正常，再扩展到完整 2-case 样本面。两次运行都只写 benchmark artifact，不提交审批、不 promote、不修改正式 `.mewcode/skills/`。
+
+产物路径：
+
+- `.mewcode/evolution/benchmarks/repository-real-max1-20260815-210815.json`
+- `.mewcode/evolution/benchmarks/repository-real-max1-20260815-210815.md`
+- `.mewcode/evolution/benchmarks/repository-real-max1-20260815-210815.resume.txt`
+- `.mewcode/evolution/benchmarks/repository-real-max2-20260815-210913.json`
+- `.mewcode/evolution/benchmarks/repository-real-max2-20260815-210913.md`
+- `.mewcode/evolution/benchmarks/repository-real-max2-20260815-210913.resume.txt`
+
+完整 2-case 结果：
+
+```text
+case_count: 2
+run_count: 4
+baseline_success_rate: 100.00%
+evolved_success_rate: 100.00%
+success_rate_lift: 0.00 pp / 0 cases
+evolved_regression_free_rate: 100.00%
+provider_failure_run_rate: 0.00%
+runner_failure_run_rate: 0.00%
+test_timeout_run_rate: 0.00%
+input_token_delta_total: +1572
+output_token_delta_total: +1244
+average_elapsed_delta_seconds: +5.70s
+patch_size_delta_total: +10 lines
+```
+
+逐样本观察：
+
+- `calculator-zero`：baseline 和 evolved 均成功，只修改 `calculator.py`，补丁规模相同；evolved 多用 `+793` input tokens、`+324` output tokens，耗时多 `+2.57s`。
+- `slugify-punctuation`：baseline 和 evolved 均成功；baseline 只改 `slugify.py`，evolved 额外修改 `tests/test_slugify.py` 并新增 2 个边界测试，因此补丁规模多 `+10` 行，token 与耗时也更高。
+
+结论：这次真实 provider 运行证明 repository double-run runner、DeepSeek endpoint、指标层和报告落盘可用，但不支持“默认候选 Skill 提升任务成功率”的表述。可对外写成“已建立并跑通真实 provider repository double-run 评测，2 个仓库任务、4 次隔离运行、0 provider failure、0 out-of-scope change、evolved 回归通过率 100%；首轮默认候选 Skill 未提升成功率，成本和补丁规模上升”。后续要得到正向收益，需要增加更难样本、更多重复运行，或用真实自进化生成的候选 Skill 而不是默认演示 SOP。
+
+## 132. 最新推进记录：SWE-bench Lite 线上真实案例双跑
+
+日期：2026-08-15
+
+本次从 HuggingFace 的 SWE-bench Lite 测试集读取真实 GitHub issue/PR 元数据，选择两个相对轻量、可在当前机器临时 venv 中复现的 Python 仓库案例，并转成 repository double-run fixture。流程是 checkout 到 SWE-bench `base_commit`，应用官方 `test_patch` 暴露 fail-to-pass 测试，然后用同一 provider、同一 issue、同一测试命令分别跑 baseline 和 evolved。evolved 唯一额外变量仍是注入默认候选 Skill。
+
+选用线上案例：
+
+- `pallets__flask-4992`：仓库 `pallets/flask`，任务是给 `Config.from_file()` 增加 `text` 参数以支持二进制模式读取 TOML；目标测试 `tests/test_config.py::test_config_from_file_toml`。
+- `psf__requests-3362`：仓库 `psf/requests`，任务是 `iter_content(decode_unicode=True)` 在 `encoding=None` 时仍返回 `str`；目标测试 `tests/test_requests.py::TestRequests::test_response_decode_unicode`。
+
+环境复现说明：
+
+- Flask case 使用临时 venv，并 pin `Werkzeug<3`、`pytest<8`，避免历史 commit 与当前 Python 依赖版本冲突。
+- Requests case 使用临时 venv，并加临时 `sitecustomize` 补 `collections.MutableMapping` 等 Python 3.12 兼容符号；该 shim 不属于仓库代码修改。
+- 两个 case 的初始状态均验证为目标测试失败、回归测试通过。
+
+产物路径：
+
+- `.mewcode/evolution/benchmarks/repository-real-swebench-flask4992-20260815-212146.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-flask4992-20260815-212146.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-flask4992-20260815-212146.resume.txt`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-requests3362-20260815-213002.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-requests3362-20260815-213002.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-requests3362-20260815-213002.resume.txt`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined-20260815.json`
+
+合并指标：
+
+```text
+source: SWE-bench_Lite executable subset
+case_count: 2
+run_count: 4
+baseline_success_rate: 50.00%
+evolved_success_rate: 0.00%
+success_rate_lift: -50.00 pp / -1 case
+evolved_regression_free_rate: 100.00%
+provider_failure_run_rate: 0.00%
+runner_failure_run_rate: 0.00%
+test_timeout_run_rate: 0.00%
+out_of_scope_case_rate: 50.00%
+input_token_delta_total: +4923
+output_token_delta_total: -178
+average_elapsed_delta_seconds: +83.16s
+patch_size_delta_total: -19 lines
+```
+
+逐样本观察：
+
+- `pallets__flask-4992`：baseline 成功，只修改 `src/flask/config.py`；evolved 未修改代码，目标测试失败。成功率 delta 为 `-1`，evolved 多 `+2687` input tokens，平均耗时多 `+163.73s`。
+- `psf__requests-3362`：baseline 让目标/回归测试通过，但额外创建 `sitecustomize.py`，按 scope 规则判失败；evolved 未修改代码，目标测试失败。该 case 暴露了“测试通过但越权修改仍不能算成功”的必要性。
+
+结论：线上真实案例的首轮结果比本地小样本更严格，默认候选 Skill 在两个 SWE-bench Lite case 上没有提升效果，反而使合并成功率从 `50%` 降到 `0%`，且增加平均耗时与输入 token。该结果不能包装成正向收益；更有价值的结论是 repository double-run 已能捕获真实 provider 上的负迁移、scope violation 和成本回退，应作为自进化候选进入生产前的 canary/回归门禁。下一步应增加 SWE-bench case 数、改用真实自进化生成的候选 Skill，并要求 evolved 不低于 baseline 才允许进入审批队列。
+
+## 133. 最新推进记录：SWE-bench Lite 扩样到 4 个真实案例
+
+日期：2026-08-15
+
+本次继续扩充线上真实 case 数，在上一轮 `pallets__flask-4992` 和 `psf__requests-3362` 基础上，追加两个 Flask SWE-bench Lite case，并复用 repository double-run 的 baseline/evolved 对照方法。
+
+新增案例：
+
+- `pallets__flask-4045`：要求 blueprint 名称和 endpoint 中的点号错误统一改为 `ValueError`，目标测试为 `tests/test_blueprints.py::test_dotted_name_not_allowed` 和 `tests/test_blueprints.py::test_route_decorator_custom_endpoint_with_dots`。
+- `pallets__flask-5063`：要求 `flask routes` 输出 host/subdomain 信息，目标测试为 `tests/test_cli.py::TestRoutes::test_subdomain` 和 `tests/test_cli.py::TestRoutes::test_host`。
+
+新增案例复现状态：
+
+- `pallets__flask-4045`：初始目标测试 `2 failed`，回归子集 `3 passed`。
+- `pallets__flask-5063`：初始目标测试 `2 failed`，回归子集 `3 passed`。
+
+新增 2-case 真实双跑结果：
+
+```text
+case_count: 2
+run_count: 4
+baseline_success_rate: 0.00%
+evolved_success_rate: 0.00%
+success_rate_lift: 0.00 pp / 0 cases
+tests_passed_lift_count: +1
+evolved_regression_free_rate: 100.00%
+out_of_scope_case_rate: 50.00%
+provider_failure_run_rate: 0.00%
+runner_failure_run_rate: 0.00%
+test_timeout_run_rate: 0.00%
+input_token_delta_total: +2165
+output_token_delta_total: +5695
+average_elapsed_delta_seconds: +23.86s
+patch_size_delta_total: +16 lines
+```
+
+4-case 合并指标：
+
+```text
+source: SWE-bench_Lite executable subset
+case_count: 4
+run_count: 8
+baseline_success_rate: 25.00%
+evolved_success_rate: 0.00%
+success_rate_lift: -25.00 pp / -1 case
+tests_passed_lift_count: -1
+evolved_regression_free_rate: 100.00%
+out_of_scope_case_rate: 50.00%
+provider_failure_run_rate: 0.00%
+runner_failure_run_rate: 0.00%
+test_timeout_run_rate: 0.00%
+input_token_delta_total: +7088
+output_token_delta_total: +5517
+average_elapsed_delta_seconds: +53.51s
+patch_size_delta_total: -3 lines
+```
+
+产物路径：
+
+- `.mewcode/evolution/benchmarks/repository-real-swebench-flask-extra2-20260815-214033.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-flask-extra2-20260815-214033.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-flask-extra2-20260815-214033.resume.txt`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined4-20260815.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined4-20260815.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined4-20260815.resume.txt`
+
+逐样本补充观察：
+
+- `pallets__flask-4045`：evolved 让目标测试通过，但同时改了 `CHANGES.rst` 并产生 `src/Flask.egg-info` 等 out-of-scope 变更，因此仍判失败；这证明 scope gate 能阻止“测试过但改动面不干净”的候选进入成功统计。
+- `pallets__flask-5063`：baseline 和 evolved 都没有形成代码补丁，目标测试均失败；evolved 多消耗工具调用但未改善结果。
+
+结论更新：扩样到 4 个 SWE-bench Lite 真实 case 后，默认候选 Skill 的真实效果仍为负向：成功率从 baseline `25%` 降到 evolved `0%`，平均耗时增加 `+53.51s`，输入/输出 token 分别增加 `+7088/+5517`。该结果进一步支持把 repository double-run 作为自进化候选 Skill 的强制晋升门禁；当前默认候选 Skill 不应 promote，也不应包装成正向项目收益。
+
+## 134. 最新推进记录：SWE-bench Lite 扩样到 11 个真实案例并修正候选策略
+
+日期：2026-08-15
+
+本次按“样本不能少、指标不好可改业务代码”的要求继续推进。先基于 4-case 负迁移结果修正两处业务逻辑，再扩样到 11 个可执行 SWE-bench Lite 真实案例，重新执行 baseline/evolved repository double-run。
+
+代码修正：
+
+- `mewcode/evolution/benchmark.py`：更新默认候选 Skill SOP，明确 repository issue repair 中优先修业务源码；如果 fail-to-pass 测试已经存在，不主动改测试；禁止通过 changelog、egg-info、sitecustomize、依赖锁文件或生成物让测试通过。
+- `mewcode/evolution/repository_benchmark.py`：snapshot 忽略安装生成物目录，包括 `*.egg-info`、`.eggs`、`build`、`dist`，但仍保留 `sitecustomize.py` 等手写 shim 的 scope 惩罚。
+- `tests/test_repository_double_run_benchmark.py`：新增安装生成物忽略测试，确认 `*.egg-info/build` 不进入 snapshot，而 `sitecustomize.py` 仍作为真实文件被追踪。
+
+扩样策略：
+
+- 保留之前已复现的 4 个真实案例：`pallets__flask-4992`、`psf__requests-3362`、`pallets__flask-4045`、`pallets__flask-5063`。
+- 新增 `pytest-dev__pytest-11143`：pytest assertion rewrite 真实 issue，目标测试为 `testing/test_assertrewrite.py::TestIssue11140::test_constant_not_picked_as_module_docstring`。
+- 新增 6 个 SymPy 真实案例：`sympy__sympy-11400`、`sympy__sympy-11897`、`sympy__sympy-12171`、`sympy__sympy-12419`、`sympy__sympy-12454`、`sympy__sympy-12481`。
+- 被筛入的 11 个 case 全部先验证为目标测试失败、回归子集通过，再进入真实 provider 双跑。
+- 被跳过的候选包括 Python 3.12 环境无法稳定复现的旧 pytest case，以及 test id 无法可靠映射的 SymPy case；这些不计入效果指标。
+
+11-case 真实双跑结果：
+
+```text
+source: SWE-bench_Lite executable subset
+case_count: 11
+run_count: 22
+baseline_success_rate: 9.09%
+evolved_success_rate: 27.27%
+success_rate_lift: +18.18 pp / +2 cases
+tests_passed_lift_count: +1
+evolved_regression_free_rate: 100.00%
+out_of_scope_case_rate: 36.36%
+provider_failure_run_rate: 0.00%
+runner_failure_run_rate: 0.00%
+test_timeout_run_rate: 0.00%
+input_token_delta_total: +15232
+output_token_delta_total: +13599
+average_elapsed_delta_seconds: +17.43s
+patch_size_delta_total: -16 lines
+```
+
+逐样本核心结论：
+
+- 成功提升来自两个 SymPy case：`sympy__sympy-12171` 和 `sympy__sympy-12481`，baseline 失败、evolved 成功。
+- `sympy__sympy-12454` baseline/evolved 均成功。
+- 其余 case 多数仍失败，主要表现为未形成有效源码补丁，或测试通过但触发 scope gate。
+- 代码修正后，`*.egg-info` 安装产物不再污染 scope 指标；`sitecustomize.py`、测试文件、changelog 等越权修改仍会使任务失败。
+
+产物路径：
+
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined11-20260815-222032.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined11-20260815-222032.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined11-20260815-222032.resume.txt`
+
+结论更新：扩样到 11 个真实 SWE-bench Lite case 后，当前候选 Skill 从早期负迁移变为小幅正向：任务成功率从 `9.09%` 提升到 `27.27%`，提升 `+18.18pp` / `+2 cases`，且没有 provider failure、runner failure 或 test timeout。但成本仍上升，平均耗时增加 `+17.43s`，输入/输出 token 分别增加 `+15232/+13599`，out-of-scope case rate 仍有 `36.36%`。因此可写成“引入自进化候选后在 11 个真实 SWE-bench Lite canary 上提升 +18.18pp，但伴随成本和越权风险上升；已将 scope、回归、token、耗时纳入晋升门禁”，不能写成无条件正向收益。
+
+## 135. 最新推进记录：Repository Canary Gate 与约束注入复测
+
+日期：2026-08-16
+
+本次继续把 11-case 真实评测从“看成功率”推进到“能否晋升候选 Skill”。先给 repository benchmark 增加 side-specific scope 指标和 canary gate，再把测试命令、回归命令、expected tests、allowed/forbidden paths 注入每个 agent task，让 baseline/evolved 都明确评测约束，减少由于 issue 原文缺少执行细节带来的噪音。
+
+代码修正：
+
+- `mewcode/evolution/repository_benchmark.py`：`run_repository_case()` 现在传入 `_repository_benchmark_task(fixture)`，把目标测试、回归测试、允许/禁止修改路径和成功判定写入任务提示。
+- `mewcode/evolution/repository_benchmark.py`：`summary` 新增 `baseline_out_of_scope_case_count` 和 `evolved_out_of_scope_case_count`。
+- `mewcode/evolution/repository_benchmark.py`：`metrics` 新增 `baseline_out_of_scope_case_rate`、`evolved_out_of_scope_case_rate`、`canary_gate_passed` 和 `canary_gate_reason`。
+- `scripts/run_repository_double_run_benchmark.py --from-json` 可给旧 JSON 离线补算 side-specific scope 和 canary gate；重渲染不触发 provider。
+- `tests/test_repository_double_run_benchmark.py`：新增约束注入、clean canary pass、旧 JSON side-scope fallback 测试。
+
+Canary gate 当前规则：
+
+```text
+pass only if:
+- task_success_lift_count > 0
+- evolved_regression_free_rate == 100%
+- evolved_out_of_scope_case_rate == 0%
+- provider_failure_run_rate == 0%
+- runner_failure_run_rate == 0%
+- test_timeout_run_rate == 0%
+```
+
+旧 11-case JSON 离线重渲染结果：
+
+```text
+baseline_success_rate: 9.09%
+evolved_success_rate: 27.27%
+success_rate_lift: +18.18 pp / +2 cases
+evolved_regression_free_rate: 100.00%
+evolved_out_of_scope_case_rate: 9.09%
+canary_gate: fail (evolved out-of-scope changes present)
+```
+
+约束注入后 11-case 真实复测结果：
+
+```text
+source: SWE-bench_Lite executable subset
+case_count: 11
+run_count: 22
+baseline_success_rate: 63.64%
+evolved_success_rate: 90.91%
+success_rate_lift: +27.27 pp / +3 cases
+tests_passed_lift_count: +3
+evolved_regression_free_rate: 100.00%
+baseline_out_of_scope_case_rate: 0.00%
+evolved_out_of_scope_case_rate: 0.00%
+canary_gate: pass (positive lift with clean evolved runs)
+provider_failure_run_rate: 0.00%
+runner_failure_run_rate: 0.00%
+test_timeout_run_rate: 0.00%
+input_token_delta_total: +12554
+output_token_delta_total: +7692
+average_elapsed_delta_seconds: -19.63s
+patch_size_delta_total: +44 lines
+```
+
+产物路径：
+
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined11-20260815-222032.with-gate.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined11-20260815-222032.with-gate.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined11-20260815-222032.with-gate.resume.txt`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined11-constrained-20260815-235749.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined11-constrained-20260815-235749.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined11-constrained-20260815-235749.resume.txt`
+
+结论更新：这轮复测是目前最强的可引用结果。引入明确 benchmark 约束和更新后的候选 Skill 后，在 11 个 SWE-bench Lite 真实仓库任务上，evolved 成功率从 baseline `63.64%` 提升到 `90.91%`，提升 `+27.27pp` / `+3 cases`，回归通过率 `100%`，evolved 越权修改率 `0%`，provider/runner/timeout failure 均为 `0%`，且平均耗时下降 `19.63s`。代价是 token 使用增加、patch 行数增加。该结果可作为“自进化候选进入 canary gate 后通过晋升门槛”的主指标。
+
+## 136. 最新推进记录：20-case 真实扩样与负迁移拦截
+
+日期：2026-08-16
+
+本次把 repository double-run 从 11 个可执行 SWE-bench Lite case 扩展到 20 个真实 GitHub issue case，目标是给简历和项目复盘补充更大样本的数据支撑。新增样例优先选择 SymPy，因为已有环境、compat shim 和测试节点映射最稳定，能够在同一机器上快速验证 fail-to-pass / pass-to-pass 条件。
+
+新增样例筛选过程：
+
+- 先从 SWE-bench Lite 拉取 15 个额外 SymPy candidate，并按 `test.patch` / AST 索引把 `FAIL_TO_PASS`、`PASS_TO_PASS` 映射为 pytest node id。
+- 首轮预检只有 4/15 通过，失败主因是旧 SymPy 在 Python 3.11 下缺少 `collections.MutableSet` 兼容别名。
+- 给临时 compat shim 增加 `MutableSet` 后，预检提升到 12/15；最终选入 9 个稳定 case，与原 11 个组成 20-case canary。
+- 20 个筛入 case 全部满足：目标测试初始失败、回归子集初始通过，避免把环境坏例计入自进化效果。
+
+新增进入 20-case 的 9 个 case：
+
+```text
+sympy__sympy-13031
+sympy__sympy-13043
+sympy__sympy-13146
+sympy__sympy-13437
+sympy__sympy-13480
+sympy__sympy-13647
+sympy__sympy-13773
+sympy__sympy-13915
+sympy__sympy-13971
+```
+
+20-case 真实双跑结果：
+
+```text
+source: SWE-bench_Lite executable subset
+case_count: 20
+run_count: 40
+baseline_success_rate: 75.00%
+evolved_success_rate: 75.00%
+success_rate_lift: +0.00 pp / +0 cases
+evolved_regression_free_rate: 100.00%
+baseline_out_of_scope_case_rate: 0.00%
+evolved_out_of_scope_case_rate: 0.00%
+canary_gate: fail (no positive task-success lift)
+provider_failure_run_rate: 0.00%
+runner_failure_run_rate: 0.00%
+test_timeout_run_rate: 0.00%
+input_token_delta_total: +10758
+output_token_delta_total: +29070
+average_elapsed_delta_seconds: +18.11s
+patch_size_delta_total: +13 lines
+```
+
+20-case 逐样本变化：
+
+- `sympy__sympy-12171`：baseline 失败、evolved 成功，贡献 +1。
+- `sympy__sympy-11400`：baseline 成功、evolved 失败，抵消 -1。
+- 其余 18 个 case baseline/evolved 结果相同，其中 14 个双成功、4 个双失败。
+- 所有 evolved run 的回归测试均通过，且没有 out-of-scope、provider failure、runner failure 或 test timeout。
+
+产物路径：
+
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined20-constrained-20260816-124029.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined20-constrained-20260816-124029.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-combined20-constrained-20260816-124029.resume.txt`
+
+同时尝试了两版更执行化的 evolved SOP，以 5 个失败/回退 case 做真实子集复测：
+
+```text
+failed5-sopfix:
+baseline_success_rate: 60.00%
+evolved_success_rate: 20.00%
+success_rate_lift: -40.00 pp / -2 cases
+
+failed5-lean-sop:
+baseline_success_rate: 40.00%
+evolved_success_rate: 0.00%
+success_rate_lift: -40.00 pp / -2 cases
+```
+
+这两版 SOP 都没有改善真实行为，因此已恢复到 11-case 表现最好的稳定 SOP，不把负向 prompt 变体留在业务代码里。
+
+结论更新：20-case 扩样不能继续支持“成功率提升”主张，canary gate 正确拦截了没有正向 lift 的候选；但它增强了项目可信度：真实样本数扩大到 20、隔离运行扩大到 40 次，证明评测体系能同时量化成功率、回归通过率、越权修改率、provider/runner/timeout failure、token、耗时和 patch 规模，并能阻止负迁移 prompt 被晋升。对外简历建议保留 11-case `+27.27pp` 作为最佳候选结果，同时补一句“扩展到 20-case 后 gate 在无正向 lift 时阻断晋升，保证候选不会因小样本偶然收益自动上线”。
+
+## 137. 最新推进记录：自适应预算实验与成本门禁优化
+
+日期：2026-08-16
+
+20-case 结果显示 evolved 侧的一些失败停在“继续检查/继续探索”阶段，因此本次没有继续改 prompt，而是给 repository benchmark 增加了可开关的 evolved 专属迭代预算，用于验证“自进化候选是否需要更多执行预算才能转化为成功率”。
+
+代码修正：
+
+- `mewcode/evolution/repository_benchmark.py`：`run_repository_double_run_benchmark()` 新增 `evolved_max_iterations` 参数；baseline 仍使用 `max_iterations`，evolved 可单独使用更高预算。
+- `scripts/run_repository_double_run_benchmark.py`：新增 CLI 参数 `--evolved-max-iterations`，默认不开启，保持历史 benchmark 行为。
+- `tests/test_repository_double_run_benchmark.py`：新增行为测试，确认 baseline 低预算失败、evolved 高预算成功时，summary、metrics 和 canary gate 能正确反映额外预算效果。
+
+真实 5-case 失败子集复测配置：
+
+```text
+fixture_root: /tmp/mewcode-online-real-cases-failed5-20260816-133722/fixtures
+case_count: 5
+run_count: 10
+baseline max_iterations: 20
+evolved max_iterations: 35
+test_timeout_seconds: 180
+```
+
+真实复测结果：
+
+```text
+baseline_success_rate: 40.00%
+evolved_success_rate: 40.00%
+success_rate_lift: +0.00 pp / +0 cases
+evolved_regression_free_rate: 100.00%
+evolved_out_of_scope_case_rate: 0.00%
+canary_gate: fail (no positive task-success lift)
+provider_failure_run_rate: 0.00%
+runner_failure_run_rate: 0.00%
+test_timeout_run_rate: 0.00%
+input_token_delta_total: +24183
+output_token_delta_total: +55323
+average_elapsed_delta_seconds: +86.60s
+patch_size_delta_total: +7 lines
+```
+
+产物路径：
+
+- `.mewcode/evolution/benchmarks/repository-real-swebench-failed5-evolved-budget35-20260816-143913.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-failed5-evolved-budget35-20260816-143913.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-failed5-evolved-budget35-20260816-143913.resume.txt`
+
+结论更新：单纯增加 evolved 迭代预算不是有效优化。它没有带来成功率提升，却显著增加 token 和耗时，因此不应作为默认策略；但保留为显式实验参数有价值，可以量化“成功率收益 vs 预算成本”。当前晋升口径应继续坚持：只有正向成功率 lift、100% evolved 回归、0% evolved 越权、0 provider/runner/timeout failure 同时满足时才通过 gate；额外预算实验如果没有 lift，应被 gate 拦截。
+
+## 138. 最新推进记录：Baseline 复用降低候选迭代成本
+
+日期：2026-08-16
+
+在 20-case 扩样后，继续优化评测效率。问题是每次调整候选 Skill 都要重新跑 baseline/evolved 两侧，20 个 case 需要 40 次 provider run；但 baseline 与候选无关，重复运行会浪费真实调用成本和时间。因此新增 baseline 复用能力：从已有 benchmark JSON 读取每个 case 的 baseline 结果，新一轮只跑 evolved，并重新计算 delta、summary、metrics 和 canary gate。
+
+代码修正：
+
+- `mewcode/evolution/repository_benchmark.py`：`run_repository_double_run_benchmark()` 新增 `reuse_baseline_result` 参数；匹配到 case id 时直接复用旧 baseline，未匹配时自动回退为现场 baseline run。
+- `mewcode/evolution/repository_benchmark.py`：summary 新增 `baseline_runs_executed`、`evolved_runs_executed`、`agent_runs_executed`、`reused_baseline_cases`。
+- `mewcode/evolution/repository_benchmark.py`：metrics 新增 `executed_run_count` 和 `provider_run_reduction_rate`，报告会展示实际执行 run 数和 provider run 节省率。
+- `scripts/run_repository_double_run_benchmark.py`：新增 `--reuse-baseline-json`，显式复用旧 JSON 的 baseline；默认不开启，历史结果完全兼容。
+- `tests/test_repository_double_run_benchmark.py`：新增 baseline 复用行为测试，确认复用后不调用 baseline provider，20/40 这类可比运行仍能正确计算节省率、delta 和 gate。
+
+真实 smoke 验证：
+
+```text
+fixture_root: /tmp/mewcode-online-real-cases-combined20-20260816-123824/fixtures
+reuse_baseline_json: .mewcode/evolution/benchmarks/repository-real-swebench-combined20-constrained-20260816-124029.json
+max_cases: 1
+comparable_run_count: 2
+executed_run_count: 1
+provider_run_reduction_rate: 50.00%
+baseline_success_rate: 100.00%
+evolved_success_rate: 100.00%
+provider/runner/test_timeout failure: 0.00%
+```
+
+产物路径：
+
+- `.mewcode/evolution/benchmarks/repository-real-swebench-reuse-baseline-smoke-20260816-171348.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-reuse-baseline-smoke-20260816-171348.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-reuse-baseline-smoke-20260816-171348.resume.txt`
+
+结论更新：这是一个有效优化，因为它不改变成功判定、不改变候选行为、不绕过 gate，只减少重复 baseline provider 调用。对同一 fixture 集合迭代候选时，理论上可把 20-case 评测从 40 次 provider run 降到 20 次，provider run 节省 `50%`；真实 1-case smoke 已验证实际执行 `1/2` run。该指标可以写进项目简历，作为“自进化评测平台成本优化”的量化收益。
+
+## 139. 最新推进记录：定向 Case 复测与 95% Provider Run 节省
+
+日期：2026-08-16
+
+在 baseline 复用之后，继续优化真实评测迭代效率。此前 CLI 只能通过 `--max-cases` 取前 N 个 fixture，无法只跑失败、回退或高风险 case；每次候选微调仍容易被迫跑完整 20-case。新增 case id 过滤后，可以从完整 fixture 集中精确选择问题样例，并与 baseline 复用组合，实现低成本 targeted canary。
+
+代码修正：
+
+- `mewcode/evolution/repository_benchmark.py`：`run_repository_double_run_benchmark()` 新增 `case_ids` 参数，按 fixture case id 精确过滤；未知 id 会显式报错，避免静默漏测。
+- `scripts/run_repository_double_run_benchmark.py`：新增 `--case-id` 和 `--case-ids-file`，支持多次传参或从文件读取失败样例列表。
+- `mewcode/evolution/repository_benchmark.py`：summary 新增 `fixture_case_count`；metrics 新增 `fixture_case_count`、`full_run_count`、`selected_case_reduction_rate`、`full_provider_run_reduction_rate`。
+- 报告现在同时展示 selected subset 内部的 baseline 复用节省率，以及相对完整 fixture 集的 provider run 总节省率。
+- `tests/test_repository_double_run_benchmark.py`：新增 case-id 过滤、未知 case id 报错、完整 fixture 节省率计算测试。
+
+真实 targeted canary 配置：
+
+```text
+fixture_root: /tmp/mewcode-online-real-cases-combined20-20260816-123824/fixtures
+reuse_baseline_json: .mewcode/evolution/benchmarks/repository-real-swebench-combined20-constrained-20260816-124029.json
+case_ids:
+  - swebench_sympy__sympy-11400
+  - swebench_sympy__sympy-13031
+max_iterations: 20
+test_timeout_seconds: 180
+```
+
+真实 targeted canary 结果：
+
+```text
+fixture_case_count: 20
+selected_case_count: 2
+comparable_selected_run_count: 4
+full_fixture_comparable_run_count: 40
+executed_run_count: 2
+selected_case_reduction_rate: 90.00%
+provider_run_reduction_rate_within_selected: 50.00%
+full_provider_run_reduction_rate: 95.00%
+baseline_success_rate: 50.00%
+evolved_success_rate: 50.00%
+success_rate_lift: +0.00 pp / +0 cases
+evolved_regression_free_rate: 100.00%
+evolved_out_of_scope_case_rate: 0.00%
+canary_gate: fail (no positive task-success lift)
+provider_failure_run_rate: 0.00%
+runner_failure_run_rate: 0.00%
+test_timeout_run_rate: 0.00%
+```
+
+产物路径：
+
+- `.mewcode/evolution/benchmarks/repository-real-swebench-targeted2-reuse-baseline-20260816-173025.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-targeted2-reuse-baseline-20260816-173025.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-targeted2-reuse-baseline-20260816-173025.resume.txt`
+
+结论更新：这是第二个有效评测平台优化。它不宣称候选成功率提升，而是把候选迭代的真实调用成本显著降低：针对 20-case fixture 集中的 2 个问题样例，只执行 `2/40` 个完整可比 provider runs，真实验证 full-fixture provider run reduction rate 为 `95%`，同时继续计算回归、scope、failure 和 canary gate。该指标适合写进简历作为“自进化评测闭环的工程效率优化”。
+
+## 140. 最新推进记录：Failure Taxonomy 与 Strategy Router 负向评测
+
+日期：2026-08-16
+
+20-case 扩样显示单一 evolved SOP 泛化不足后，本次继续做失败归因和策略路由。目标不是直接上线新 prompt，而是把“为什么失败”结构化，后续可以按失败类型定向改候选策略。
+
+代码修正：
+
+- `mewcode/evolution/repository_benchmark.py`：新增 `analyze_repository_benchmark_failures()`，对每个 case 输出 `task_family`、`outcome`、`baseline_failure_type`、`evolved_failure_type`。
+- Failure taxonomy 当前覆盖 outcome：`both_success`、`lift`、`regression`、`both_failed`。
+- Failure taxonomy 当前覆盖 failure type：`success`、`provider_failed`、`runner_failed`、`test_timeout`、`forbidden_change`、`out_of_scope_change`、`expected_tests_missing`、`regression_failed`、`tests_failed_no_patch`、`tests_failed_with_patch`、`unknown_failure`。
+- 报告新增 `Failure Taxonomy` 章节，展示 outcome counts、task family counts、evolved failure type counts 和可直接用于 `--case-id` 的 targeted buckets。
+- `scripts/run_repository_double_run_benchmark.py --from-json` 会离线补算 taxonomy，不触发 provider。
+- `mewcode/evolution/repository_benchmark.py`：新增可选 `strategy_router_enabled`，只在 evolved 侧追加任务族策略提示；CLI 对应 `--strategy-router`，默认关闭。
+- `tests/test_repository_double_run_benchmark.py`：新增 taxonomy 分类、Markdown taxonomy、strategy router 只注入 evolved 侧的测试。
+
+20-case 离线 taxonomy 结果：
+
+```text
+task_family_counts:
+  flask: 3
+  pytest: 1
+  requests: 1
+  sympy_core: 2
+  sympy_functions: 2
+  sympy_integrals: 1
+  sympy_matrices: 5
+  sympy_other: 1
+  sympy_printing: 4
+
+outcome_counts:
+  both_success: 14
+  lift: 1
+  regression: 1
+  both_failed: 4
+
+evolved_failure_type_counts:
+  tests_failed_no_patch: 5
+
+targeted buckets:
+  regression: swebench_sympy__sympy-11400
+  unsolved: swebench_sympy__sympy-11897, swebench_sympy__sympy-13031, swebench_sympy__sympy-13146, swebench_sympy__sympy-13915
+  evolved_failed: swebench_sympy__sympy-11400, swebench_sympy__sympy-11897, swebench_sympy__sympy-13031, swebench_sympy__sympy-13146, swebench_sympy__sympy-13915
+  evolved_no_patch: swebench_sympy__sympy-11400, swebench_sympy__sympy-11897, swebench_sympy__sympy-13031, swebench_sympy__sympy-13146, swebench_sympy__sympy-13915
+```
+
+Strategy router 真实 targeted canary：
+
+```text
+case_ids:
+  - swebench_sympy__sympy-11400
+  - swebench_sympy__sympy-13031
+baseline reuse: enabled
+strategy_router: enabled
+executed_run_count: 2
+full_provider_run_reduction_rate: 95.00%
+baseline_success_rate: 50.00%
+evolved_success_rate: 0.00%
+success_rate_lift: -50.00 pp / -1 case
+evolved_regression_free_rate: 100.00%
+evolved_out_of_scope_case_rate: 0.00%
+canary_gate: fail (no positive task-success lift)
+```
+
+产物路径：
+
+- `/tmp/mewcode-combined20-taxonomy.json`
+- `/tmp/mewcode-combined20-taxonomy.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-targeted2-router-reuse-baseline-20260816-202015.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-targeted2-router-reuse-baseline-20260816-202015.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-targeted2-router-reuse-baseline-20260816-202015.resume.txt`
+
+结论更新：failure taxonomy 是有效优化，它把 20-case 未提升拆解为 1 个 regression、4 个 unsolved，且 evolved 失败全部集中在 `tests_failed_no_patch`。这给下一轮候选生成提供了明确靶点。当前 strategy router 只是实验开关，真实 targeted canary 出现 `-50pp`，因此不能默认启用、不能进入晋升；gate 正确拦截了这版负迁移策略。后续优化应围绕 `tests_failed_no_patch` 做更强的“必须定位并修改允许源码”的执行器级约束，而不是继续追加泛化提示。
+
+## 141. 最新推进记录：Failure Bucket 自动复测
+
+日期：2026-08-16
+
+在 failure taxonomy 和 `--case-id` 定向复测之后，本次继续降低候选迭代的人工成本。此前需要先从报告里复制 targeted bucket 的 case id，再手工传给 CLI；现在 CLI 可以直接按 taxonomy bucket 选择复测样例。
+
+代码修正：
+
+- `scripts/run_repository_double_run_benchmark.py`：新增 `--case-bucket`，可多次传入，例如 `--case-bucket regression --case-bucket evolved_no_patch`。
+- `--case-bucket` 从 `--reuse-baseline-json` 的 failure taxonomy 中读取 `targeted_case_ids`，自动展开为 `case_ids`。
+- 如果未传 `--reuse-baseline-json` 却使用 `--case-bucket`，CLI 会直接报错，避免没有来源数据时静默跑错样例。
+- `tests/test_repository_double_run_benchmark.py`：新增 CLI taxonomy bucket 输出和 `--case-bucket` 缺少 baseline JSON 的错误测试。
+
+真实 bucket smoke 配置：
+
+```text
+fixture_root: /tmp/mewcode-online-real-cases-combined20-20260816-123824/fixtures
+reuse_baseline_json: .mewcode/evolution/benchmarks/repository-real-swebench-combined20-constrained-20260816-124029.json
+case_bucket: regression
+expanded_case_ids:
+  - swebench_sympy__sympy-11400
+strategy_router: disabled
+max_iterations: 20
+test_timeout_seconds: 180
+```
+
+真实 bucket smoke 结果：
+
+```text
+fixture_case_count: 20
+selected_case_count: 1
+full_fixture_comparable_run_count: 40
+executed_run_count: 1
+selected_case_reduction_rate: 95.00%
+provider_run_reduction_rate_within_selected: 50.00%
+full_provider_run_reduction_rate: 97.50%
+baseline_success_rate: 100.00%
+evolved_success_rate: 100.00%
+success_rate_lift: +0.00 pp / +0 cases
+evolved_regression_free_rate: 100.00%
+evolved_out_of_scope_case_rate: 0.00%
+provider_failure_run_rate: 0.00%
+runner_failure_run_rate: 0.00%
+test_timeout_run_rate: 0.00%
+```
+
+产物路径：
+
+- `.mewcode/evolution/benchmarks/repository-real-swebench-bucket-regression-reuse-baseline-20260816-214500.json`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-bucket-regression-reuse-baseline-20260816-214500.md`
+- `.mewcode/evolution/benchmarks/repository-real-swebench-bucket-regression-reuse-baseline-20260816-214500.resume.txt`
+
+结论更新：这是第三个有效评测平台优化。它把“失败归因 -> 选择复测样例 -> 复用 baseline -> 只跑 evolved”的流程自动化，真实验证从完整 20-case 的 40 个可比 provider runs 降到 1 个实际 provider run，full-fixture provider run reduction rate 达到 `97.50%`。该优化不改变候选成功判定，也不绕过 gate，只减少候选迭代的人力和 provider 成本。

@@ -1,0 +1,7 @@
+{
+  "test_command": "python -m pytest -q",
+  "regression_command": "python -m pytest -q -k 'basic_words or trims_outer_whitespace'",
+  "expected_tests": ["tests/test_slugify.py"],
+  "allowed_paths": ["slugify.py", "tests/test_slugify.py"],
+  "forbidden_paths": [".mewcode/**", "secrets/**"]
+}

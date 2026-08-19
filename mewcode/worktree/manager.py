@@ -11,6 +11,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from mewcode.worktree.changes import (
     CleanupResult,
@@ -36,10 +37,12 @@ class WorktreeManager:
     def __init__(
         self,
         repo_root: str,
+        file_cache: Any = None,
         symlink_directories: list[str] | None = None,
         worktree_dir: str | None = None,
     ) -> None:
         self.repo_root = repo_root
+        self.file_cache = file_cache
         self.symlink_directories = symlink_directories or []
         self.worktree_dir = worktree_dir or str(
             Path(repo_root) / ".mewcode" / "worktrees"
@@ -191,6 +194,8 @@ class WorktreeManager:
         )
         self.current_session = session
         save_worktree_session(self._mewcode_dir, session)
+        if self.file_cache is not None:
+            self.file_cache.clear()
         return session
 
     # ------------------------------------------------------------------

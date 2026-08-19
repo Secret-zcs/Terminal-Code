@@ -59,7 +59,7 @@ from mewcode.tools.base import (
 
 log = logging.getLogger(__name__)
 
-MEMORY_EXTRACTION_INTERVAL = 5
+MEMORY_EXTRACTION_DELAY_SECONDS = 15.0
 MAX_TOKENS_CEILING = 64000
 MAX_OUTPUT_TOKENS_RECOVERIES = 3
 
@@ -379,7 +379,6 @@ class Agent:
         self.instructions_content = instructions_content
         self.memory_manager = memory_manager
         self.hook_engine = hook_engine
-        self._loop_count = 0
         self._extracting = False
         self.session_id: str = ""
         self.active_skills: dict[str, str] = {}
@@ -402,6 +401,49 @@ class Agent:
         if self.session_id:
             return str(Path(self.work_dir) / ".mewcode" / "sessions" / f"{self.session_id}.jsonl")
         return ""
+
+    def _latest_user_task(self, conversation: ConversationManager) -> str:
+        for msg in reversed(conversation.history):
+            if msg.role != "user" or not msg.content:
+                continue
+            content = msg.content.strip()
+            if content.startswith("<system-reminder>"):
+                continue
+            if content.startswith("<environment_context"):
+                continue
+            return content
+        return ""
+
+    def _load_memory_for_conversation(
+        self,
+        conversation: ConversationManager,
+        query: str = "",
+    ) -> str:
+        if not self.memory_manager:
+            return ""
+        task = query.strip() or self._latest_user_task(conversation)
+        if task:
+            return self.memory_manager.load_relevant(task)
+        return self.memory_manager.load()
+
+    def _schedule_fork_memory_extraction(
+        self,
+        conversation: ConversationManager,
+        delay_seconds: float = MEMORY_EXTRACTION_DELAY_SECONDS,
+    ) -> None:
+        if not self.memory_manager:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        self.memory_manager.schedule_fork_extraction(
+            self.client,
+            conversation,
+            self.protocol,
+            delay_seconds=delay_seconds,
+            loop=loop,
+        )
 
     @property
     def plan_mode(self) -> bool:
@@ -481,7 +523,7 @@ class Agent:
         )
         conversation.inject_environment(env_context)
 
-        memory_content = self.memory_manager.load() if self.memory_manager else ""
+        memory_content = self._load_memory_for_conversation(conversation)
         conversation.inject_long_term_memory(self.instructions_content, memory_content)
 
         if self.hook_engine:
@@ -534,7 +576,7 @@ class Agent:
                     boundary=compact_result.boundary,
                 )
                 conversation.inject_environment(env_context)
-                mem = self.memory_manager.load() if self.memory_manager else ""
+                mem = self._load_memory_for_conversation(conversation)
                 conversation.inject_long_term_memory(
                     self.instructions_content, mem
                 )
@@ -651,12 +693,7 @@ class Agent:
                 conversation.add_assistant_message(
                     response.text, thinking_blocks=conv_thinking
                 )
-                self._loop_count += 1
-                if (
-                    self._loop_count % MEMORY_EXTRACTION_INTERVAL == 0
-                    and self.memory_manager
-                ):
-                    asyncio.ensure_future(self._extract_memories(conversation))
+                self._schedule_fork_memory_extraction(conversation)
                 if self.hook_engine:
                     ctx = self._build_hook_context("turn_end")
                     await self.hook_engine.run_hooks("turn_end", ctx)
@@ -864,6 +901,21 @@ class Agent:
             return tc.arguments.get("file_path", tc.tool_name)
         return str(tc.arguments)
 
+    async def _execute_tool_with_mode(self, tool: Any, params: Any) -> ToolResult:
+        previous_state_cache = getattr(tool, "_state_cache", None)
+        bypass_file_state_guard = (
+            self.permission_mode == PermissionMode.BYPASS
+            and getattr(tool, "category", None) == "write"
+            and hasattr(tool, "_state_cache")
+        )
+        if bypass_file_state_guard:
+            tool._state_cache = None
+        try:
+            return await tool.execute(params)
+        finally:
+            if bypass_file_state_guard:
+                tool._state_cache = previous_state_cache
+
     async def _execute_single_tool_direct(
         self, tc: ToolCallComplete
     ) -> _ToolExecResult:
@@ -890,7 +942,7 @@ class Agent:
 
         try:
             params = tool.params_model.model_validate(tc.arguments)
-            result = await tool.execute(params)
+            result = await self._execute_tool_with_mode(tool, params)
         except ValidationError as e:
             result = ToolResult(output=f"Parameter validation error: {e}", is_error=True)
         except Exception as e:
@@ -982,7 +1034,7 @@ class Agent:
 
         try:
             params = tool.params_model.model_validate(tc.arguments)
-            result = await tool.execute(params)
+            result = await self._execute_tool_with_mode(tool, params)
         except ValidationError as e:
             result = ToolResult(
                 output=f"Parameter validation error: {e}", is_error=True
@@ -1170,7 +1222,7 @@ class Agent:
             self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
         )
             conversation.inject_environment(env_context)
-            memory_content = self.memory_manager.load() if self.memory_manager else ""
+            memory_content = self._load_memory_for_conversation(conversation)
             conversation.inject_long_term_memory(
                 self.instructions_content, memory_content
             )
@@ -1193,14 +1245,14 @@ class Agent:
             )
             conversation.inject_environment(env_context)
 
-            if self.instructions_content:
-                memory_content = self.memory_manager.load() if self.memory_manager else ""
-                conversation.inject_long_term_memory(
-                    self.instructions_content, memory_content
-                )
-
         if task:
             conversation.add_user_message(task)
+
+        if not conversation.ltm_injected:
+            memory_content = self._load_memory_for_conversation(conversation, task)
+            conversation.inject_long_term_memory(
+                self.instructions_content, memory_content
+            )
 
         hook_prompts = (
             self.hook_engine.get_prompt_messages() if self.hook_engine else None
@@ -1295,6 +1347,7 @@ class Agent:
 
             if not response.tool_calls:
                 conversation.add_assistant_message(response.text)
+                self._schedule_fork_memory_extraction(conversation)
                 if self.checkpoint_manager is not None:
                     summary = response.text[:60] + "…" if len(response.text) > 60 else response.text
                     self.checkpoint_manager.create_checkpoint(
@@ -1401,7 +1454,7 @@ class Agent:
 
         try:
             params = tool.params_model.model_validate(tc.arguments)
-            result = await tool.execute(params)
+            result = await self._execute_tool_with_mode(tool, params)
         except ValidationError as e:
             result = ToolResult(
                 output=f"Parameter validation error: {e}", is_error=True

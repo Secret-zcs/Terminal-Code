@@ -137,13 +137,26 @@ def validate_permission_mode(mode: str) -> str:
     return mode
 
 
-def validate_mcp_servers(raw_mcp: list | None) -> list[dict]:
-    """校验 mcp_servers 配置段，返回清洗后的 server 配置字典列表。"""
+def validate_mcp_servers(raw_mcp: list | dict | None) -> list[dict]:
+    """校验 mcp_servers 配置段，返回清洗后的 server 配置字典列表。
+
+    兼容两种写法：新版列表格式，以及旧版 ``name: config`` 映射格式。
+    """
     if raw_mcp is None:
         return []
 
+    if isinstance(raw_mcp, dict):
+        entries = []
+        for name, entry in raw_mcp.items():
+            if not isinstance(name, str) or not isinstance(entry, dict):
+                raise ConfigError("MCP server mapping entries must be named mappings")
+            normalized = dict(entry)
+            normalized.setdefault("name", name)
+            entries.append(normalized)
+        raw_mcp = entries
+
     if not isinstance(raw_mcp, list):
-        raise ConfigError("'mcp_servers' must be a list of server configs")
+        raise ConfigError("'mcp_servers' must be a list or named mapping of server configs")
 
     servers: list[dict] = []
     for i, entry in enumerate(raw_mcp):

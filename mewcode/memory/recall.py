@@ -21,13 +21,15 @@ MAX_MEMORY_FILES = 200
 FRONTMATTER_MAX_LINES = 30
 ENTRYPOINT_NAME = "MEMORY.md"
 VALID_TYPES = {"user", "feedback", "project", "reference"}
+DEFAULT_ROUGH_RECALL_LIMIT = 20
+DEFAULT_SELECTED_MEMORY_LIMIT = 5
 
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 SELECTOR_SYSTEM_PROMPT = (
-    "You are selecting memories that will be useful to MewCode as it processes "
-    "a user's query. You will be given the user's query and a list of available "
-    "memory files with their filenames and descriptions.\n\n"
+    "You are reranking memories that will be useful to MewCode as it processes "
+    "a user's query. You will be given the user's query and a locally prefiltered "
+    "list of memory files with their filenames, names, tags, and descriptions.\n\n"
     "Return a list of filenames for the memories that will clearly be useful to "
     "MewCode as it processes the user's query (up to 5). Only include memories "
     "that you are certain will be helpful based on their name and description.\n"
@@ -60,6 +62,8 @@ class MemoryHeader:
     mtime_ms: int      # modification time, ms since epoch
     description: str   # frontmatter description; "" if absent
     type: str          # frontmatter type; "" if unrecognized
+    name: str = ""     # frontmatter name; "" if absent
+    tags: tuple[str, ...] = ()
 
 
 @dataclass
@@ -106,17 +110,17 @@ def memory_freshness_text(mtime_ms: int) -> str:
 # ---------------------------------------------------------------------------
 
 def parse_frontmatter(content: str) -> dict[str, str]:
-    """Extract name/description/type from YAML-ish frontmatter.
+    """Extract memory metadata from YAML-ish frontmatter.
 
-    Only the three known fields are read; everything else is ignored.
+    Only the known recall fields are read; everything else is ignored.
     Files without frontmatter return empty fields.
     """
     m = FRONTMATTER_RE.match(content)
     if not m:
-        return {"name": "", "description": "", "type": ""}
+        return {"name": "", "description": "", "type": "", "scope": "", "tags": ""}
 
     block = m.group(1)
-    result: dict[str, str] = {"name": "", "description": "", "type": ""}
+    result: dict[str, str] = {"name": "", "description": "", "type": "", "scope": "", "tags": ""}
     for line in block.split("\n"):
         colon = line.find(":")
         if colon < 0:
@@ -136,7 +140,21 @@ def parse_frontmatter(content: str) -> dict[str, str]:
         elif key == "type":
             if val in VALID_TYPES:
                 result["type"] = val
+        elif key == "scope":
+            if val in {"user", "project"}:
+                result["scope"] = val
+        elif key == "tags":
+            result["tags"] = val
     return result
+
+
+def _parse_tags(raw: str) -> tuple[str, ...]:
+    raw = raw.strip()
+    if not raw:
+        return ()
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1]
+    return tuple(part.strip().strip('"\'') for part in raw.split(",") if part.strip())
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +211,8 @@ def _read_memory_header(
         return None
 
     fm = parse_frontmatter(content)
+    if fm["scope"] and fm["scope"] != scope:
+        return None
     try:
         rel = str(file_path.relative_to(memory_dir))
     except ValueError:
@@ -205,6 +225,8 @@ def _read_memory_header(
         mtime_ms=mtime_ms,
         description=fm["description"],
         type=fm["type"],
+        name=fm["name"],
+        tags=_parse_tags(fm["tags"]),
     )
 
 
@@ -224,10 +246,19 @@ def format_memory_manifest(memories: list[MemoryHeader]) -> str:
             m.mtime_ms / 1000, tz=timezone.utc
         ).strftime("%Y-%m-%dT%H:%M:%S.") + f"{m.mtime_ms % 1000:03d}Z"
         path = m.file_path if m.file_path else m.filename
+        label_parts = []
+        if m.name:
+            label_parts.append(f"name={m.name}")
+        if m.tags:
+            label_parts.append("tags=" + ",".join(m.tags))
+        label = "; ".join(label_parts)
+        if label:
+            label += "; "
         if m.description:
-            lines.append(f"- {scope_tag}{type_tag}{path} ({ts}): {m.description}")
+            lines.append(f"- {scope_tag}{type_tag}{path} ({ts}): {label}{m.description}")
         else:
-            lines.append(f"- {scope_tag}{type_tag}{path} ({ts})")
+            suffix = f": {label.rstrip('; ')}" if label else ""
+            lines.append(f"- {scope_tag}{type_tag}{path} ({ts}){suffix}")
     return "\n".join(lines)
 
 
@@ -241,13 +272,14 @@ async def find_relevant_memories(
     project_mem_dir: Path | None,
     recent_tools: list[str] | None,
     already_surfaced: set[str] | None,
-    selector: SelectorFn,
+    selector: SelectorFn | None,
+    rough_top_k: int = DEFAULT_ROUGH_RECALL_LIMIT,
+    top_k: int = DEFAULT_SELECTED_MEMORY_LIMIT,
 ) -> list[RelevantMemory]:
-    """Scan both dirs, filter already-surfaced, ask selector to pick up to 5
-    relevant filenames, and return the corresponding paths + mtimes.
+    """Scan memories, locally prefilter, optionally rerank with selector.
 
     Selector failures are silent — recall is best-effort and must never block
-    the main conversation.
+    the main conversation. On selector failure, local prefilter results are used.
     """
     all_headers: list[MemoryHeader] = []
     if user_mem_dir is not None:
@@ -260,22 +292,83 @@ async def find_relevant_memories(
     if not candidates:
         return []
 
-    selected_filenames = await _select_relevant_memories(
-        query, candidates, recent_tools, selector
+    rough_candidates = preselect_memory_headers(
+        query, candidates, limit=rough_top_k
     )
+    if not rough_candidates:
+        return []
+
+    selected_filenames: list[str] | None = None
+    if selector is not None:
+        selected_filenames = await _select_relevant_memories(
+            query, rough_candidates, recent_tools, selector
+        )
 
     # Build lookup from both file_path and filename to header.
     by_key: dict[str, MemoryHeader] = {}
-    for m in candidates:
+    for m in rough_candidates:
         by_key[m.file_path] = m
         by_key.setdefault(m.filename, m)
 
+    selected_headers: list[MemoryHeader]
+    if selected_filenames is None:
+        selected_headers = rough_candidates[:top_k]
+    else:
+        selected_headers = []
+        for fn in selected_filenames[:top_k]:
+            m = by_key.get(fn)
+            if m is not None:
+                selected_headers.append(m)
+
     result: list[RelevantMemory] = []
-    for fn in selected_filenames:
-        m = by_key.get(fn)
-        if m is not None:
-            result.append(RelevantMemory(path=m.file_path, mtime_ms=m.mtime_ms))
+    for m in selected_headers:
+        result.append(RelevantMemory(path=m.file_path, mtime_ms=m.mtime_ms))
     return result
+
+
+def _tokens(text: str) -> set[str]:
+    lowered = text.lower()
+    tokens = set(re.findall(r"[a-z0-9_]{2,}", lowered))
+    cjk = re.findall(r"[\u4e00-\u9fff]", lowered)
+    if len(cjk) == 1:
+        tokens.add(cjk[0])
+    else:
+        tokens.update("".join(cjk[i : i + 2]) for i in range(len(cjk) - 1))
+    return tokens
+
+
+def _header_score(query_tokens: set[str], memory: MemoryHeader) -> int:
+    if not query_tokens:
+        return 0
+    fields = [
+        (8, " ".join(memory.tags)),
+        (6, memory.name),
+        (5, memory.description),
+        (3, memory.filename),
+        (2, memory.type),
+        (1, memory.scope),
+    ]
+    score = 0
+    for weight, value in fields:
+        score += weight * len(query_tokens & _tokens(value))
+    return score
+
+
+def preselect_memory_headers(
+    query: str,
+    memories: list[MemoryHeader],
+    limit: int = DEFAULT_ROUGH_RECALL_LIMIT,
+) -> list[MemoryHeader]:
+    """Local rough recall before any model-side reranking.
+
+    The selector only sees this narrowed candidate set, which caps token cost
+    and avoids asking a model to scan unrelated memories.
+    """
+    query_tokens = _tokens(query)
+    scored = [(_header_score(query_tokens, m), m.mtime_ms, m) for m in memories]
+    positives = [item for item in scored if item[0] > 0]
+    positives.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [memory for _, _, memory in positives[:max(limit, 0)]]
 
 
 async def _select_relevant_memories(
@@ -283,9 +376,14 @@ async def _select_relevant_memories(
     memories: list[MemoryHeader],
     recent_tools: list[str] | None,
     selector: SelectorFn,
-) -> list[str]:
-    """Format manifest, call selector, parse JSON, return valid filenames."""
-    valid_filenames = {m.filename for m in memories}
+) -> list[str] | None:
+    """Format manifest, call selector, parse JSON, return valid filenames.
+
+    Returns None only when selector execution/parsing failed. A valid empty
+    selection stays [], so model-side reranking can intentionally reject weak
+    local matches.
+    """
+    valid_filenames = {m.filename for m in memories} | {m.file_path for m in memories}
 
     manifest = format_memory_manifest(memories)
 
@@ -298,20 +396,20 @@ async def _select_relevant_memories(
     try:
         raw = await selector(SELECTOR_SYSTEM_PROMPT, user_message)
     except Exception:
-        return []
+        return None
 
     clean = _extract_json_object(raw)
     if not clean:
-        return []
+        return None
 
     try:
         parsed = json.loads(clean)
         arr = parsed.get("selected_memories", [])
         if not isinstance(arr, list):
-            return []
+            return None
         return [f for f in arr if isinstance(f, str) and f in valid_filenames]
     except (json.JSONDecodeError, AttributeError):
-        return []
+        return None
 
 
 def _extract_json_object(raw: str) -> str:
