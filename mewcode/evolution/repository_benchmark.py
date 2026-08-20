@@ -144,6 +144,9 @@ _ROUTED_REPOSITORY_SKILLS = {
 """.strip(),
     ),
 }
+_ROUTED_REPOSITORY_SKILLS["sympy_mathematica_printing"] = _ROUTED_REPOSITORY_SKILLS[
+    "sympy_printing"
+]
 
 
 def snapshot_repository(root: str | Path) -> dict[str, str]:
@@ -525,10 +528,13 @@ async def run_repository_double_run_benchmark(
                 baseline_runs_executed += 1
             else:
                 reused_baseline_cases += 1
+            if task_route is not None:
+                task_route = _repository_route_after_baseline_safety(task_route, baseline)
             if (
                 task_route is not None
                 and task_route.action == "skip"
                 and task_router_short_circuit_skips
+                and _baseline_safe_for_short_circuit(baseline)
             ):
                 evolved = _repository_skipped_evolved_result(baseline, task_route)
             else:
@@ -881,7 +887,7 @@ def analyze_repository_route_impacts(
         if not isinstance(case, dict):
             continue
         route = case.get("task_route", {}) if isinstance(case.get("task_route"), dict) else {}
-        family = str(route.get("family") or _repository_task_family(case)).strip() or "unknown"
+        family = _repository_case_route_family(case, route)
         action = str(route.get("action", "")).strip()
         baseline = case.get("baseline", {}) if isinstance(case.get("baseline"), dict) else {}
         evolved = case.get("evolved", {}) if isinstance(case.get("evolved"), dict) else {}
@@ -1012,11 +1018,12 @@ def recompute_repository_task_router_policy(
             continue
         case = json.loads(json.dumps(raw_case))
         route = case.get("task_route", {}) if isinstance(case.get("task_route"), dict) else {}
-        family = str(route.get("family", "")).strip()
+        family = _repository_case_route_family(case, route)
         action = str(route.get("action", "")).strip()
         should_inject = bool(route) and action == "inject" and family in promoted_set
         if should_inject:
             injected_count += 1
+            route["family"] = family
             route["reason"] = _append_route_reason(
                 route.get("reason", ""),
                 "family skill passed route promotion gate",
@@ -1029,11 +1036,12 @@ def recompute_repository_task_router_policy(
             cases.append(case)
             continue
 
-        if route and short_circuit_skips:
+        if route and short_circuit_skips and _baseline_safe_for_short_circuit(case.get("baseline", {})):
             skipped_count += 1
             short_circuit_count += 1
             if action == "inject":
                 skill_name = str(route.get("skill_name", ""))
+                route["family"] = family
                 route["action"] = "skip"
                 route["hint"] = (
                     f"Task router matched `{skill_name}` for family `{family}`, but this "
@@ -1042,6 +1050,7 @@ def recompute_repository_task_router_policy(
                 )
                 route["reason"] = "routed family skill not promoted by policy recompute"
             else:
+                route["family"] = family
                 route["action"] = "skip"
             case["task_route"] = route
             case["evolved"] = _repository_skipped_evolved_result(
@@ -1055,6 +1064,19 @@ def recompute_repository_task_router_policy(
                     reason=str(route.get("reason", "")),
                 ),
             )
+            case["delta"] = _repository_case_delta(
+                case.get("baseline", {}),
+                case.get("evolved", {}),
+            )
+        elif route:
+            injected_count += 1
+            route["family"] = family
+            route["action"] = "inject"
+            route["reason"] = _append_route_reason(
+                route.get("reason", ""),
+                "baseline was not safe to short-circuit; retained source evolved result",
+            )
+            case["task_route"] = route
             case["delta"] = _repository_case_delta(
                 case.get("baseline", {}),
                 case.get("evolved", {}),
@@ -1122,6 +1144,51 @@ def _append_route_reason(reason: Any, suffix: str) -> str:
     if suffix in existing:
         return existing
     return f"{existing}; {suffix}"
+
+
+def _repository_case_route_family(case: dict[str, Any], route: dict[str, Any]) -> str:
+    family = _repository_task_family(case)
+    if family != "unknown":
+        return family
+    route_family = str(route.get("family", "")).strip()
+    return route_family or "unknown"
+
+
+def _baseline_safe_for_short_circuit(baseline: dict[str, Any]) -> bool:
+    return (
+        str(baseline.get("status", "completed")) == "completed"
+        and bool(baseline.get("regression_free", True))
+        and not baseline.get("out_of_scope_changes")
+        and not baseline.get("forbidden_changes")
+        and not _has_test_timeout(baseline)
+    )
+
+
+def _repository_route_after_baseline_safety(
+    route: RepositoryTaskRoute,
+    baseline: dict[str, Any],
+) -> RepositoryTaskRoute:
+    if (
+        route.action != "skip"
+        or _baseline_safe_for_short_circuit(baseline)
+        or not route.skill.strip()
+    ):
+        return route
+    return RepositoryTaskRoute(
+        family=route.family,
+        action="inject",
+        skill_name=route.skill_name,
+        skill=route.skill,
+        hint=(
+            f"Task router matched `{route.skill_name}` for family `{route.family}`, "
+            "and the baseline run was not safe to short-circuit. Run this "
+            "family-specific Skill as a safety rescue."
+        ),
+        reason=_append_route_reason(
+            route.reason,
+            "baseline was not safe to short-circuit; running routed Skill as safety rescue",
+        ),
+    )
 
 
 def _empty_route_impact_row(family: str) -> dict[str, Any]:
@@ -1713,9 +1780,11 @@ def _repository_task_family(case: dict[str, Any]) -> str:
         return "flask"
     if "requests" in signal:
         return "requests"
+    if "sympy/printing/mathematica" in signal or "mathematica" in signal:
+        return "sympy_mathematica_printing"
     if "sympy/printing" in signal or any(
         token in signal
-        for token in ("latex", "pretty", "ccode", "mathematica", "printer")
+        for token in ("latex", "pretty", "ccode", "printer")
     ):
         return "sympy_printing"
     if "sympy/matrices" in signal or "matrix" in signal:
@@ -1767,9 +1836,11 @@ def _repository_fixture_family(fixture: RepositoryFixture) -> str:
         return "flask"
     if "requests" in signal:
         return "requests"
+    if "sympy/printing/mathematica" in signal or "mathematica" in signal:
+        return "sympy_mathematica_printing"
     if "sympy/printing" in signal or any(
         token in signal
-        for token in ("latex", "pretty", "ccode", "mathematica", "printer")
+        for token in ("latex", "pretty", "ccode", "printer")
     ):
         return "sympy_printing"
     if "sympy/matrices" in signal or "matrix" in signal:
@@ -1835,7 +1906,7 @@ def _repository_task_route(
             family=family,
             action="skip",
             skill_name=skill_name,
-            skill="",
+            skill=skill,
             hint=(
                 f"Task router matched `{skill_name}` for family `{family}`, but this "
                 "family Skill is not in the promoted route set. Do not inject the "

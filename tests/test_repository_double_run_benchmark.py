@@ -1302,6 +1302,104 @@ async def test_double_run_task_router_skips_unpromoted_family_skill(
 
 
 @pytest.mark.asyncio
+async def test_double_run_task_router_keeps_mathematica_printing_unpromoted(
+    tmp_path: Path,
+) -> None:
+    fixture_root = tmp_path / "fixtures"
+    case = _write_calc_fixture(fixture_root)
+    (case / "expected.json").write_text(
+        json.dumps({
+            "test_command": f"{sys.executable} -m pytest test_calc.py -q",
+            "regression_command": f"{sys.executable} -m pytest test_regression.py -q",
+            "expected_tests": ["sympy/printing/tests/test_mathematica.py"],
+            "allowed_paths": ["sympy/printing/mathematica.py"],
+            "forbidden_paths": ["pyproject.toml"],
+        }),
+        encoding="utf-8",
+    )
+    clients: list[ScriptedRepositoryClient] = []
+
+    def client_factory(_root: Path, _evolved: bool) -> LLMClient:
+        client = ScriptedRepositoryClient([
+            [TextDelta("Done."), StreamEnd("end_turn", input_tokens=1, output_tokens=1)]
+        ])
+        clients.append(client)
+        return client
+
+    result = await run_repository_double_run_benchmark(
+        client_factory,
+        fixture_root,
+        "# Candidate\nGLOBAL SHOULD BE GATED.",
+        workspace_root=tmp_path / "workspace",
+        max_iterations=1,
+        test_timeout_seconds=10,
+        task_router_enabled=True,
+        task_router_promoted_families=("sympy_printing",),
+    )
+
+    assert result["cases"][0]["task_route"]["family"] == "sympy_mathematica_printing"
+    assert result["cases"][0]["task_route"]["action"] == "skip"
+    assert result["configuration"]["candidate_skill_injected"] is False
+    assert result["summary"]["task_router_short_circuits"] == 1
+    assert len(clients) == 1
+
+
+@pytest.mark.asyncio
+async def test_double_run_task_router_rescues_unpromoted_family_when_baseline_unsafe(
+    tmp_path: Path,
+) -> None:
+    fixture_root = tmp_path / "fixtures"
+    case = _write_calc_fixture(fixture_root)
+    (case / "expected.json").write_text(
+        json.dumps({
+            "test_command": f"{sys.executable} -m pytest test_calc.py -q",
+            "regression_command": f"{sys.executable} -m pytest test_regression.py -q",
+            "expected_tests": ["sympy/printing/tests/test_mathematica.py"],
+            "allowed_paths": ["sympy/printing/mathematica.py"],
+            "forbidden_paths": ["pyproject.toml"],
+        }),
+        encoding="utf-8",
+    )
+    (case / "repository" / "test_regression.py").write_text(
+        "from calc import add\n\n"
+        "def test_zero():\n"
+        "    assert add(4, 0) == 999\n",
+        encoding="utf-8",
+    )
+    clients: list[ScriptedRepositoryClient] = []
+
+    def client_factory(_root: Path, _evolved: bool) -> LLMClient:
+        client = ScriptedRepositoryClient([
+            [TextDelta("Done."), StreamEnd("end_turn", input_tokens=1, output_tokens=1)]
+        ])
+        clients.append(client)
+        return client
+
+    result = await run_repository_double_run_benchmark(
+        client_factory,
+        fixture_root,
+        "# Candidate\nGLOBAL SAFETY RULES.",
+        workspace_root=tmp_path / "workspace",
+        max_iterations=1,
+        test_timeout_seconds=10,
+        task_router_enabled=True,
+        task_router_promoted_families=("sympy_printing",),
+    )
+
+    route = result["cases"][0]["task_route"]
+    assert route["family"] == "sympy_mathematica_printing"
+    assert route["action"] == "inject"
+    assert "baseline was not safe to short-circuit" in route["reason"]
+    assert result["summary"]["task_router_injections"] == 1
+    assert result["summary"]["task_router_short_circuits"] == 0
+    assert result["summary"]["evolved_runs_executed"] == 1
+    assert len(clients) == 2
+    evolved_messages = "\n".join(clients[1].conversations[0])
+    assert "sympy_printing_repair" in evolved_messages
+    assert "GLOBAL SAFETY RULES" in evolved_messages
+
+
+@pytest.mark.asyncio
 async def test_double_run_marks_out_of_scope_change(tmp_path: Path) -> None:
     fixture_root = tmp_path / "fixtures"
     _write_calc_fixture(fixture_root)
@@ -1694,6 +1792,108 @@ def test_recompute_repository_task_router_policy_short_circuits_unpromoted_route
     assert matrix_case["evolved"]["status"] == "skipped"
     assert matrix_case["evolved"]["task_success"] is True
     assert matrix_case["delta"]["task_success"] == 0
+
+
+def test_recompute_repository_task_router_policy_refines_mathematica_subfamily() -> None:
+    source = {
+        "cases": [
+            {
+                "id": "mathematica-costly",
+                "task_route": {
+                    "family": "sympy_printing",
+                    "action": "inject",
+                    "skill_name": "sympy_printing_repair",
+                },
+                "baseline": {
+                    "task_success": True,
+                    "changed_paths": ["sympy/printing/mathematica.py"],
+                    "regression_free": False,
+                    "out_of_scope_changes": [],
+                    "patch_size": {"total": 1},
+                    "model_call_count": 2,
+                    "tool_call_count": 3,
+                    "input_tokens": 100,
+                    "output_tokens": 100,
+                    "elapsed_seconds": 5.0,
+                },
+                "evolved": {
+                    "task_success": True,
+                    "changed_paths": ["sympy/printing/mathematica.py"],
+                    "regression_free": True,
+                    "out_of_scope_changes": [],
+                    "status": "completed",
+                    "patch_size": {"total": 1},
+                    "model_call_count": 5,
+                    "tool_call_count": 11,
+                    "input_tokens": 200,
+                    "output_tokens": 300,
+                    "elapsed_seconds": 25.0,
+                },
+                "delta": {
+                    "task_success": 0,
+                    "model_call_count": 3,
+                    "tool_call_count": 8,
+                    "input_tokens": 100,
+                    "output_tokens": 200,
+                    "elapsed_seconds": 20.0,
+                    "patch_size_total": 0,
+                },
+            },
+            {
+                "id": "latex-lift",
+                "task_route": {
+                    "family": "sympy_printing",
+                    "action": "inject",
+                    "skill_name": "sympy_printing_repair",
+                },
+                "baseline": {
+                    "task_success": False,
+                    "model_call_count": 2,
+                    "tool_call_count": 2,
+                    "input_tokens": 100,
+                    "output_tokens": 100,
+                    "elapsed_seconds": 5.0,
+                    "patch_size": {"total": 0},
+                },
+                "evolved": {
+                    "task_success": True,
+                    "changed_paths": ["sympy/printing/latex.py"],
+                    "regression_free": True,
+                    "out_of_scope_changes": [],
+                    "status": "completed",
+                    "model_call_count": 2,
+                    "tool_call_count": 2,
+                    "input_tokens": 90,
+                    "output_tokens": 80,
+                    "elapsed_seconds": 4.0,
+                    "patch_size": {"total": 1},
+                },
+                "delta": {
+                    "task_success": 1,
+                    "model_call_count": 0,
+                    "tool_call_count": 0,
+                    "input_tokens": -10,
+                    "output_tokens": -20,
+                    "elapsed_seconds": -1.0,
+                    "patch_size_total": 1,
+                },
+            },
+        ],
+    }
+
+    recomputed = recompute_repository_task_router_policy(
+        source,
+        promoted_families=("sympy_printing",),
+    )
+
+    by_id = {case["id"]: case for case in recomputed["cases"]}
+    assert by_id["mathematica-costly"]["task_route"]["family"] == "sympy_mathematica_printing"
+    assert by_id["mathematica-costly"]["task_route"]["action"] == "inject"
+    assert "baseline was not safe to short-circuit" in by_id["mathematica-costly"]["task_route"]["reason"]
+    assert by_id["mathematica-costly"]["delta"]["tool_call_count"] == 8
+    assert by_id["latex-lift"]["task_route"]["action"] == "inject"
+    assert recomputed["metrics"]["canary_gate_passed"] is True
+    assert recomputed["metrics"]["runtime_efficiency_gate_passed"] is False
 
 
 def test_cli_helper_loads_promoted_route_families_from_json(tmp_path: Path) -> None:
